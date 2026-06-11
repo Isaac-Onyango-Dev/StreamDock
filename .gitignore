@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-electron/
+release/
+
+# Binaries (ffmpeg, ffprobe, yt-dlp) — too large for GitHub (>100 MB).
+# Run `npm run download:binaries` to fetch them locally.
+binaries/
+
+# Logs and OS
+*.log
+.DS_Store
+Thumbs.db
+
+# Local scratch / test artifacts
+tmp/
+test-download/
+test-*.cjs
+test-*.py
+
+# IDE (optional local overrides)
+.vscode/*.local.*
+
+# Agent tooling caches (not part of the app)
+.gemini/
+.opencode/
+.kiro/

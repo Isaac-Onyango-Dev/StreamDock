@@ -1,0 +1,158 @@
+@import './styles/tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-text-primary);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow: hidden;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  button, input, select, textarea {
+    font-family: inherit;
+    font-size: inherit;
+  }
+}
+
+@layer components {
+  .page-shell {
+    @apply mx-auto flex h-full w-full max-w-[var(--content-max-width)] flex-col;
+  }
+
+  .page-header {
+    @apply mb-4 shrink-0;
+  }
+
+  .page-title {
+    @apply text-[length:var(--text-lg)] font-semibold tracking-tight text-text-primary;
+  }
+
+  .page-desc {
+    @apply mt-0.5 text-[length:var(--text-sm)] text-text-secondary;
+  }
+
+  .card {
+    @apply rounded-lg border border-border bg-surface-2;
+  }
+
+  .card-pad {
+    @apply p-3;
+  }
+
+  .input-field {
+    @apply h-8 w-full rounded-md border border-border bg-surface-3 px-2.5 text-[length:var(--text-base)] text-text-primary outline-none transition-colors placeholder:text-text-disabled hover:border-border focus:bg-surface-2;
+  }
+
+  .input-field:focus {
+    border-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
+  }
+
+  .input-field:focus-visible {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent);
+  }
+
+  .select-field {
+    @apply input-field appearance-none cursor-pointer pr-7;
+  }
+
+  .btn {
+    @apply inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-2.5 text-[length:var(--text-sm)] font-medium transition-colors focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40;
+  }
+
+  .btn:focus-visible {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 50%, transparent);
+  }
+
+  .btn-ghost {
+    @apply btn border border-border bg-transparent text-text-secondary hover:bg-surface-3 hover:text-text-primary;
+  }
+
+  .btn-secondary {
+    @apply btn border border-border bg-surface-3 text-text-primary hover:bg-surface-4;
+  }
+
+  .btn-primary {
+    @apply btn bg-accent text-white hover:bg-accent-hover active:bg-accent-pressed;
+  }
+
+  .btn-danger {
+    @apply btn border bg-error-subtle text-error;
+    border-color: color-mix(in srgb, var(--color-error) 20%, transparent);
+  }
+
+  .btn-danger:hover {
+    background: color-mix(in srgb, var(--color-error) 20%, transparent);
+  }
+
+  .btn-icon {
+    @apply inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-3 hover:text-text-primary focus-visible:outline-none;
+  }
+
+  .btn-icon:focus-visible {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 50%, transparent);
+  }
+
+  .badge {
+    @apply inline-flex items-center rounded px-1.5 py-0.5 text-[length:var(--text-xs)] font-medium;
+  }
+
+  .field-label {
+    @apply mb-1 block text-[length:var(--text-xs)] font-medium text-text-secondary;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: var(--color-surface-4);
+    border-radius: var(--radius-full);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in var(--motion-normal) var(--ease-out) forwards;
+}
+
+.animate-entrance-row {
+  animation: entrance-row var(--motion-slow) var(--ease-out) forwards;
+}
+
+.animate-modal-enter {
+  animation: modal-enter var(--motion-normal) var(--ease-out) forwards;
+}
+
+.animate-toast-enter {
+  animation: toast-enter var(--motion-normal) var(--ease-out) forwards;
+}
+
+.animate-context-menu-enter {
+  animation: context-menu-enter var(--motion-fast) var(--ease-out) forwards;
+}
+
+.animate-slide-down {
+  animation: slide-down var(--motion-normal) var(--ease-out) forwards;
+}
+
+@keyframes slide-down {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

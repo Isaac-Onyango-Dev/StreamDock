@@ -1,0 +1,112 @@
+{
+  "name": "streamdock",
+  "version": "1.0.0",
+  "description": "Desktop video downloader and live stream capture app",
+  "type": "module",
+  "main": "dist-electron/main.cjs",
+  "author": "Isaac Onyango",
+  "license": "MIT",
+  "scripts": {
+    "dev:main": "esbuild electron/main.ts --bundle --platform=node --format=cjs --outfile=dist-electron/main.cjs --external:electron --external:electron-log && esbuild electron/preload.ts --bundle --platform=node --format=cjs --outfile=dist-electron/preload.cjs --external:electron",
+    "dev": "concurrently \"vite --host 127.0.0.1\" \"npm run dev:main && wait-on http://127.0.0.1:5173 && cross-env NODE_ENV=development electron .\"",
+    "build": "tsx scripts/build.ts && electron-builder",
+    "build:app": "tsx scripts/build.ts",
+    "typecheck": "tsc --noEmit",
+    "verify:engine": "tsx scripts/verify-engine.ts",
+    "download:binaries": "tsx scripts/download-binaries.ts",
+    "download:plugins": "tsx scripts/download-plugins.ts"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "electron-log": "^5.4.3",
+    "lucide-react": "^0.511.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-error-boundary": "^6.1.2",
+    "tailwind-merge": "^3.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "@types/react": "^18.3.21",
+    "@types/react-dom": "^18.3.7",
+    "autoprefixer": "^10.4.21",
+    "concurrently": "^9.2.1",
+    "cross-env": "^7.0.3",
+    "electron": "^41.0.2",
+    "electron-builder": "^26.8.1",
+    "esbuild": "^0.25.0",
+    "postcss": "^8.5.4",
+    "source-map": "^0.7.4",
+    "tailwindcss": "3.4.19",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "wait-on": "^8.0.3"
+  },
+  "build": {
+    "appId": "com.streamdock.app",
+    "productName": "StreamDock",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "assets/**/*",
+      "binaries/**/*",
+      "plugins/**/*"
+    ],
+    "asarUnpack": [
+      "binaries/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "binaries/",
+        "to": "binaries/",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "assets/",
+        "to": "assets/",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "plugins/",
+        "to": "plugins/",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/icon.png"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "publish": null
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nextlevelbuilder/streamdock.git"
+  }
+}
