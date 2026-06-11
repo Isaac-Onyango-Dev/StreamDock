@@ -366,7 +366,7 @@ function buildAppMenu(): void {
       submenu: [
         { label: 'Open Logs Folder', click: () => shell.openPath(app.getPath('userData')) },
         { type: 'separator' },
-        { label: 'Report Issue', click: () => shell.openExternal('https://github.com/nextlevelbuilder/streamdock/issues') },
+        { label: 'Report Issue', click: () => shell.openExternal('https://github.com/Isaac-Onyango-Dev/StreamDock/issues') },
       ],
     },
   ];
