@@ -1,0 +1,8 @@
+<!-- Role: unique StreamDock application icon source. -->
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="24" y="24" width="208" height="208" rx="48" fill="#0B1115"/>
+  <rect x="42" y="58" width="104" height="140" rx="26" fill="#101B20" stroke="#2DD4BF" stroke-width="10"/>
+  <path d="M75 151V105C75 96.8 84.3 92 91 96.7L128 122.7C133.7 126.7 133.7 135.3 128 139.3L91 165.3C84.3 170 75 165.2 75 157V151Z" fill="#2DD4BF"/>
+  <path d="M139 80H159C179.4 80 196 96.6 196 117V139C196 159.4 179.4 176 159 176H139" stroke="#38BDF8" stroke-width="12" stroke-linecap="round"/>
+  <path d="M139 176H160C180.4 176 197 159.4 197 139V117C197 96.6 180.4 80 160 80H139" stroke="#2DD4BF" stroke-width="12" stroke-linecap="round" opacity="0.75"/>
+</svg>

@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StreamDock — Download</title>
+  <meta name="description" content="Download StreamDock v1.0.0 — the powerful desktop app for downloading videos and capturing live streams using yt-dlp and ffmpeg." />
+  <meta property="og:title" content="StreamDock — Download" />
+  <meta property="og:description" content="Download StreamDock v1.0.0 — the powerful desktop app for downloading videos and capturing live streams." />
+  <meta property="og:type" content="website" />
+  <link rel="icon" href="data:image/svg+xml,<svg width='256' height='256' viewBox='0 0 256 256' fill='none' xmlns='http://www.w3.org/2000/svg'><rect x='24' y='24' width='208' height='208' rx='48' fill='%230B1115'/><rect x='42' y='58' width='104' height='140' rx='26' fill='%23101B20' stroke='%232DD4BF' stroke-width='10'/><path d='M75 151V105C75 96.8 84.3 92 91 96.7L128 122.7C133.7 126.7 133.7 135.3 128 139.3L91 165.3C84.3 170 75 165.2 75 157V151Z' fill='%232DD4BF'/><path d='M139 80H159C179.4 80 196 96.6 196 117V139C196 159.4 179.4 176 159 176H139' stroke='%2338BDF8' stroke-width='12' stroke-linecap='round'/></svg>" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #070d10;
+      --surface: #0d1a1f;
+      --surface2: #112028;
+      --border: rgba(45, 212, 191, 0.15);
+      --teal: #2dd4bf;
+      --teal-dim: rgba(45, 212, 191, 0.18);
+      --sky: #38bdf8;
+      --sky-dim: rgba(56, 189, 248, 0.15);
+      --text: #e2f0f0;
+      --muted: #6b9090;
+      --card-glow: rgba(45, 212, 191, 0.06);
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Background mesh ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 20% 10%, rgba(45,212,191,.06) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 80%, rgba(56,189,248,.05) 0%, transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Grid overlay ── */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(45,212,191,.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(45,212,191,.03) 1px, transparent 1px);
+      background-size: 60px 60px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .wrapper { position: relative; z-index: 1; }
+
+    /* ── Nav ── */
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 48px;
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(16px);
+      background: rgba(7,13,16,.6);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+    }
+
+    .nav-logo svg { width: 36px; height: 36px; flex-shrink: 0; }
+
+    .nav-wordmark {
+      font-size: 1.2rem;
+      font-weight: 700;
+      letter-spacing: -.02em;
+      color: var(--text);
+    }
+
+    .nav-wordmark span { color: var(--teal); }
+
+    .nav-badge {
+      background: var(--teal-dim);
+      border: 1px solid var(--teal);
+      color: var(--teal);
+      font-size: .7rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      letter-spacing: .04em;
+    }
+
+    .nav-links { display: flex; gap: 32px; list-style: none; }
+    .nav-links a { color: var(--muted); text-decoration: none; font-size: .9rem; font-weight: 500; transition: color .2s; }
+    .nav-links a:hover { color: var(--teal); }
+
+    /* ── Hero ── */
+    .hero {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: 100px 24px 80px;
+      gap: 32px;
+    }
+
+    .hero-eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--teal-dim);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 6px 16px;
+      font-size: .8rem;
+      font-weight: 600;
+      color: var(--teal);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      animation: fadeDown .6s ease both;
+    }
+
+    .hero-eyebrow::before {
+      content: '';
+      width: 6px; height: 6px;
+      background: var(--teal);
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+
+    .hero-icon {
+      width: 120px; height: 120px;
+      animation: fadeDown .5s .1s ease both;
+      filter: drop-shadow(0 0 40px rgba(45,212,191,.4));
+    }
+
+    .hero h1 {
+      font-size: clamp(2.6rem, 6vw, 4.2rem);
+      font-weight: 900;
+      letter-spacing: -.04em;
+      line-height: 1.05;
+      animation: fadeDown .5s .15s ease both;
+    }
+
+    .hero h1 .grad {
+      background: linear-gradient(135deg, var(--teal) 0%, var(--sky) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero-sub {
+      max-width: 580px;
+      font-size: 1.1rem;
+      color: var(--muted);
+      line-height: 1.7;
+      animation: fadeDown .5s .2s ease both;
+    }
+
+    /* ── Download cards ── */
+    .download-section {
+      padding: 0 24px 80px;
+    }
+
+    .section-label {
+      text-align: center;
+      font-size: .8rem;
+      font-weight: 600;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 32px;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 32px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease;
+      animation: fadeUp .5s ease both;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--teal), transparent);
+      opacity: 0;
+      transition: opacity .3s;
+    }
+
+    .card:hover { transform: translateY(-4px); border-color: rgba(45,212,191,.4); box-shadow: 0 20px 60px rgba(0,0,0,.4), 0 0 40px rgba(45,212,191,.07); }
+    .card:hover::before { opacity: 1; }
+
+    .card-icon {
+      width: 52px; height: 52px;
+      border-radius: 14px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.6rem;
+    }
+
+    .card-icon.win { background: linear-gradient(135deg, #1e3a5f, #0d2040); border: 1px solid rgba(56,189,248,.3); }
+    .card-icon.mac { background: linear-gradient(135deg, #2a1a3e, #1a0d2e); border: 1px solid rgba(167,139,250,.3); }
+    .card-icon.lnx { background: linear-gradient(135deg, #1a2e1a, #0d1f0d); border: 1px solid rgba(74,222,128,.3); }
+
+    .card-header { display: flex; flex-direction: column; gap: 4px; }
+    .card-header h3 { font-size: 1.15rem; font-weight: 700; letter-spacing: -.01em; }
+    .card-header p { font-size: .82rem; color: var(--muted); }
+
+    .card-meta {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .tag {
+      font-size: .72rem;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 999px;
+      letter-spacing: .04em;
+    }
+
+    .tag-teal { background: var(--teal-dim); border: 1px solid rgba(45,212,191,.3); color: var(--teal); }
+    .tag-sky { background: var(--sky-dim); border: 1px solid rgba(56,189,248,.3); color: var(--sky); }
+    .tag-muted { background: rgba(107,144,144,.1); border: 1px solid rgba(107,144,144,.25); color: var(--muted); }
+
+    .btn-dl {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 14px 24px;
+      border-radius: 12px;
+      font-size: .9rem;
+      font-weight: 700;
+      text-decoration: none;
+      transition: all .25s ease;
+      cursor: pointer;
+      border: none;
+      letter-spacing: -.01em;
+    }
+
+    .btn-dl-primary {
+      background: linear-gradient(135deg, var(--teal), var(--sky));
+      color: #070d10;
+      box-shadow: 0 0 0 rgba(45,212,191,0);
+    }
+
+    .btn-dl-primary:hover {
+      box-shadow: 0 8px 30px rgba(45,212,191,.35);
+      transform: translateY(-1px);
+    }
+
+    .btn-dl-outline {
+      background: transparent;
+      color: var(--teal);
+      border: 1px solid var(--border);
+    }
+
+    .btn-dl-outline:hover {
+      background: var(--teal-dim);
+      border-color: var(--teal);
+    }
+
+    /* ── Features strip ── */
+    .features {
+      padding: 60px 24px;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      margin: 0 0 80px;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 40px;
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    .feature { display: flex; flex-direction: column; gap: 12px; }
+    .feature-icon { font-size: 1.8rem; }
+    .feature h4 { font-size: .95rem; font-weight: 700; }
+    .feature p { font-size: .82rem; color: var(--muted); line-height: 1.6; }
+
+    /* ── Requirements ── */
+    .requirements {
+      max-width: 800px;
+      margin: 0 auto 80px;
+      padding: 0 24px;
+    }
+
+    .requirements h2 {
+      font-size: 1.5rem;
+      font-weight: 800;
+      letter-spacing: -.03em;
+      margin-bottom: 24px;
+      text-align: center;
+    }
+
+    .req-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .req-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+    }
+
+    .req-emoji { font-size: 1.4rem; flex-shrink: 0; margin-top: 2px; }
+    .req-text h5 { font-size: .9rem; font-weight: 700; margin-bottom: 4px; }
+    .req-text p { font-size: .8rem; color: var(--muted); line-height: 1.5; }
+
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 40px 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .footer-brand { display: flex; align-items: center; gap: 10px; }
+    .footer-brand svg { width: 24px; height: 24px; }
+    .footer-brand span { font-weight: 700; font-size: .9rem; }
+    .footer-brand span em { font-style: normal; color: var(--teal); }
+
+    .footer-links { display: flex; gap: 24px; }
+    .footer-links a { color: var(--muted); font-size: .82rem; text-decoration: none; transition: color .2s; }
+    .footer-links a:hover { color: var(--teal); }
+
+    .footer-copy { color: var(--muted); font-size: .8rem; }
+
+    /* ── Animations ── */
+    @keyframes fadeDown {
+      from { opacity: 0; transform: translateY(-16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(24px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: .5; transform: scale(.8); }
+    }
+
+    .card:nth-child(1) { animation-delay: .05s; }
+    .card:nth-child(2) { animation-delay: .12s; }
+    .card:nth-child(3) { animation-delay: .19s; }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+      nav { padding: 16px 20px; }
+      .nav-links { display: none; }
+      .hero { padding: 64px 20px 56px; }
+      footer { padding: 32px 20px; flex-direction: column; align-items: flex-start; }
+      .req-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="wrapper">
+
+  <!-- NAV -->
+  <nav>
+    <a class="nav-logo" href="#" id="nav-logo-link">
+      <svg viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="24" y="24" width="208" height="208" rx="48" fill="#0B1115"/>
+        <rect x="42" y="58" width="104" height="140" rx="26" fill="#101B20" stroke="#2DD4BF" stroke-width="10"/>
+        <path d="M75 151V105C75 96.8 84.3 92 91 96.7L128 122.7C133.7 126.7 133.7 135.3 128 139.3L91 165.3C84.3 170 75 165.2 75 157V151Z" fill="#2DD4BF"/>
+        <path d="M139 80H159C179.4 80 196 96.6 196 117V139C196 159.4 179.4 176 159 176H139" stroke="#38BDF8" stroke-width="12" stroke-linecap="round"/>
+      </svg>
+      <span class="nav-wordmark">Stream<span>Dock</span></span>
+      <span class="nav-badge">v1.0.0</span>
+    </a>
+    <ul class="nav-links">
+      <li><a href="#download" id="nav-download-link">Download</a></li>
+      <li><a href="#features" id="nav-features-link">Features</a></li>
+      <li><a href="#requirements" id="nav-requirements-link">Requirements</a></li>
+      <li><a href="https://github.com/Isaac-Onyango-Dev/StreamDock" id="nav-github-link" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <span class="hero-eyebrow">Version 1.0.0 — Now Available</span>
+
+    <svg class="hero-icon" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="24" y="24" width="208" height="208" rx="48" fill="#0B1115"/>
+      <rect x="42" y="58" width="104" height="140" rx="26" fill="#101B20" stroke="#2DD4BF" stroke-width="10"/>
+      <path d="M75 151V105C75 96.8 84.3 92 91 96.7L128 122.7C133.7 126.7 133.7 135.3 128 139.3L91 165.3C84.3 170 75 165.2 75 157V151Z" fill="#2DD4BF"/>
+      <path d="M139 80H159C179.4 80 196 96.6 196 117V139C196 159.4 179.4 176 159 176H139" stroke="#38BDF8" stroke-width="12" stroke-linecap="round"/>
+    </svg>
+
+    <h1>Download <span class="grad">StreamDock</span></h1>
+
+    <p class="hero-sub">
+      The powerful desktop app for downloading videos and capturing live streams — powered by <strong>yt-dlp</strong> and <strong>ffmpeg</strong>. Fast, reliable, and beautifully designed.
+    </p>
+
+    <a href="#download" class="btn-dl btn-dl-primary" id="hero-download-btn">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>
+      Download Now
+    </a>
+  </section>
+
+  <!-- DOWNLOAD CARDS -->
+  <section class="download-section" id="download">
+    <p class="section-label">Choose your platform</p>
+    <div class="cards">
+
+      <!-- Windows -->
+      <div class="card">
+        <div class="card-icon win">🪟</div>
+        <div class="card-header">
+          <h3>Windows</h3>
+          <p>Windows 10 / 11 — 64-bit</p>
+        </div>
+        <div class="card-meta">
+          <span class="tag tag-teal">NSIS Installer</span>
+          <span class="tag tag-sky">.exe</span>
+          <span class="tag tag-muted">v1.0.0</span>
+        </div>
+        <a class="btn-dl btn-dl-primary" id="windows-download-btn"
+           href="https://github.com/Isaac-Onyango-Dev/StreamDock/releases/download/v1.0.0/StreamDock-Setup-1.0.0.exe"
+           download>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download for Windows
+        </a>
+      </div>
+
+      <!-- macOS -->
+      <div class="card">
+        <div class="card-icon mac">🍎</div>
+        <div class="card-header">
+          <h3>macOS</h3>
+          <p>macOS 12 Monterey or later</p>
+        </div>
+        <div class="card-meta">
+          <span class="tag tag-teal">Disk Image</span>
+          <span class="tag tag-sky">.dmg</span>
+          <span class="tag tag-muted">v1.0.0</span>
+        </div>
+        <a class="btn-dl btn-dl-primary" id="macos-download-btn"
+           href="https://github.com/Isaac-Onyango-Dev/StreamDock/releases/download/v1.0.0/StreamDock-1.0.0.dmg"
+           download>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download for macOS
+        </a>
+      </div>
+
+      <!-- Linux -->
+      <div class="card">
+        <div class="card-icon lnx">🐧</div>
+        <div class="card-header">
+          <h3>Linux</h3>
+          <p>Ubuntu 20.04+ / Debian-based</p>
+        </div>
+        <div class="card-meta">
+          <span class="tag tag-teal">AppImage</span>
+          <span class="tag tag-sky">.AppImage</span>
+          <span class="tag tag-muted">v1.0.0</span>
+        </div>
+        <a class="btn-dl btn-dl-primary" id="linux-download-btn"
+           href="https://github.com/Isaac-Onyango-Dev/StreamDock/releases/download/v1.0.0/StreamDock-1.0.0.AppImage"
+           download>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download for Linux
+        </a>
+      </div>
+
+    </div>
+
+    <div style="text-align:center; margin-top: 28px;">
+      <a class="btn-dl btn-dl-outline" id="all-releases-btn"
+         href="https://github.com/Isaac-Onyango-Dev/StreamDock/releases" target="_blank" rel="noopener">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+        View all releases on GitHub
+      </a>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section class="features" id="features">
+    <div class="features-grid">
+      <div class="feature">
+        <div class="feature-icon">⚡</div>
+        <h4>Blazing Fast Downloads</h4>
+        <p>Powered by yt-dlp — the fastest and most feature-complete video downloader available, supporting thousands of sites.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">📡</div>
+        <h4>Live Stream Capture</h4>
+        <p>Capture live streams in real time with ffmpeg integration. Never miss a broadcast again.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🎨</div>
+        <h4>Beautiful UI</h4>
+        <p>A sleek, dark-themed Electron interface built with React and Tailwind. Clean, distraction-free, and responsive.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🔌</div>
+        <h4>Plugin System</h4>
+        <p>Extend StreamDock with community plugins. Add new sources, processing steps, and output formats.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🛡️</div>
+        <h4>Sandboxed &amp; Safe</h4>
+        <p>Electron security best practices applied throughout. IPC is typed and validated at every boundary.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🖥️</div>
+        <h4>Cross-Platform</h4>
+        <p>Native builds for Windows (NSIS), macOS (DMG), and Linux (AppImage) — one codebase, three platforms.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- REQUIREMENTS -->
+  <section class="requirements" id="requirements">
+    <h2>System Requirements</h2>
+    <div class="req-grid">
+      <div class="req-item">
+        <span class="req-emoji">🪟</span>
+        <div class="req-text">
+          <h5>Windows</h5>
+          <p>Windows 10 (64-bit) or later. No additional runtime required — everything is bundled.</p>
+        </div>
+      </div>
+      <div class="req-item">
+        <span class="req-emoji">🍎</span>
+        <div class="req-text">
+          <h5>macOS</h5>
+          <p>macOS 12 Monterey or later (Apple Silicon &amp; Intel supported).</p>
+        </div>
+      </div>
+      <div class="req-item">
+        <span class="req-emoji">🐧</span>
+        <div class="req-text">
+          <h5>Linux</h5>
+          <p>Ubuntu 20.04 / Debian 11 or compatible. Mark AppImage as executable before running.</p>
+        </div>
+      </div>
+      <div class="req-item">
+        <span class="req-emoji">⚙️</span>
+        <div class="req-text">
+          <h5>Binaries</h5>
+          <p>Place <code style="color:var(--teal);font-size:.78rem">yt-dlp</code> and <code style="color:var(--teal);font-size:.78rem">ffmpeg</code> in the <code style="color:var(--teal);font-size:.78rem">binaries/</code> folder, or install on PATH.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="footer-brand">
+      <svg viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="24" y="24" width="208" height="208" rx="48" fill="#0B1115"/>
+        <rect x="42" y="58" width="104" height="140" rx="26" fill="#101B20" stroke="#2DD4BF" stroke-width="10"/>
+        <path d="M75 151V105C75 96.8 84.3 92 91 96.7L128 122.7C133.7 126.7 133.7 135.3 128 139.3L91 165.3C84.3 170 75 165.2 75 157V151Z" fill="#2DD4BF"/>
+        <path d="M139 80H159C179.4 80 196 96.6 196 117V139C196 159.4 179.4 176 159 176H139" stroke="#38BDF8" stroke-width="12" stroke-linecap="round"/>
+      </svg>
+      <span>Stream<em>Dock</em> — v1.0.0</span>
+    </div>
+    <div class="footer-links">
+      <a href="https://github.com/Isaac-Onyango-Dev/StreamDock" id="footer-github-link" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/Isaac-Onyango-Dev/StreamDock/releases" id="footer-releases-link" target="_blank" rel="noopener">Releases</a>
+      <a href="https://github.com/Isaac-Onyango-Dev/StreamDock/issues" id="footer-issues-link" target="_blank" rel="noopener">Issues</a>
+    </div>
+    <p class="footer-copy">&copy; 2025 Isaac Onyango · MIT License</p>
+  </footer>
+
+</div>
+</body>
+</html>
