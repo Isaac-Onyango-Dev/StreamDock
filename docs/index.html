@@ -475,7 +475,7 @@
       </div>
 
       <!-- macOS -->
-      <div class="card">
+      <div class="card" style="opacity:.55; pointer-events:none;">
         <div class="card-icon mac">🍎</div>
         <div class="card-header">
           <h3>macOS</h3>
@@ -484,18 +484,15 @@
         <div class="card-meta">
           <span class="tag tag-teal">Disk Image</span>
           <span class="tag tag-sky">.dmg</span>
-          <span class="tag tag-muted">v1.0.0</span>
+          <span class="tag tag-muted">Coming Soon</span>
         </div>
-        <a class="btn-dl btn-dl-primary" id="macos-download-btn"
-           href="https://github.com/Isaac-Onyango-Dev/StreamDock/releases/download/v1.0.0/StreamDock-1.0.0.dmg"
-           download>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Download for macOS
-        </a>
+        <span class="btn-dl btn-dl-outline" style="justify-content:center; cursor:not-allowed;">
+          Not yet available
+        </span>
       </div>
 
       <!-- Linux -->
-      <div class="card">
+      <div class="card" style="opacity:.55; pointer-events:none;">
         <div class="card-icon lnx">🐧</div>
         <div class="card-header">
           <h3>Linux</h3>
@@ -504,14 +501,11 @@
         <div class="card-meta">
           <span class="tag tag-teal">AppImage</span>
           <span class="tag tag-sky">.AppImage</span>
-          <span class="tag tag-muted">v1.0.0</span>
+          <span class="tag tag-muted">Coming Soon</span>
         </div>
-        <a class="btn-dl btn-dl-primary" id="linux-download-btn"
-           href="https://github.com/Isaac-Onyango-Dev/StreamDock/releases/download/v1.0.0/StreamDock-1.0.0.AppImage"
-           download>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Download for Linux
-        </a>
+        <span class="btn-dl btn-dl-outline" style="justify-content:center; cursor:not-allowed;">
+          Not yet available
+        </span>
       </div>
 
     </div>
@@ -564,7 +558,7 @@
   <!-- REQUIREMENTS -->
   <section class="requirements" id="requirements">
     <h2>System Requirements</h2>
-    <div class="req-grid">
+    <div class="req-grid" style="grid-template-columns:1fr 1fr;">
       <div class="req-item">
         <span class="req-emoji">🪟</span>
         <div class="req-text">
@@ -573,24 +567,24 @@
         </div>
       </div>
       <div class="req-item">
-        <span class="req-emoji">🍎</span>
-        <div class="req-text">
-          <h5>macOS</h5>
-          <p>macOS 12 Monterey or later (Apple Silicon &amp; Intel supported).</p>
-        </div>
-      </div>
-      <div class="req-item">
-        <span class="req-emoji">🐧</span>
-        <div class="req-text">
-          <h5>Linux</h5>
-          <p>Ubuntu 20.04 / Debian 11 or compatible. Mark AppImage as executable before running.</p>
-        </div>
-      </div>
-      <div class="req-item">
         <span class="req-emoji">⚙️</span>
         <div class="req-text">
           <h5>No extras needed</h5>
           <p><code style="color:var(--teal);font-size:.78rem">yt-dlp</code> and <code style="color:var(--teal);font-size:.78rem">ffmpeg</code> are bundled inside the installer — nothing extra to download or configure.</p>
+        </div>
+      </div>
+      <div class="req-item" style="opacity:.45;">
+        <span class="req-emoji">🍎</span>
+        <div class="req-text">
+          <h5>macOS — Coming Soon</h5>
+          <p>macOS 12 Monterey or later (Apple Silicon &amp; Intel). Build not yet available.</p>
+        </div>
+      </div>
+      <div class="req-item" style="opacity:.45;">
+        <span class="req-emoji">🐧</span>
+        <div class="req-text">
+          <h5>Linux — Coming Soon</h5>
+          <p>Ubuntu 20.04 / Debian 11 or compatible. Build not yet available.</p>
         </div>
       </div>
     </div>
