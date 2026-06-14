@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { CheckCircle2, FolderOpen, RefreshCw, XCircle } from 'lucide-react';
 import type { EngineStatus, Settings } from '../../lib/types';
 import { BackgroundSettings } from './BackgroundSettings';
+import { Toggle } from '../../components/Toggle';
 
 interface SettingsPanelProps {
   settings: Settings;
@@ -73,29 +74,16 @@ export function SettingsView({
 
           <div className="mt-4 space-y-3 border-t border-border-subtle pt-3">
             <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm text-text-primary">Use Chrome cookies</p>
-                <p className="text-xs text-text-secondary">For age-gated or login-protected sites.</p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={settings.useCookies}
-                onClick={() => {
-                  void window.streamDock?.updateSettings({ useCookies: !settings.useCookies }).then((next) => {
+              <Toggle
+                label="Use Chrome cookies"
+                ariaLabel="Use Chrome cookies for age-gated or login-protected sites"
+                enabled={settings.useCookies}
+                onChange={(val) => {
+                  void window.streamDock?.updateSettings({ useCookies: val }).then((next) => {
                     if (next) onSettingsChange(next);
                   });
                 }}
-                className={`relative h-5 w-9 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/50 ${
-                  settings.useCookies ? 'bg-accent' : 'bg-surface-4'
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow-1 transition-transform ${
-                    settings.useCookies ? 'translate-x-4' : 'translate-x-0'
-                  }`}
-                />
-              </button>
+              />
             </div>
 
             <div>
@@ -122,32 +110,18 @@ export function SettingsView({
             </div>
 
             <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm text-text-primary">Clipboard URL watcher</p>
-                <p className="text-xs text-text-secondary">Auto-detect URLs copied to clipboard.</p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={settings.clipboardWatcher}
-                onClick={() => {
-                  const nextVal = !settings.clipboardWatcher;
-                  void window.streamDock?.updateSettings({ clipboardWatcher: nextVal }).then((next) => {
+              <Toggle
+                label="Clipboard URL watcher"
+                ariaLabel="Auto-detect URLs copied to clipboard"
+                enabled={settings.clipboardWatcher}
+                onChange={(val) => {
+                  void window.streamDock?.updateSettings({ clipboardWatcher: val }).then((next) => {
                     if (next) onSettingsChange(next);
-                    if (nextVal) window.streamDock?.startClipboardWatcher();
+                    if (val) window.streamDock?.startClipboardWatcher();
                     else window.streamDock?.stopClipboardWatcher();
                   });
                 }}
-                className={`relative h-5 w-9 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/50 ${
-                  settings.clipboardWatcher ? 'bg-accent' : 'bg-surface-4'
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow-1 transition-transform ${
-                    settings.clipboardWatcher ? 'translate-x-4' : 'translate-x-0'
-                  }`}
-                />
-              </button>
+              />
             </div>
           </div>
         </section>
