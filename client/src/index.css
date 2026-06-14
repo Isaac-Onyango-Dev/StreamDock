@@ -126,6 +126,21 @@
     background: var(--color-surface-4);
     border-radius: var(--radius-full);
   }
+
+  /* Semi-transparent chrome panels — opaque by default, transparent only in bing/wallpaper mode */
+  .bg-chrome-rail    { background-color: var(--color-surface-1); }
+  .bg-chrome-header  { background-color: var(--color-surface-0); }
+  .bg-chrome-content { background-color: var(--color-surface-0); }
+
+  [data-bg-mode="bing"] .bg-chrome-rail {
+    background-color: color-mix(in srgb, var(--color-surface-1) 78%, transparent);
+  }
+  [data-bg-mode="bing"] .bg-chrome-header {
+    background-color: color-mix(in srgb, var(--color-surface-0) 68%, transparent);
+  }
+  [data-bg-mode="bing"] .bg-chrome-content {
+    background-color: color-mix(in srgb, var(--color-surface-0) 55%, transparent);
+  }
 }
 
 .animate-fade-in {

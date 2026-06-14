@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { CheckCircle2, FolderOpen, RefreshCw, XCircle } from 'lucide-react';
 import type { EngineStatus, Settings } from '../../lib/types';
+import { BackgroundSettings } from './BackgroundSettings';
 
 interface SettingsPanelProps {
   settings: Settings;
@@ -119,6 +120,35 @@ export function SettingsView({
                 className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-surface-4 accent-accent"
               />
             </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm text-text-primary">Clipboard URL watcher</p>
+                <p className="text-xs text-text-secondary">Auto-detect URLs copied to clipboard.</p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={settings.clipboardWatcher}
+                onClick={() => {
+                  const nextVal = !settings.clipboardWatcher;
+                  void window.streamDock?.updateSettings({ clipboardWatcher: nextVal }).then((next) => {
+                    if (next) onSettingsChange(next);
+                    if (nextVal) window.streamDock?.startClipboardWatcher();
+                    else window.streamDock?.stopClipboardWatcher();
+                  });
+                }}
+                className={`relative h-5 w-9 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/50 ${
+                  settings.clipboardWatcher ? 'bg-accent' : 'bg-surface-4'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow-1 transition-transform ${
+                    settings.clipboardWatcher ? 'translate-x-4' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
           </div>
         </section>
 
@@ -175,6 +205,8 @@ export function SettingsView({
             </p>
           )}
         </section>
+
+        <BackgroundSettings />
       </div>
     </div>
   );

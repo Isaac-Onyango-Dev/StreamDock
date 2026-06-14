@@ -10,6 +10,7 @@ import {
   parseManifestContent,
   type AudioTrackInfo,
   type ParsedManifestTracks,
+  type QualityVariant,
   type SubtitleFormat,
   type SubtitleTrackInfo,
 } from './manifest-parser';
@@ -28,6 +29,7 @@ export interface MediaTrackProbe {
   manifestType?: 'm3u8' | 'mpd';
   audioTracks: AudioTrackInfo[];
   subtitleTracks: SubtitleTrackInfo[];
+  qualityOptions: QualityVariant[];
   defaultAudioLanguage?: string;
   originalAudioLanguage?: string;
   notes: string[];
@@ -300,6 +302,7 @@ export async function probeMediaTracks(request: ProbeMediaTracksRequest): Promis
     manifestType,
     audioTracks: merged.audio,
     subtitleTracks: merged.subs,
+    qualityOptions: parsed?.qualityOptions || [],
     defaultAudioLanguage: inferDefaultAudio(merged.audio),
     originalAudioLanguage: inferOriginalLanguage(merged.audio),
     notes,

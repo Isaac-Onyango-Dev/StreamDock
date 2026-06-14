@@ -11,6 +11,11 @@ type Settings = {
   scheduledStartTime?: string | null;
   hasOnboarded?: boolean;
   densityMode?: 'comfortable' | 'compact';
+  backgroundMode?: 'solid' | 'bing' | 'gradient';
+  backgroundImageUrl?: string;
+  solidColorBg?: string;
+  bingRefreshInterval?: number;
+  clipboardWatcher?: boolean;
 };
 
 type StartRequest = {
@@ -34,6 +39,10 @@ type StartRequest = {
   subtitleConvertFormat?: 'original' | 'srt' | 'vtt';
   subsOnly?: boolean;
   downloadPackaging?: 'video-only' | 'video-audio' | 'video-subs' | 'video-audio-subs' | 'video-multi-subs' | 'subs-only';
+  /** User-selected manifest URL from stream options probe (for language-specific streams) */
+  manifestUrl?: string;
+  /** Referer URL for the selected manifest (for sites that require it) */
+  manifestReferer?: string;
 };
 
 type Unsubscribe = () => void;
@@ -79,6 +88,10 @@ const api = {
 
   // Clipboard
   readClipboard: () => ipcRenderer.invoke(IPC.CLIPBOARD_READ_TEXT) as Promise<string>,
+  startClipboardWatcher: () => ipcRenderer.invoke(IPC.CLIPBOARD_WATCHER_START) as Promise<boolean>,
+  stopClipboardWatcher: () => ipcRenderer.invoke(IPC.CLIPBOARD_WATCHER_STOP) as Promise<boolean>,
+  onClipboardUrl: (callback: (data: { url: string; sourceText: string }) => void): Unsubscribe =>
+    on<{ url: string; sourceText: string }>(IPC.EVENT_CLIPBOARD_URL, callback),
 
   // URL analysis
   analyzeUrl: (url: string) =>
@@ -88,6 +101,8 @@ const api = {
   inspectUrl: (url: string) => ipcRenderer.invoke(IPC.URL_INSPECT, url),
   probeMediaTracks: (payload: { pageUrl: string; manifestUrl?: string; referer?: string }) =>
     ipcRenderer.invoke(IPC.MEDIA_PROBE_TRACKS, payload),
+  probeStreamOptions: (pageUrl: string) =>
+    ipcRenderer.invoke(IPC.STREAM_OPTIONS_PROBE, pageUrl),
 
   // Engine status
   getEngineStatus: () => ipcRenderer.invoke(IPC.ENGINE_STATUS),
@@ -118,6 +133,10 @@ const api = {
     ipcRenderer.invoke(IPC.ENGINE_CLEAR_RECORDS, scope) as Promise<boolean>,
   updateEngine: () =>
     ipcRenderer.invoke(IPC.ENGINE_UPDATE) as Promise<{ success: boolean; message?: string; error?: string }>,
+
+  // Background
+  getBingDailyImage: () => ipcRenderer.invoke(IPC.BACKGROUND_GET_BING_IMAGE) as Promise<string | null>,
+  getBingRefreshInfo: () => ipcRenderer.invoke(IPC.BACKGROUND_GET_BING_INFO) as Promise<{ lastRefresh: number }>,
 
   // Event subscriptions
   onDownloadProgress: (callback: (record: DownloadRecord) => void): Unsubscribe =>

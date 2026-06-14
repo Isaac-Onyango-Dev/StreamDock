@@ -2,6 +2,8 @@ import { app } from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 
+export type BackgroundMode = 'solid' | 'bing' | 'gradient';
+
 export interface AppSettings {
   downloadDir: string;
   useCookies?: boolean;
@@ -9,6 +11,11 @@ export interface AppSettings {
   scheduledStartTime?: string | null;
   hasOnboarded?: boolean;
   densityMode?: 'comfortable' | 'compact';
+  backgroundMode?: BackgroundMode;
+  backgroundImageUrl?: string;
+  solidColorBg?: string;
+  bingRefreshInterval?: number;
+  clipboardWatcher?: boolean;
 }
 
 export class PersistenceGateway {
@@ -22,6 +29,10 @@ export class PersistenceGateway {
       maxConcurrent: 3,
       hasOnboarded: false,
       densityMode: 'comfortable',
+      backgroundMode: 'solid',
+      solidColorBg: '#0b1014', // Default matches hsl(220, 14%, 6%)
+      bingRefreshInterval: 24,
+      clipboardWatcher: true,
     };
   }
 

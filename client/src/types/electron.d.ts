@@ -6,6 +6,7 @@ import type {
   EngineStatus,
   MediaTrackProbe,
   Settings,
+  StreamOptionsProbeResult,
   UrlAnalysis,
 } from '../lib/types';
 
@@ -30,6 +31,7 @@ declare global {
         manifestUrl?: string;
         referer?: string;
       }) => Promise<{ success: true; data: MediaTrackProbe } | { success: false; error: string }>;
+      probeStreamOptions: (pageUrl: string) => Promise<StreamOptionsProbeResult>;
       getEngineStatus: () => Promise<EngineStatus[]>;
       startDownload: (
         mode: CaptureMode,
@@ -53,6 +55,8 @@ declare global {
           subtitleConvertFormat?: 'original' | 'srt' | 'vtt';
           subsOnly?: boolean;
           downloadPackaging?: DownloadPackagingMode;
+          manifestUrl?: string;
+          manifestReferer?: string;
         },
       ) => Promise<DownloadRecord>;
       cancelDownload: (id: string) => Promise<boolean>;
@@ -88,6 +92,13 @@ declare global {
       onMenuFocusTab: (callback: (tab: string) => void) => () => void;
       onMenuOpenDownloadFolder: (callback: () => void) => () => void;
       onMenuPasteClipboard: (callback: () => void) => () => void;
+      // Clipboard watcher
+      startClipboardWatcher: () => Promise<boolean>;
+      stopClipboardWatcher: () => Promise<boolean>;
+      onClipboardUrl: (callback: (data: { url: string; sourceText: string }) => void) => () => void;
+      // Background
+      getBingDailyImage: () => Promise<string | null>;
+      getBingRefreshInfo?: () => Promise<{ lastRefresh: number }>;
     };
   }
 }

@@ -28,15 +28,24 @@ export interface SubtitleTrackInfo {
   uri?: string;
 }
 
+export interface QualityVariant {
+  height: number;
+  label: string;
+  width?: number;
+  bandwidth?: number;
+  uri?: string;
+}
+
 export interface ParsedManifestTracks {
   manifestType: 'm3u8' | 'mpd';
   audioTracks: AudioTrackInfo[];
   subtitleTracks: SubtitleTrackInfo[];
+  qualityOptions: QualityVariant[];
 }
 
 function parseHlsAttributes(line: string): Record<string, string> {
   const attrs: Record<string, string> = {};
-  const body = line.replace(/^#EXT-X-MEDIA:/i, '');
+  const body = line.replace(/^#EXT-X-[A-Z0-9-]+:/i, '');
   const re = /([A-Z0-9-]+)=("([^"]*)"|([^,]*))/gi;
   let match: RegExpExecArray | null;
   while ((match = re.exec(body)) !== null) {
@@ -66,11 +75,42 @@ function resolveManifestUrl(baseUrl: string, relative: string): string {
 export function parseHlsManifest(text: string, manifestUrl: string): ParsedManifestTracks {
   const audioTracks: AudioTrackInfo[] = [];
   const subtitleTracks: SubtitleTrackInfo[] = [];
+  const qualityByHeight = new Map<number, QualityVariant>();
   const seenAudio = new Set<string>();
   const seenSubs = new Set<string>();
+  const lines = text.split(/\r?\n/);
 
-  for (const rawLine of text.split(/\r?\n/)) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const rawLine = lines[index];
     const line = rawLine.trim();
+    if (line.startsWith('#EXT-X-STREAM-INF:')) {
+      const attrs = parseHlsAttributes(line);
+      const resolution = attrs.resolution?.match(/(\d+)x(\d+)/i);
+      const width = resolution ? Number(resolution[1]) : undefined;
+      const height = resolution ? Number(resolution[2]) : undefined;
+      if (height && Number.isFinite(height) && height > 0) {
+        let uri: string | undefined;
+        for (let nextIndex = index + 1; nextIndex < lines.length; nextIndex += 1) {
+          const nextLine = lines[nextIndex].trim();
+          if (!nextLine || nextLine.startsWith('#')) continue;
+          uri = resolveManifestUrl(manifestUrl, nextLine);
+          break;
+        }
+        const bandwidth = attrs.bandwidth ? Number(attrs.bandwidth) : undefined;
+        const existing = qualityByHeight.get(height);
+        if (!existing || (bandwidth || 0) > (existing.bandwidth || 0)) {
+          qualityByHeight.set(height, {
+            height,
+            width,
+            bandwidth,
+            uri,
+            label: `${height}p`,
+          });
+        }
+      }
+      continue;
+    }
+
     if (!line.startsWith('#EXT-X-MEDIA:')) continue;
 
     const attrs = parseHlsAttributes(line);
@@ -116,7 +156,7 @@ export function parseHlsManifest(text: string, manifestUrl: string): ParsedManif
 
   // Variant streams referencing AUDIO groups without EXT-X-MEDIA
   if (audioTracks.length === 0) {
-    for (const rawLine of text.split(/\r?\n/)) {
+    for (const rawLine of lines) {
       const line = rawLine.trim();
       if (!line.startsWith('#EXT-X-STREAM-INF:')) continue;
       const langMatch = line.match(/LANGUAGE="?([^,"]+)"?/i);
@@ -136,7 +176,12 @@ export function parseHlsManifest(text: string, manifestUrl: string): ParsedManif
     }
   }
 
-  return { manifestType: 'm3u8', audioTracks, subtitleTracks };
+  return {
+    manifestType: 'm3u8',
+    audioTracks,
+    subtitleTracks,
+    qualityOptions: Array.from(qualityByHeight.values()).sort((a, b) => b.height - a.height),
+  };
 }
 
 function xmlAttr(tag: string, name: string): string | undefined {
@@ -147,6 +192,7 @@ function xmlAttr(tag: string, name: string): string | undefined {
 export function parseDashManifest(text: string, manifestUrl: string): ParsedManifestTracks {
   const audioTracks: AudioTrackInfo[] = [];
   const subtitleTracks: SubtitleTrackInfo[] = [];
+  const qualityByHeight = new Map<number, QualityVariant>();
   const seenAudio = new Set<string>();
   const seenSubs = new Set<string>();
 
@@ -158,6 +204,7 @@ export function parseDashManifest(text: string, manifestUrl: string): ParsedMani
     const lang = normalizeLanguageCode(xmlAttr(openTag, 'lang') || xmlAttr(openTag, 'language'));
     const isAudio = mime.includes('audio');
     const isText = mime.includes('text') || mime.includes('subtitle') || mime.includes('caption');
+    const isVideo = mime.includes('video');
 
     const representations = block.match(/<Representation\b[^>]*\/?>/gi) || [];
     let codec: string | undefined;
@@ -170,6 +217,23 @@ export function parseDashManifest(text: string, manifestUrl: string): ParsedMani
       if (bw) bitrate = parseInt(bw, 10);
       const baseUrl = block.match(/<BaseURL>([^<]+)<\/BaseURL>/i)?.[1];
       if (baseUrl) uri = resolveManifestUrl(manifestUrl, baseUrl.trim());
+      if (isVideo) {
+        const height = Number(xmlAttr(rep, 'height'));
+        if (Number.isFinite(height) && height > 0) {
+          const width = Number(xmlAttr(rep, 'width'));
+          const bandwidth = bw ? parseInt(bw, 10) : undefined;
+          const existing = qualityByHeight.get(height);
+          if (!existing || (bandwidth || 0) > (existing.bandwidth || 0)) {
+            qualityByHeight.set(height, {
+              height,
+              width: Number.isFinite(width) && width > 0 ? width : undefined,
+              bandwidth,
+              uri,
+              label: `${height}p`,
+            });
+          }
+        }
+      }
     }
 
     if (isAudio) {
@@ -206,7 +270,12 @@ export function parseDashManifest(text: string, manifestUrl: string): ParsedMani
     }
   }
 
-  return { manifestType: 'mpd', audioTracks, subtitleTracks };
+  return {
+    manifestType: 'mpd',
+    audioTracks,
+    subtitleTracks,
+    qualityOptions: Array.from(qualityByHeight.values()).sort((a, b) => b.height - a.height),
+  };
 }
 
 export function parseManifestContent(text: string, manifestUrl: string): ParsedManifestTracks | null {

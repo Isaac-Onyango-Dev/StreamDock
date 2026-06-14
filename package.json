@@ -7,17 +7,21 @@
   "author": "Isaac Onyango",
   "license": "MIT",
   "scripts": {
-    "dev:main": "esbuild electron/main.ts --bundle --platform=node --format=cjs --outfile=dist-electron/main.cjs --external:electron --external:electron-log && esbuild electron/preload.ts --bundle --platform=node --format=cjs --outfile=dist-electron/preload.cjs --external:electron",
-    "dev": "concurrently \"vite --host 127.0.0.1\" \"npm run dev:main && wait-on http://127.0.0.1:5173 && cross-env NODE_ENV=development electron .\"",
+    "dev:main": "esbuild electron/main.ts --bundle --platform=node --format=cjs --outfile=dist-electron/main.cjs --external:electron --external:electron-log",
+    "dev:preload": "esbuild electron/preload.ts --bundle --platform=node --format=cjs --outfile=dist-electron/preload.cjs --external:electron",
+    "dev:main:watch": "esbuild electron/main.ts --bundle --platform=node --format=cjs --outfile=dist-electron/main.cjs --external:electron --external:electron-log --watch",
+    "dev:preload:watch": "esbuild electron/preload.ts --bundle --platform=node --format=cjs --outfile=dist-electron/preload.cjs --external:electron --watch",
+    "dev": "concurrently \"vite --host 127.0.0.1\" \"npm run dev:main && npm run dev:preload && wait-on http://127.0.0.1:5173 && cross-env NODE_ENV=development electron .\" \"npm run dev:main:watch\" \"npm run dev:preload:watch\"",
     "build": "tsx scripts/build.ts && electron-builder",
     "build:app": "tsx scripts/build.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit -p tsconfig.renderer.json && tsc --noEmit -p tsconfig.electron.json",
+    "typecheck:renderer": "tsc --noEmit -p tsconfig.renderer.json",
+    "typecheck:electron": "tsc --noEmit -p tsconfig.electron.json",
     "verify:engine": "tsx scripts/verify-engine.ts",
     "download:binaries": "tsx scripts/download-binaries.ts",
     "download:plugins": "tsx scripts/download-plugins.ts"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "^4.7.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "electron-log": "^5.4.3",
@@ -28,6 +32,7 @@
     "tailwind-merge": "^3.3.0"
   },
   "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
     "@types/node": "^22.15.21",
     "@types/react": "^18.3.21",
     "@types/react-dom": "^18.3.7",

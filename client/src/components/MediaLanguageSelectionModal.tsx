@@ -1,43 +1,50 @@
 import { X } from 'lucide-react';
-import type { MediaTrackProbe, DownloadPackagingMode, SubtitleFormat } from '../lib/types';
+import type { MediaTrackProbe, DownloadPackagingMode, SubtitleFormat, StreamOption, StreamOptionsProbeResult } from '../lib/types';
 import { MediaLanguagePanel } from './MediaLanguagePanel';
 
 interface MediaLanguageSelectionModalProps {
-    probe: MediaTrackProbe;
+    probe?: MediaTrackProbe;
+    streamOptions?: StreamOptionsProbeResult;
     selectedAudioId: string | null;
     selectedSubtitleIds: Set<string>;
     subtitleMode: 'none' | 'embed' | 'sidecar';
     subtitleConvert: 'original' | 'srt' | 'vtt';
     subsOnly: boolean;
     packagingMode: DownloadPackagingMode;
+    selectedStreamOption?: string;
     onAudioSelect: (id: string | null) => void;
     onSubtitleToggle: (id: string) => void;
     onSubtitleModeChange: (mode: 'none' | 'embed' | 'sidecar') => void;
     onSubtitleConvertChange: (format: 'original' | 'srt' | 'vtt') => void;
     onSubsOnlyChange: (value: boolean) => void;
+    onStreamOptionSelect?: (manifestUrl: string) => void;
     onConfirm: () => void;
     onCancel: () => void;
 }
 
 export function MediaLanguageSelectionModal({
     probe,
+    streamOptions,
     selectedAudioId,
     selectedSubtitleIds,
     subtitleMode,
     subtitleConvert,
     subsOnly,
     packagingMode,
+    selectedStreamOption,
     onAudioSelect,
     onSubtitleToggle,
     onSubtitleModeChange,
     onSubtitleConvertChange,
     onSubsOnlyChange,
+    onStreamOptionSelect,
     onConfirm,
     onCancel,
 }: MediaLanguageSelectionModalProps) {
-    const hasAudio = probe.audioTracks.length > 0;
-    const hasSubs = probe.subtitleTracks.length > 0;
+    const hasAudio = (probe?.audioTracks?.length ?? 0) > 0;
+    const hasSubs = (probe?.subtitleTracks?.length ?? 0) > 0;
     const hasAlternateTracks = hasAudio || hasSubs;
+    const hasStreamOptions = streamOptions?.options && streamOptions.options.length > 1;
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-[2px] animate-fade-in">
@@ -45,7 +52,7 @@ export function MediaLanguageSelectionModal({
                 {/* Header */}
                 <div className="flex items-center justify-between border-b border-border-subtle px-4 py-3">
                     <h2 className="text-sm font-semibold text-text-primary">
-                        {hasAlternateTracks ? 'Select Languages & Subtitles' : 'Probe Details'}
+                        {hasStreamOptions ? 'Select Stream Language' : hasAlternateTracks ? 'Select Languages & Subtitles' : 'Probe Details'}
                     </h2>
                     <button type="button" onClick={onCancel} className="btn-icon" aria-label="Close">
                         <X className="h-4 w-4" />
@@ -54,22 +61,51 @@ export function MediaLanguageSelectionModal({
 
                 {/* Content */}
                 <div className="flex-1 overflow-y-auto px-4 py-3 custom-scrollbar">
-                    <MediaLanguagePanel
-                        probe={probe}
-                        selectedAudioId={selectedAudioId}
-                        selectedSubtitleIds={selectedSubtitleIds}
-                        subtitleMode={subtitleMode}
-                        subtitleConvert={subtitleConvert}
-                        subsOnly={subsOnly}
-                        packagingMode={packagingMode}
-                        onAudioSelect={onAudioSelect}
-                        onSubtitleToggle={onSubtitleToggle}
-                        onSubtitleModeChange={onSubtitleModeChange}
-                        onSubtitleConvertChange={onSubtitleConvertChange}
-                        onSubsOnlyChange={onSubsOnlyChange}
-                    />
+                    {hasStreamOptions && onStreamOptionSelect && (
+                        <section className="mb-4 space-y-2">
+                            <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-text-secondary">
+                                <span>Stream language</span>
+                            </div>
+                            <div className="space-y-1">
+                                {streamOptions!.options.map((option) => (
+                                    <label
+                                        key={option.manifestUrl}
+                                        className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-surface-3"
+                                    >
+                                        <input
+                                            type="radio"
+                                            name="stream-option"
+                                            checked={selectedStreamOption === option.manifestUrl}
+                                            onChange={() => onStreamOptionSelect(option.manifestUrl)}
+                                            className="accent-accent"
+                                        />
+                                        <span className="min-w-0 flex-1 truncate text-text-primary">{option.label}</span>
+                                        {option.isDefault && <span className="badge bg-surface-3 text-text-secondary">Default</span>}
+                                        <span className="badge bg-surface-3 text-text-disabled">{option.manifestType.toUpperCase()}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </section>
+                    )}
 
-                    {probe.audioTracks.length === 0 && probe.subtitleTracks.length === 0 && (
+                    {probe && (
+                        <MediaLanguagePanel
+                            probe={probe}
+                            selectedAudioId={selectedAudioId}
+                            selectedSubtitleIds={selectedSubtitleIds}
+                            subtitleMode={subtitleMode}
+                            subtitleConvert={subtitleConvert}
+                            subsOnly={subsOnly}
+                            packagingMode={packagingMode}
+                            onAudioSelect={onAudioSelect}
+                            onSubtitleToggle={onSubtitleToggle}
+                            onSubtitleModeChange={onSubtitleModeChange}
+                            onSubtitleConvertChange={onSubtitleConvertChange}
+                            onSubsOnlyChange={onSubsOnlyChange}
+                        />
+                    )}
+
+                    {probe && probe.audioTracks.length === 0 && probe.subtitleTracks.length === 0 && (
                         <div className="space-y-2 rounded-md border border-border-subtle bg-surface-2 p-3">
                             <p className="text-sm text-text-secondary">No alternate audio or subtitle tracks detected for this source.</p>
                             {probe.notes.length > 0 && (
@@ -104,7 +140,7 @@ export function MediaLanguageSelectionModal({
                         onClick={onConfirm}
                         className="btn-primary flex-1"
                     >
-                        {hasAlternateTracks ? 'Confirm & Download' : 'Proceed with Default'}
+                        {hasStreamOptions ? 'Confirm & Download' : hasAlternateTracks ? 'Confirm & Download' : 'Proceed with Default'}
                     </button>
                 </div>
             </div>

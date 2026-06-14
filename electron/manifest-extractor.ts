@@ -368,23 +368,23 @@ async function tryAnikotoApi(pageUrl: string): Promise<ApiProbeResult | null> {
   }
 
   // Robustly extract episodeListUrl from ANY script or variable
-  let epListMatch: (RegExpMatchArray | Array<string | null> | null) = 
-    pageHtml.match(/episodeListUrl\s*[:=]\s*['"]([^'"]+)['"]/i) || 
+  let epListMatch: (RegExpMatchArray | Array<string | null> | null) =
+    pageHtml.match(/episodeListUrl\s*[:=]\s*['"]([^'"]+)['"]/i) ||
     pageHtml.match(/["']url["']\s*[:=]\s*['"]([^'"]+episode[^'"]+)['"]/i);
-  
+
   if (!epListMatch) {
     log.warn('[manifest-extractor] anikoto: episode list URL not found, scanning for backup patterns...');
     // Fallback 1: try to find any URL that looks like an API call for episodes
     const backupMatch = pageHtml.match(/https?:\/\/[^"'\s]+?\/api\/[^"'\s]+?episode[^"'\s]*/i);
     if (backupMatch) {
-       epListMatch = [null, backupMatch[0]];
+      epListMatch = [null, backupMatch[0]];
     } else {
-       // Fallback 2: Brute force search for any JSON in <script> tags that has a .cz or .site URL
-       const scripts = pageHtml.match(/<script\b[^>]*>([\s\S]*?)<\/script>/gi) || [];
-       for (const s of scripts) {
-         const m = s.match(/https?:\/\/[^"'\s]+?episode[^"'\s]*/i);
-         if (m) { epListMatch = [null, m[0]]; break; }
-       }
+      // Fallback 2: Brute force search for any JSON in <script> tags that has a .cz or .site URL
+      const scripts = pageHtml.match(/<script\b[^>]*>([\s\S]*?)<\/script>/gi) || [];
+      for (const s of scripts) {
+        const m = s.match(/https?:\/\/[^"'\s]+?episode[^"'\s]*/i);
+        if (m) { epListMatch = [null, m[0]]; break; }
+      }
     }
   }
 
@@ -442,7 +442,7 @@ async function fetchMapperApi(
     const data = JSON.parse(json);
     // Recursive search for anything that looks like a playable URL
     let foundUrl: string | null = null;
-    
+
     const findMedia = (obj: any) => {
       if (!obj || foundUrl) return;
       if (typeof obj === 'string') {
@@ -470,7 +470,7 @@ async function fetchMapperApi(
     };
 
     findMedia(data);
-    
+
     if (foundUrl) {
       log.info(`[manifest-extractor] anikoto: found media URL via API: ${foundUrl}`);
       // If it's an embed page, resolve it
@@ -488,7 +488,7 @@ async function fetchMapperApi(
       }
       return { url: foundUrl, referer: 'https://anikoto.cz/' };
     }
-    
+
     return null;
   } catch (e) {
     return null;
@@ -638,7 +638,7 @@ async function probeOnce(
       if (settled) return;
       settled = true;
       if (reloadTimer) clearTimeout(reloadTimer);
-      try { if (preloadPath) rmSync(preloadPath, { force: true }); } catch {}
+      try { if (preloadPath) rmSync(preloadPath, { force: true }); } catch { }
       cleanup();
       resolve(result);
     };
@@ -673,7 +673,7 @@ async function probeOnce(
     const cleanup = () => {
       clearTimeout(timeout);
       try { win.destroy(); } catch { /* already gone */ }
-      probeSession.clearStorageData().catch(() => {});
+      probeSession.clearStorageData().catch(() => { });
     };
 
     // Spoof user-agent
@@ -726,60 +726,113 @@ async function probeOnce(
         // Scroll to trigger lazy-loaded content
         window.scrollTo({ top: document.body.scrollHeight * 0.4, behavior: 'instant' });
         setTimeout(() => window.scrollTo({ top: 0, behavior: 'instant' }), 1500);
-      `).catch(() => {});
+      `).catch(() => { });
     });
 
-    // Intercept all outgoing requests and look for manifest URLs.
-    // Also watch for known video CDNs and segment patterns.
+    // Intercept requests and responses. Use separate handlers for:
+    //  - onBeforeRequest: fast-path manifest detection and optional cancel
+    //  - onBeforeSendHeaders: ensure UA/Accept-Language headers
+    //  - onHeadersReceived: inspect JSON API responses via filterResponseData
     let apiFetchAttempted = false;
-    probeSession.webRequest.onBeforeSendHeaders((details, callback) => {
-      const headers = { ...details.requestHeaders };
-      if (!headers['Accept-Language']) {
-        headers['Accept-Language'] = 'en-US,en;q=0.9';
-      }
 
-      if (!settled) {
-        const referer = headers['Referer'] || headers['referer'] || pageUrl;
+    // Fast-path: detect direct manifest requests and CDN-hosted manifests
+    probeSession.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
+      try {
+        if (settled) { callback({ cancel: true }); return; }
         const match = details.url.match(MANIFEST_PATTERN);
         if (match) {
           const type = match[1].toLowerCase() as ManifestResult['type'];
           log.info(`[manifest-extractor] Found ${type} manifest: ${details.url}`);
-          callback({ cancel: true, requestHeaders: headers });
-          finish({ originalUrl: pageUrl, manifestUrl: details.url, type, referer });
+          // Cancel the request to avoid letting the player consume it
+          callback({ cancel: true });
+          finish({ originalUrl: pageUrl, manifestUrl: details.url, type, referer: pageUrl });
           return;
         }
 
-        // Check for known video CDNs (e.g. s2.cinewave2.site) that host HLS manifests.
-        // We only return if it looks like a real manifest file, otherwise we let
-        // the browser load it and catch the sub-request.
         if (KNOWN_CDNS.some((cdn) => details.url.includes(cdn)) && (MANIFEST_PATTERN.test(details.url) || details.url.includes('/hls/'))) {
           log.info(`[manifest-extractor] Found CDN manifest: ${details.url}`);
-          callback({ cancel: true, requestHeaders: headers });
-          finish({ originalUrl: pageUrl, manifestUrl: details.url, type: 'm3u8', referer });
+          callback({ cancel: true });
+          finish({ originalUrl: pageUrl, manifestUrl: details.url, type: 'm3u8', referer: pageUrl });
           return;
         }
 
-        // Check for known API domains — the manifest URL is often embedded
-        // in the JSON response and never requested separately.
-        if (!apiFetchAttempted && API_DOMAINS.some((d) => details.url.includes(d))) {
-          apiFetchAttempted = true;
-          log.info(`[manifest-extractor] Scheduling API fetch: ${details.url}`);
-          fetchAndFindManifest(pageUrl, details.url).then((manifestUrl) => {
-            if (settled || !manifestUrl) return;
-            const type = mediaTypeFromUrl(manifestUrl) || 'm3u8';
-            log.info(`[manifest-extractor] Found manifest via API response: ${manifestUrl}`);
-            const embedOrigin = new URL(details.url).origin + '/';
-            finish({ originalUrl: pageUrl, manifestUrl, type, referer: embedOrigin });
-          });
-        }
-
-        // Also check for segment patterns that might lead back to the manifest
+        // Heuristic: if this looks like a segment list or API that might contain
+        // manifest info, note it for potential background fetches.
         if (!apiFetchAttempted && SEGMENT_PATTERN.test(details.url) && !details.url.includes('.ts') && !details.url.includes('.m4s')) {
           log.info(`[manifest-extractor] Possible manifest via pattern: ${details.url}`);
         }
+      } catch (e) {
+        // swallow
       }
-      if (settled) { callback({ cancel: true, requestHeaders: headers }); return; }
-      callback({ cancel: false, requestHeaders: headers });
+      callback({});
+    });
+
+    // Ensure outgoing headers include Accept-Language / User-Agent
+    probeSession.webRequest.onBeforeSendHeaders({ urls: ['<all_urls>'] }, (details, callback) => {
+      try {
+        const headers = { ...details.requestHeaders } as Record<string, string>;
+        if (!headers['Accept-Language'] && !headers['accept-language']) headers['Accept-Language'] = 'en-US,en;q=0.9';
+        if (!headers['User-Agent'] && !headers['user-agent']) headers['User-Agent'] = SPOOF_UA;
+        callback({ requestHeaders: headers });
+        return;
+      } catch (e) {
+        callback({});
+        return;
+      }
+    });
+
+    // Inspect JSON responses for embedded manifest URLs using a response filter
+    probeSession.webRequest.onHeadersReceived({ urls: ['<all_urls>'] }, (details, callback) => {
+      try {
+        const rawCt = (details.responseHeaders && (details.responseHeaders['content-type'] || details.responseHeaders['Content-Type'])) || [];
+        const ct = Array.isArray(rawCt) ? rawCt[0] : (rawCt || '');
+        const isJson = /application\/(json|javascript)|text\/json|text\/plain/i.test(String(ct)) || API_DOMAINS.some(d => details.url.includes(d));
+
+        if (isJson) {
+          try {
+            // @ts-expect-error - filterResponseData is an Electron API that may not be fully typed
+            const filter = probeSession.webRequest.filterResponseData(details.requestId);
+            const chunks: Buffer[] = [];
+            filter.on('data', (chunk: Buffer) => {
+              chunks.push(Buffer.from(chunk));
+              filter.write(chunk);
+            });
+            filter.on('end', () => {
+              try {
+                const body = Buffer.concat(chunks).toString('utf8');
+                // quick regex search for manifest URLs
+                const m = body.match(/(https?:\/\/[^\s"'<>{},]+?\.(?:m3u8|mpd|mp4)[^\s"'<>}]*)/i);
+                if (m && !settled) {
+                  const manifestUrl = m[1];
+                  const type = mediaTypeFromUrl(manifestUrl) || 'm3u8';
+                  log.info(`[manifest-extractor] Found manifest in API response: ${manifestUrl}`);
+                  const embedOrigin = new URL(details.url).origin + '/';
+                  finish({ originalUrl: pageUrl, manifestUrl, type, referer: embedOrigin });
+                }
+              } catch (e) {
+                // ignore parse errors
+              } finally {
+                filter.end();
+              }
+            });
+          } catch (e) {
+            // filterResponseData not supported or failed — fall back to background fetch
+            if (!apiFetchAttempted && API_DOMAINS.some((d) => details.url.includes(d))) {
+              apiFetchAttempted = true;
+              fetchAndFindManifest(pageUrl, details.url).then((manifestUrl) => {
+                if (settled || !manifestUrl) return;
+                const type = mediaTypeFromUrl(manifestUrl) || 'm3u8';
+                log.info(`[manifest-extractor] Found manifest via API response fetch: ${manifestUrl}`);
+                const embedOrigin = new URL(details.url).origin + '/';
+                finish({ originalUrl: pageUrl, manifestUrl, type, referer: embedOrigin });
+              }).catch(() => { });
+            }
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+      callback({});
     });
 
     // Handle navigation / load failures gracefully.
@@ -807,7 +860,7 @@ async function probeOnce(
             finish(found);
             return;
           }
-        }).catch(() => {});
+        }).catch(() => { });
 
         reloadTimer = setTimeout(() => {
           if (settled) return;
@@ -823,7 +876,7 @@ async function probeOnce(
                 finish(found);
                 return;
               }
-            }).catch(() => {});
+            }).catch(() => { });
 
             reloadTimer = setTimeout(() => {
               if (!settled) {
@@ -832,7 +885,7 @@ async function probeOnce(
               }
             }, POST_LOAD_WAIT_MS);
           });
-          win.loadURL(pageUrl).catch(() => {});
+          win.loadURL(pageUrl).catch(() => { });
         }, POST_LOAD_WAIT_MS);
       });
     } else {
@@ -847,7 +900,7 @@ async function probeOnce(
             finish(found);
             return;
           }
-        }).catch(() => {});
+        }).catch(() => { });
 
         reloadTimer = setTimeout(() => {
           if (!settled) finish(null);

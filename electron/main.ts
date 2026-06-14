@@ -1,5 +1,5 @@
 // Role: StreamDock Electron main process — window lifecycle, IPC, logging, crash handling.
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell, nativeImage, Notification, Tray } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell, nativeImage, Notification, Tray, net } from 'electron';
 import type { OpenDialogOptions, MenuItemConstructorOptions } from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
@@ -9,10 +9,131 @@ import { DownloadEngine, type DownloadRequest } from './download-engine';
 import { analyzeUrl } from './url-router';
 import { inspectUrl } from './playlist-inspector';
 import { probeMediaTracks } from './media-track-probe';
+import { probeStreamOptions } from './stream-options-probe';
 import { getBinaryStatus, resolveUpdatableYtDlpCommand, resolveYtDlpCommand } from './binary-resolver';
 import { toUserError } from './error-translator';
 import { checkYtDlpVersion } from './version-checker';
 import { installCrashReporter } from './crash-reporter';
+
+const BING_CACHE_DIR = join(app.getPath('userData'), 'backgrounds');
+const BING_API_URL = 'https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=en-US';
+
+let bingRefreshTimer: NodeJS.Timeout | null = null;
+let lastBingRefresh = 0;
+
+function getBingCacheInfo() {
+  const cacheFile = join(BING_CACHE_DIR, 'bing-daily.json');
+  if (existsSync(cacheFile)) {
+    try {
+      const data = JSON.parse(readFileSync(cacheFile, 'utf-8'));
+      // Migrate old format {date: string} to {timestamp: number}
+      if (data.date && !data.timestamp) {
+        data.timestamp = new Date(data.date).getTime();
+      }
+      return data;
+    } catch {}
+  }
+  return { timestamp: 0, url: null };
+}
+
+async function fetchBingDailyImage(force = false): Promise<string | null> {
+  try {
+    if (!existsSync(BING_CACHE_DIR)) mkdirSync(BING_CACHE_DIR, { recursive: true });
+    const cacheFile = join(BING_CACHE_DIR, 'bing-daily.json');
+    const settings = persistence.getSettings();
+    const intervalMs = (settings.bingRefreshInterval || 24) * 3600000;
+    
+    const cached = getBingCacheInfo();
+    const now = Date.now();
+    
+    // Return cached if not forced and interval hasn't passed
+    if (!force && cached.url && (now - cached.timestamp < intervalMs)) {
+      log.info('[background] Using cached Bing image');
+      lastBingRefresh = cached.timestamp;
+      return cached.url;
+    }
+
+    const response = await fetch(BING_API_URL);
+    const data = await response.json() as { images?: Array<{ url: string }> };
+    const image = data?.images?.[0];
+    if (!image?.url) return null;
+
+    const fullUrl = `https://www.bing.com${image.url}`;
+    lastBingRefresh = now;
+    writeFileSync(cacheFile, JSON.stringify({ timestamp: now, url: fullUrl }), 'utf-8');
+    log.info('[background] Fetched new Bing daily image');
+    return fullUrl;
+  } catch (err) {
+    log.warn('[background] Failed to fetch Bing image:', err);
+    return null;
+  }
+}
+
+function scheduleBingRefresh() {
+  if (bingRefreshTimer) {
+    clearTimeout(bingRefreshTimer);
+    bingRefreshTimer = null;
+  }
+  
+  const settings = persistence.getSettings();
+  if (settings.backgroundMode !== 'bing') return;
+  
+  const intervalMs = (settings.bingRefreshInterval || 24) * 3600000;
+  const cached = getBingCacheInfo();
+  lastBingRefresh = cached.timestamp || Date.now();
+  
+  const timeSinceLastRefresh = Date.now() - lastBingRefresh;
+  const timeUntilNext = Math.max(0, intervalMs - timeSinceLastRefresh);
+  
+  log.info(`[background] Next Bing refresh scheduled in ${Math.round(timeUntilNext/60000)} minutes`);
+  
+  bingRefreshTimer = setTimeout(async () => {
+    const url = await fetchBingDailyImage(true);
+    if (url) {
+      persistence.updateSettings({ backgroundImageUrl: url });
+    }
+    scheduleBingRefresh(); // loop
+  }, timeUntilNext);
+}
+
+// Clipboard watcher
+let clipboardWatcherInterval: NodeJS.Timeout | null = null;
+let lastClipboardText = '';
+
+function startClipboardWatcher(): void {
+  if (clipboardWatcherInterval) return;
+  
+  lastClipboardText = clipboard.readText() || '';
+  log.info('[clipboard] Watcher started');
+  
+  clipboardWatcherInterval = setInterval(() => {
+    try {
+      const text = clipboard.readText() || '';
+      if (text !== lastClipboardText) {
+        lastClipboardText = text;
+        const urls = text.match(/https?:\/\/[^\s]+/g);
+        if (urls && urls.length > 0) {
+          const firstUrl = urls[0];
+          log.info('[clipboard] URL detected:', firstUrl);
+          // Send to all renderer windows
+          BrowserWindow.getAllWindows().forEach((win) => {
+            win.webContents.send(IPC.EVENT_CLIPBOARD_URL, { url: firstUrl, sourceText: text });
+          });
+        }
+      }
+    } catch (err) {
+      log.warn('[clipboard] Watcher error:', err);
+    }
+  }, 1000);
+}
+
+function stopClipboardWatcher(): void {
+  if (clipboardWatcherInterval) {
+    clearInterval(clipboardWatcherInterval);
+    clipboardWatcherInterval = null;
+    log.info('[clipboard] Watcher stopped');
+  }
+}
 
 // ── Configure electron-log (GOAL 9) ──────────────────────────────────────────
 log.transports.file.level = 'debug';
@@ -101,6 +222,10 @@ function setupIpc(): void {
     if (typeof updates.maxConcurrent === 'number') {
       engine.setMaxConcurrent(updates.maxConcurrent);
     }
+    // Update interval timer if related settings changed
+    if (updates.bingRefreshInterval !== undefined || updates.backgroundMode !== undefined) {
+      scheduleBingRefresh();
+    }
     return next;
   });
 
@@ -115,6 +240,16 @@ function setupIpc(): void {
 
   // ── Clipboard ──────────────────────────────────────────────────────────────
   ipcMain.handle(IPC.CLIPBOARD_READ_TEXT, () => clipboard.readText());
+  
+  ipcMain.handle(IPC.CLIPBOARD_WATCHER_START, () => {
+    startClipboardWatcher();
+    return true;
+  });
+  
+  ipcMain.handle(IPC.CLIPBOARD_WATCHER_STOP, () => {
+    stopClipboardWatcher();
+    return true;
+  });
 
   // ── URL Analysis ───────────────────────────────────────────────────────────
   ipcMain.handle(IPC.URL_ANALYZE, (_event, url: string) => {
@@ -136,6 +271,13 @@ function setupIpc(): void {
       return { success: true, data: await probeMediaTracks(payload) };
     } catch (error) {
       return { success: false, error: toUserError(error) };
+    }
+  });
+  ipcMain.handle(IPC.STREAM_OPTIONS_PROBE, async (_event, pageUrl: string) => {
+    try {
+      return await probeStreamOptions(pageUrl);
+    } catch (error) {
+      return { success: false, url: pageUrl, options: [], error: toUserError(error) };
     }
   });
 
@@ -266,6 +408,15 @@ function setupIpc(): void {
       });
       n.show();
     }
+  });
+
+  // ── Background ──────────────────────────────────────────────────────────────
+  ipcMain.handle(IPC.BACKGROUND_GET_BING_IMAGE, async () => {
+    return await fetchBingDailyImage(true);
+  });
+  
+  ipcMain.handle(IPC.BACKGROUND_GET_BING_INFO, async () => {
+    return { lastRefresh: lastBingRefresh || getBingCacheInfo().timestamp };
   });
 
   // ── Active Count / Tray Badge ──────────────────────────────────────────────
@@ -424,6 +575,7 @@ function setupBeforeQuit(): void {
 }
 
 app.whenReady().then(async () => {
+  scheduleBingRefresh();
   log.info(`Starting StreamDock v${app.getVersion()}`);
 
   // Configure electron-log file path
@@ -435,6 +587,7 @@ app.whenReady().then(async () => {
   const settings = persistence.getSettings();
   if (settings.maxConcurrent) engine.setMaxConcurrent(settings.maxConcurrent);
   hasOnboarded = !!settings.hasOnboarded;
+  if (settings.clipboardWatcher) startClipboardWatcher();
 
   buildAppMenu();
   setupIpc();

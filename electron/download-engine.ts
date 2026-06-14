@@ -62,6 +62,10 @@ export interface DownloadRequest {
   subsOnly?: boolean;
   /** User-selected packaging mode from language UI */
   downloadPackaging?: 'video-only' | 'video-audio' | 'video-subs' | 'video-audio-subs' | 'video-multi-subs' | 'subs-only';
+  /** User-selected manifest URL from stream options probe (for language-specific streams) */
+  manifestUrl?: string;
+  /** Referer URL for the selected manifest (for sites that require it) */
+  manifestReferer?: string;
 }
 
 export interface DownloadRecord {
@@ -599,7 +603,20 @@ export class DownloadEngine {
     const originalPageUrl = request.url;
     let referer: string | undefined;
 
-    if (matchesProbeHost(host)) {
+    // If user selected a specific manifest URL from stream options probe, use it directly
+    if (request.manifestUrl) {
+      log.info(`[engine] Using user-selected manifest URL: ${request.manifestUrl}`);
+      spawnUrl = request.manifestUrl;
+      referer = request.manifestReferer;
+      const isActuallyStream = request.mode === 'stream';
+      request = { ...request, url: spawnUrl };
+      task.request = request;
+      task.manifestAttempted = true;
+
+      if (isActuallyStream) {
+        record.title = 'Live stream capture';
+      }
+    } else if (matchesProbeHost(host)) {
       record.title = 'Extracting stream manifest…';
       this.emitProgress(record);
 
@@ -612,16 +629,16 @@ export class DownloadEngine {
           log.info(`[engine] Manifest extraction successful: ${result.manifestUrl}`);
           spawnUrl = result.manifestUrl;
           referer = result.referer;
-          
+
           // Only force 'stream' naming if the original request was actually a stream.
-          // VODs (like anime episodes) should stay as 'video' so they don't get 
+          // VODs (like anime episodes) should stay as 'video' so they don't get
           // named "StreamDock Stream...".
           const isActuallyStream = request.mode === 'stream';
           request = { ...request, url: spawnUrl };
           task.request = request;
           task.manifestAttempted = true;
           task.cookiesFile = result.cookiesFile;
-          
+
           if (isActuallyStream) {
             record.title = 'Live stream capture';
           }
