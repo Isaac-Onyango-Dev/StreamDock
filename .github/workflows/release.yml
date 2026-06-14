@@ -1,17 +1,16 @@
-# .github/workflows/release.yml
 name: Build & Release
 
 on:
   push:
     tags:
-      - 'v*'   # fires on v1.0.3, v1.1.0, v2.0.0, etc.
+      - 'v*'
 
 permissions:
-  contents: write  # required to create releases and upload assets
+  contents: write
 
 jobs:
   build-and-release:
-    runs-on: windows-latest  # Electron Windows builds must run on Windows
+    runs-on: windows-latest
 
     steps:
       - name: Checkout code
@@ -28,16 +27,14 @@ jobs:
 
       - name: Build Electron app
         run: npm run build
-        # This should produce dist/StreamDock.Setup.X.X.X.exe
-        # Adjust the build script name if yours differs
 
       - name: Create GitHub Release & Upload Assets
         uses: softprops/action-gh-release@v2
         with:
           name: "StreamDock ${{ github.ref_name }}"
-          generate_release_notes: true   # auto-generates notes from commits
+          generate_release_notes: true
           files: |
-            dist/*.exe
-            dist/*.zip
-            dist/latest.yml
+            release/*.exe
+            release/*.zip
+            release/latest.yml
           fail_on_unmatched_files: false
