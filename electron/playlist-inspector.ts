@@ -13,6 +13,11 @@ export interface PlaylistProbeItem {
   thumbnail?: string;
 }
 
+export interface QualityOption {
+  height: number;
+  label: string;
+}
+
 export interface PlaylistProbe {
   url: string;
   host: string;
@@ -20,6 +25,7 @@ export interface PlaylistProbe {
   support: ProbeSupport;
   itemCount: number;
   preview: PlaylistProbeItem[];
+  qualityOptions?: QualityOption[];
   thumbnail?: string;
   extractor?: string;
   isLive: boolean;
@@ -37,6 +43,11 @@ interface YtDlpInfo {
   live_status?: string;
   duration?: number;
   thumbnail?: string;
+  formats?: Array<{
+    height?: number;
+    vcodec?: string;
+    protocol?: string;
+  }>;
   entries?: Array<YtDlpInfo | null>;
 }
 
@@ -151,6 +162,7 @@ function parseInfo(url: string, stdout: string): PlaylistProbe {
     support,
     itemCount,
     preview: entries.length > 0 ? entries.slice(0, PREVIEW_LIMIT).map(toItem) : [toItem(info, 0)],
+    qualityOptions: entries.length === 0 ? extractQualityOptions(info) : undefined,
     thumbnail: info.thumbnail,
     extractor: info.extractor_key || info.extractor,
     isLive: info.live_status === 'is_live',
@@ -160,6 +172,21 @@ function parseInfo(url: string, stdout: string): PlaylistProbe {
         : 'Metadata probe completed.',
     ],
   };
+}
+
+function extractQualityOptions(info: YtDlpInfo): QualityOption[] | undefined {
+  const heights = new Set<number>();
+
+  for (const format of info.formats || []) {
+    const height = Number(format.height);
+    if (!Number.isFinite(height) || height <= 0) continue;
+    if (!format.vcodec || format.vcodec === 'none') continue;
+    heights.add(height);
+  }
+
+  const sorted = Array.from(heights).sort((a, b) => b - a);
+  if (sorted.length === 0) return undefined;
+  return sorted.map((height) => ({ height, label: `${height}p` }));
 }
 
 function fallbackProbe(url: string, reason: string): PlaylistProbe {
@@ -345,8 +372,10 @@ export async function inspectUrl(url: string): Promise<PlaylistProbe> {
   if (
     probe &&
     probe.support === 'direct' &&
-    hasListParam(url) &&
-    probe.preview.length <= 1
+    (
+      (hasListParam(url) && probe.preview.length <= 1) ||
+      !probe.qualityOptions?.length
+    )
   ) {
     result = await spawnProbe(url, false, FULL_PROBE_TIMEOUT_MS, ytDlpCmd);
     if (result.probe) probe = result.probe;

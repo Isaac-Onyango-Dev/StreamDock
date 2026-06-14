@@ -69,13 +69,13 @@ export function AppChrome({ currentTab, activeCount, onTabChange, children }: Ap
 
   return (
     <div
-      className={`flex h-screen overflow-hidden bg-bg transition-[filter] duration-normal ${
+      className={`flex h-screen overflow-hidden bg-transparent transition-[filter] duration-normal ${
         !isFocused ? 'brightness-[0.94] saturate-[0.85]' : ''
       }`}
     >
       {/* Icon rail */}
       <aside
-        className="flex w-[var(--nav-rail-width)] shrink-0 flex-col items-center border-r border-border bg-surface-1 py-2"
+        className="flex w-[var(--nav-rail-width)] shrink-0 flex-col items-center border-r border-border bg-chrome-rail py-2"
         aria-label="Main navigation"
       >
         <div className="mb-3 flex h-7 w-7 items-center justify-center rounded-md bg-accent/15 text-accent">
@@ -118,7 +118,7 @@ export function AppChrome({ currentTab, activeCount, onTabChange, children }: Ap
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Titlebar */}
         <header
-          className={`flex h-[var(--titlebar-height)] shrink-0 items-center justify-between border-b border-border bg-surface-1 ${
+          className={`flex h-[var(--titlebar-height)] shrink-0 items-center justify-between border-b border-border bg-chrome-rail ${
             isMac ? 'pl-[68px]' : 'pl-3'
           }`}
           style={{ WebkitAppRegion: 'drag' } as CSSProperties}
@@ -156,13 +156,13 @@ export function AppChrome({ currentTab, activeCount, onTabChange, children }: Ap
         </header>
 
         {/* Page header */}
-        <div className="shrink-0 border-b border-border-subtle bg-surface-0 px-4 py-3">
+        <div className="shrink-0 border-b border-border-subtle bg-chrome-header px-4 py-3">
           <h1 className="page-title">{copy.title}</h1>
           <p className="page-desc">{copy.description}</p>
         </div>
 
         {/* Content */}
-        <main className="min-h-0 flex-1 overflow-hidden bg-surface-0">
+        <main className="min-h-0 flex-1 overflow-hidden bg-chrome-content">
           {children}
         </main>
       </div>

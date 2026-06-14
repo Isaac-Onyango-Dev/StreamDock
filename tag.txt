@@ -1,0 +1,5 @@
+﻿v1.0.1 — Dynamic Wallpaper System
+
+First feature release. Adds Bing wallpaper integration with configurable
+auto-refresh intervals, live countdown timer, and a full custom background
+color system with persistent preferences.

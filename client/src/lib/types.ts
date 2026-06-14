@@ -18,6 +18,11 @@ export interface PlaylistProbeItem {
   thumbnail?: string;
 }
 
+export interface QualityOption {
+  height: number;
+  label: string;
+}
+
 export interface PlaylistProbe {
   url: string;
   host: string;
@@ -25,6 +30,7 @@ export interface PlaylistProbe {
   support: 'direct' | 'playlist' | 'episode-range' | 'manifest-probe' | 'unknown';
   itemCount: number;
   preview: PlaylistProbeItem[];
+  qualityOptions?: QualityOption[];
   thumbnail?: string;
   extractor?: string;
   isLive: boolean;
@@ -102,10 +108,27 @@ export interface MediaTrackProbe {
   manifestType?: 'm3u8' | 'mpd';
   audioTracks: AudioTrack[];
   subtitleTracks: SubtitleTrack[];
+  qualityOptions: QualityOption[];
   defaultAudioLanguage?: string;
   originalAudioLanguage?: string;
   notes: string[];
   source: 'manifest' | 'ytdlp' | 'combined';
+}
+
+export interface StreamOption {
+  label: string;
+  manifestUrl: string;
+  manifestType: 'm3u8' | 'mpd' | 'mp4';
+  referer?: string;
+  isDefault: boolean;
+}
+
+export interface StreamOptionsProbeResult {
+  success: boolean;
+  url: string;
+  options: StreamOption[];
+  defaultOption?: StreamOption;
+  error?: string;
 }
 
 export interface StartRequest {
@@ -131,6 +154,8 @@ export interface StartRequest {
   downloadPackaging?: DownloadPackagingMode;
 }
 
+export type BackgroundMode = 'solid' | 'bing' | 'gradient';
+
 export interface Settings {
   downloadDir: string;
   useCookies?: boolean;
@@ -138,6 +163,11 @@ export interface Settings {
   scheduledStartTime?: string | null;
   hasOnboarded?: boolean;
   densityMode?: 'comfortable' | 'compact';
+  backgroundMode?: BackgroundMode;
+  backgroundImageUrl?: string;
+  solidColorBg?: string;
+  bingRefreshInterval?: number;
+  clipboardWatcher?: boolean;
 }
 
 export type QueueStats = {

@@ -27,6 +27,7 @@ export const IPC = {
   URL_ANALYZE: 'url:analyze',
   URL_INSPECT: 'url:inspect',
   MEDIA_PROBE_TRACKS: 'media:probe-tracks',
+  STREAM_OPTIONS_PROBE: 'stream:options-probe',
 
   // Download lifecycle
   DOWNLOAD_START_VIDEO:     'download:start-video',
@@ -65,6 +66,15 @@ export const IPC = {
 
   // Native notification
   NOTIFICATION_DOWNLOAD_COMPLETE: 'notification:download-complete',
+
+  // Background
+  BACKGROUND_GET_BING_IMAGE: 'background:get-bing-image',
+  BACKGROUND_GET_BING_INFO:  'background:get-bing-info',
+
+  // Clipboard watcher
+  CLIPBOARD_WATCHER_START: 'clipboard:watch-start',
+  CLIPBOARD_WATCHER_STOP: 'clipboard:watch-stop',
+  EVENT_CLIPBOARD_URL: 'event:clipboard-url',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];

@@ -12,7 +12,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlowToggle } from '../../components/FlowToggle';
 import { MediaLanguageSelectionModal } from '../../components/MediaLanguageSelectionModal';
-import type { CaptureMode, DownloadPackagingMode, MediaTrackProbe, PlaylistProbe, UrlAnalysis } from '../../lib/types';
+import type { CaptureMode, DownloadPackagingMode, MediaTrackProbe, PlaylistProbe, StreamOptionsProbeResult, UrlAnalysis } from '../../lib/types';
 import { computePackagingMode } from '../../lib/languages';
 import { inferModeFromText } from '../../lib/url-routing';
 import { playDiscovery, playPop } from '../../lib/audio';
@@ -28,6 +28,7 @@ interface CaptureViewProps {
 type SelectionMode = 'all' | 'first' | 'range' | 'schedule';
 type AudioPreference = 'auto' | 'dub' | 'sub';
 type SubtitleMode = 'none' | 'embed' | 'sidecar';
+type QualityChoice = { label: string; value: string };
 
 function buildPlaylistItems(selection: SelectionMode, firstCount: number, rangeStart: number, rangeEnd: number) {
   if (selection === 'first') return `1-${Math.max(1, firstCount)}`;
@@ -49,6 +50,23 @@ function selectionLabel(value: SelectionMode, probe: PlaylistProbe | null) {
   if (value === 'first') return 'First N';
   if (value === 'range') return 'Range';
   return 'All';
+}
+
+function buildQualityValue(mode: CaptureMode, height: number) {
+  if (mode === 'video') {
+    return `bestvideo[height<=${height}]+bestaudio/best[height<=${height}]`;
+  }
+  return `best[height<=${height}]/best`;
+}
+
+function fallbackQualityChoices(mode: CaptureMode): QualityChoice[] {
+  const heights = [1080, 720, 480, 360];
+  const choices = heights.map((height) => ({
+    label: `${height}p`,
+    value: buildQualityValue(mode, height),
+  }));
+  choices.push({ label: 'Audio only', value: 'bestaudio/best' });
+  return choices;
 }
 
 function selectedEpisodeUrls(
@@ -110,6 +128,9 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
   const [subtitleConvert, setSubtitleConvert] = useState<'original' | 'srt' | 'vtt'>('original');
   const [subsOnly, setSubsOnly] = useState(false);
   const [showLanguageModal, setShowLanguageModal] = useState(false);
+  const [streamOptions, setStreamOptions] = useState<StreamOptionsProbeResult | null>(null);
+  const [selectedStreamOption, setSelectedStreamOption] = useState<string | null>(null);
+  const [probingStreamOptions, setProbingStreamOptions] = useState(false);
 
   useEffect(() => {
     let dragCounter = 0;
@@ -204,6 +225,8 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
     setSelectedAudioId(null);
     setSelectedSubtitleIds(new Set());
     setSubsOnly(false);
+    setStreamOptions(null);
+    setSelectedStreamOption(null);
     clearSelection();
     setQuality('');
   };
@@ -219,14 +242,52 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
       }
       console.log('[StreamDock] probeMediaTracks result:', result.data);
       setTrackProbe(result.data);
-      const defaultAudio = result.data.audioTracks.find((t) => t.isDefault) || result.data.audioTracks[0];
-      if (defaultAudio) setSelectedAudioId(defaultAudio.id);
       const defaultSubs = result.data.subtitleTracks.filter((t) => t.isDefault).map((t) => t.id);
       if (defaultSubs.length > 0) setSelectedSubtitleIds(new Set(defaultSubs));
     } catch (error) {
       console.error('[StreamDock] probeMediaTracks error:', error);
     } finally {
       setProbingTracks(false);
+    }
+  }, []);
+
+  const loadStreamOptions = useCallback(async (pageUrl: string) => {
+    if (!window.streamDock?.probeStreamOptions) return;
+    setProbingStreamOptions(true);
+    try {
+      const result = await window.streamDock.probeStreamOptions(pageUrl);
+      console.log('[StreamDock] probeStreamOptions result:', result);
+      if (result.success && result.options.length > 1) {
+        setStreamOptions(result);
+        const defaultManifestUrl = result.defaultOption?.manifestUrl || result.options[0].manifestUrl;
+        setSelectedStreamOption(defaultManifestUrl);
+        // Probe tracks for the default stream option's manifest
+        if (window.streamDock?.probeMediaTracks && defaultManifestUrl !== pageUrl) {
+          setProbingTracks(true);
+          try {
+            const trackResult = await window.streamDock.probeMediaTracks({ pageUrl: defaultManifestUrl, manifestUrl: defaultManifestUrl });
+            if (trackResult?.success) {
+              setTrackProbe(trackResult.data);
+              const defaultSubs = trackResult.data.subtitleTracks.filter((t) => t.isDefault).map((t) => t.id);
+              if (defaultSubs.length > 0) setSelectedSubtitleIds(new Set(defaultSubs));
+              setSelectedAudioId(null);
+            }
+          } catch (error) {
+            console.error('[StreamDock] probeMediaTracks for default stream option error:', error);
+          } finally {
+            setProbingTracks(false);
+          }
+        }
+      } else {
+        setStreamOptions(null);
+        setSelectedStreamOption(null);
+      }
+    } catch (error) {
+      console.error('[StreamDock] probeStreamOptions error:', error);
+      setStreamOptions(null);
+      setSelectedStreamOption(null);
+    } finally {
+      setProbingStreamOptions(false);
     }
   }, []);
 
@@ -253,6 +314,30 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
     }),
     [subsOnly, selectedAudioLanguage, selectedSubtitleLanguages],
   );
+
+  const qualityChoices = useMemo(() => {
+    const detectedHeights = Array.from(
+      new Set([
+        ...(probe?.qualityOptions || []).map((option) => option.height),
+        ...(trackProbe?.qualityOptions || []).map((option) => option.height),
+      ].filter((height) => height > 0)),
+    ).sort((a, b) => b - a);
+
+    if (detectedHeights.length === 0) return fallbackQualityChoices(mode);
+
+    const detectedChoices = detectedHeights.map((height) => ({
+      label: `${height}p`,
+      value: buildQualityValue(mode, height),
+    }));
+    detectedChoices.push({ label: 'Audio only', value: 'bestaudio/best' });
+    return detectedChoices;
+  }, [mode, probe?.qualityOptions, trackProbe?.qualityOptions]);
+
+  useEffect(() => {
+    if (!quality) return;
+    if (qualityChoices.some((option) => option.value === quality)) return;
+    setQuality('');
+  }, [quality, qualityChoices]);
 
   const toggleSubtitleTrack = useCallback((id: string) => {
     setSelectedSubtitleIds((prev) => {
@@ -337,6 +422,10 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
         setSubtitleMode('none');
       }
       void loadMediaTracks(current.url);
+      // For stream mode or anime sites, probe for separate language manifest URLs
+      if (mode === 'stream' || ['anikoto', 'animepahe', 'hianime', 'gojoora', 'everythingmoe'].some(h => current.host.includes(h))) {
+        void loadStreamOptions(current.url);
+      }
       return result.data;
     } catch (error) {
       onError(error instanceof Error ? error.message : String(error));
@@ -412,18 +501,20 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
           parsedScheduledAt = d.toISOString();
         }
 
-        const effectiveSubtitleMode =
-          selectedSubtitleLanguages.length > 0 ? subtitleMode : 'none';
+        // Get the selected stream option if available
+        const selectedOption = selectedStreamOption ? streamOptions?.options.find(o => o.manifestUrl === selectedStreamOption) : undefined;
+
+        const folderHint = isEpisodeRange ? probe?.title : undefined;
 
         await window.streamDock?.startDownload(mode, {
           url: batchUrl,
           outputDir,
           quality: quality || undefined,
           playlistItems: batchUrls.length > 1 ? undefined : playlistItems,
-          audioPreference: trackProbe ? 'auto' : audioPreference,
-          subtitleMode: effectiveSubtitleMode,
+          audioPreference,
+          subtitleMode,
           isPlaylist: isPlaylist && !playlistItems,
-          folderHint: probe?.title,
+          folderHint,
           titleHint,
           impersonate: impersonate || undefined,
           scheduledAt: parsedScheduledAt,
@@ -432,6 +523,8 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
           subtitleConvertFormat: subtitleConvert,
           subsOnly,
           downloadPackaging: packagingMode,
+          manifestUrl: selectedOption?.manifestUrl,
+          manifestReferer: selectedOption?.referer,
         });
       }
       setUrl('');
@@ -455,20 +548,43 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
         </div>
       )}
 
-      {showLanguageModal && trackProbe && (
+      {showLanguageModal && (trackProbe || streamOptions) && (
         <MediaLanguageSelectionModal
-          probe={trackProbe}
+          probe={trackProbe || undefined}
+          streamOptions={streamOptions || undefined}
           selectedAudioId={selectedAudioId}
           selectedSubtitleIds={selectedSubtitleIds}
           subtitleMode={subtitleMode}
           subtitleConvert={subtitleConvert}
           subsOnly={subsOnly}
           packagingMode={packagingMode}
+          selectedStreamOption={selectedStreamOption || undefined}
           onAudioSelect={setSelectedAudioId}
           onSubtitleToggle={toggleSubtitleTrack}
           onSubtitleModeChange={setSubtitleMode}
           onSubtitleConvertChange={setSubtitleConvert}
           onSubsOnlyChange={setSubsOnly}
+          onStreamOptionSelect={async (manifestUrl: string) => {
+              setSelectedStreamOption(manifestUrl);
+              // Re-probe tracks for the selected manifest URL since different languages
+              // may be on different manifest URLs (separate streams)
+              if (window.streamDock?.probeMediaTracks) {
+                setProbingTracks(true);
+                try {
+                  const result = await window.streamDock.probeMediaTracks({ pageUrl: manifestUrl, manifestUrl });
+                  if (result?.success) {
+                    setTrackProbe(result.data);
+                    const defaultSubs = result.data.subtitleTracks.filter((t) => t.isDefault).map((t) => t.id);
+                    if (defaultSubs.length > 0) setSelectedSubtitleIds(new Set(defaultSubs));
+                    setSelectedAudioId(null);
+                  }
+                } catch (error) {
+                  console.error('[StreamDock] probeMediaTracks for stream option error:', error);
+                } finally {
+                  setProbingTracks(false);
+                }
+              }
+            }}
           onConfirm={() => {
             setShowLanguageModal(false);
             void start();
@@ -537,21 +653,11 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
               className="select-field h-8 w-36"
             >
               <option value="">Best quality</option>
-              {mode === 'video' ? (
-                <>
-                  <option value="bestvideo[height<=1080]+bestaudio/best[height<=1080]">1080p</option>
-                  <option value="bestvideo[height<=720]+bestaudio/best[height<=720]">720p</option>
-                  <option value="bestvideo[height<=480]+bestaudio/best[height<=480]">480p</option>
-                  <option value="bestaudio/best">Audio only</option>
-                </>
-              ) : (
-                <>
-                  <option value="best[height<=1080]/best">1080p stream</option>
-                  <option value="best[height<=720]/best">720p stream</option>
-                  <option value="best[height<=480]/best">480p stream</option>
-                  <option value="bestaudio/best">Audio only</option>
-                </>
-              )}
+              {qualityChoices.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
             <button type="button" onClick={start} disabled={busy || probing} className="btn-primary min-w-[88px]">
               {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5 fill-current" />}
@@ -569,11 +675,29 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
         </div>
       )}
 
-      {(probingTracks || trackProbe) && (
+      {(probingTracks || trackProbe || probingStreamOptions || streamOptions) && (
         probingTracks ? (
           <div className="card card-pad flex items-center gap-2 text-sm text-text-secondary">
             <Loader2 className="h-4 w-4 animate-spin text-accent" />
             Detecting available audio and subtitle tracks…
+          </div>
+        ) : probingStreamOptions ? (
+          <div className="card card-pad flex items-center gap-2 text-sm text-text-secondary">
+            <Loader2 className="h-4 w-4 animate-spin text-accent" />
+            Detecting language stream options…
+          </div>
+        ) : streamOptions && streamOptions.options.length > 1 ? (
+          <div className="card card-pad flex items-center justify-between gap-2 animate-fade-in">
+            <div className="flex items-center gap-2 text-sm text-text-secondary">
+              <span>{streamOptions.options.length} language streams detected</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowLanguageModal(true)}
+              className="btn-secondary text-sm"
+            >
+              Select Stream
+            </button>
           </div>
         ) : trackProbe ? (
           trackProbe.audioTracks.length > 0 || trackProbe.subtitleTracks.length > 0 ? (

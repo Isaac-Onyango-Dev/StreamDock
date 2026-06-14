@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { AppChrome } from './components/AppChrome';
 import { TransferView } from './views/TransferView';
 import { ErrorBanner } from './components/ErrorBanner';
@@ -6,7 +6,7 @@ import { VersionWarningBanner } from './components/VersionWarningBanner';
 import { SettingsView } from './views/SettingsView';
 import { CaptureView } from './views/CaptureView';
 import { OverlayBus } from './components/OverlayBus';
-import type { CaptureMode, EngineStatus, Settings, Tab } from './lib/types';
+import type { CaptureMode, EngineStatus, Settings, Tab, BackgroundMode } from './lib/types';
 import { downloadStore } from './store/DownloadStore';
 import { useDownloadRecords, useActiveCount } from './store/useDownloadStore';
 
@@ -73,6 +73,15 @@ export default function App() {
           // silent
         }
       }),
+      window.streamDock?.onClipboardUrl(({ url }) => {
+        setCurrentTab('capture');
+        const urlInput = document.querySelector<HTMLInputElement>('input[name="capture-url"]');
+        if (urlInput) {
+          urlInput.value = url;
+          urlInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        downloadStore.addToast(`URL captured from clipboard: ${url}`, 'success');
+      }),
     ].filter(Boolean) as Array<() => void>;
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, []);
@@ -120,11 +129,46 @@ export default function App() {
     if (next) setSettings(next);
   };
 
+  const handleBackgroundModeChange = async (backgroundMode: BackgroundMode) => {
+    const next = await window.streamDock?.updateSettings({ backgroundMode });
+    if (next) setSettings(next);
+  };
+
+  const handleBackgroundImageUrlChange = async (backgroundImageUrl: string) => {
+    const next = await window.streamDock?.updateSettings({ backgroundImageUrl });
+    if (next) setSettings(next);
+  };
+
+  // Auto-fetch Bing daily image when mode is 'bing'
+  useEffect(() => {
+    if (settings.backgroundMode === 'bing' && window.streamDock?.getBingDailyImage) {
+      window.streamDock.getBingDailyImage().then((url) => {
+        if (url) {
+          void window.streamDock?.updateSettings({ backgroundImageUrl: url }).then((next) => {
+            if (next) setSettings(next);
+          });
+        }
+      });
+    }
+  }, [settings.backgroundMode]);
+
   const scrollableTab = currentTab !== 'transfers';
 
+  // Pass the image URL through the CSS variable so tokens.css
+  // [data-bg-mode="bing"] can pick it up via var(--bg-bing-image, none).
+  // Do NOT set backgroundImage inline — that would bypass the CSS
+  // variable system and break the gradient mode too.
+  const bgStyle = {
+    '--bg-bing-image': settings.backgroundImageUrl ? `url("${settings.backgroundImageUrl}")` : 'none',
+    '--bg-solid-color': settings.solidColorBg || undefined,
+  } as CSSProperties;
+
+  const bgMode = settings.backgroundMode ?? 'solid';
+
   return (
-    <>
+    <div data-bg-mode={bgMode} className="contents">
       <OverlayBus />
+      <div className="app-background" data-bg-mode={bgMode} style={bgStyle} />
       <AppChrome currentTab={currentTab} activeCount={activeCount} onTabChange={setCurrentTab}>
         <div
           className={`flex h-full min-h-0 flex-col px-4 py-4 ${
@@ -191,6 +235,6 @@ export default function App() {
           </div>
         </div>
       </AppChrome>
-    </>
+    </div>
   );
 }

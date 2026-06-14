@@ -1,21 +1,12 @@
 {
-  "compilerOptions": {
-    "target": "ES2022",
-    "useDefineForClassFields": true,
-    "lib": ["DOM", "DOM.Iterable", "ES2022"],
-    "allowJs": false,
-    "skipLibCheck": true,
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "strict": true,
-    "forceConsistentCasingInFileNames": true,
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": true,
-    "jsx": "react-jsx",
-    "types": ["node"]
-  },
-  "include": ["client/src", "electron", "scripts", "vite.config.ts", "tailwind.config.ts"]
+  // Root tsconfig — for IDE navigation only. Do not use for compilation.
+  // Type-checking is done per-environment:
+  //   npm run typecheck:renderer  → tsconfig.renderer.json (DOM + ESNext)
+  //   npm run typecheck:electron  → tsconfig.electron.json (Node + CommonJS)
+  //   npm run typecheck           → both, in sequence
+  "references": [
+    { "path": "./tsconfig.renderer.json" },
+    { "path": "./tsconfig.electron.json" }
+  ],
+  "files": []
 }
