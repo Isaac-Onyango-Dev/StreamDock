@@ -55,7 +55,7 @@ actual runs — full yt-dlp spawn command lines, verbatim stderr, timestamps.
 
 ## Where things stand (as of this session)
 
-Nine work sessions have happened against this repo so far.
+Twelve work sessions have happened against this repo so far.
 
 **Correcting a claim this file carried for three sessions:** sessions 5 and 6
 were *not* unpushed. Verified in session 9 — `HEAD == origin/main` and
@@ -957,8 +957,110 @@ application menu, and added the `libgtk`/`patchelf` system-dependency step to
 release.yml's Linux job — ci.yml had it, and the job that builds the artifact
 users actually download must not be the one missing it.
 
+### Session 12 — Linux verified on real hardware; three bugs the AppImage exposed
+
+**First session run from inside Ubuntu** (26.04, Wayland, on Isaac's dual-boot).
+Version 1.5.0 -> 1.6.0, pushed, and the first release to carry a Linux asset.
+
+**Testing method worth reusing: don't build, download the CI artifact.** ci.yml
+already uploads `streamdock-linux` on every push to main, so `gh run download`
+gave the exact bytes a user would get. That matters — a locally built artifact
+can differ from CI's, and session 11's whole point was that the CI Linux job had
+been green while packaging nothing.
+
+**Session 11's platform-aware engine work is confirmed correct.** All three
+binaries in the artifact are genuine x86-64 ELF, exec bits set, and run:
+yt-dlp 2026.08.19, ffmpeg/ffprobe N-126455. The app boots clean and a real
+download completes and saves. The AppImage also needs **no libfuse2** —
+electron-builder 26's runtime works with fuse3 — and its desktop entry is
+`Exec=AppRun --no-sandbox %U`, so users never hit Ubuntu 24.04+'s
+`kernel.apparmor_restrict_unprivileged_userns=1` sandbox crash. (Running
+`linux-unpacked/streamdock` directly *does* hit it: `GPU process isn't usable.
+Goodbye.` That is a property of the unpacked binary, not of the shipped app.)
+
+**Three bugs found, two of them cross-platform and long-standing.**
+
+1. *Single videos landed in a folder named `NA`.* Session 8 fixed the
+   `folderHint` route into the folder branch and missed a second one. The
+   preview list auto-selects its only entry for a one-item probe, so
+   `hasSelection` is true for an ordinary video; `CaptureView` then turned that
+   into `playlistItems: '1'`, and `isConfirmedMultiItem()` counted any non-empty
+   value as a batch. The template took its playlist branch, had no folderHint,
+   and fell back to `%(playlist_title)s` — which yt-dlp renders as the literal
+   `NA`. Fixed at both ends: the renderer no longer emits `playlistItems` for a
+   non-playlist probe, and a selection naming exactly one item is no longer a
+   batch wherever it came from (so one episode out of a series stops getting a
+   folder too, which is the rule session 8 stated but only half-applied).
+2. *Thumbnails rendered as a broken-image glyph.* Not a data bug — the probe
+   resolved them correctly and the chosen URL returns 200. `client/index.html`'s
+   CSP had `img-src 'self' data: https://*.bing.com`, a leftover from the
+   wallpaper work, so every thumbnail was blocked. Session 8 added the thumbnail
+   plumbing; nothing widened the policy. Now `img-src 'self' data: https:` —
+   thumbnails come from whatever site is being downloaded from, which no
+   allowlist can enumerate.
+3. *The Linux dock icon was a generic placeholder.* electron-builder downsamples
+   a single PNG into a macOS `.icns` or Windows `.ico`, but for Linux it ships
+   only the sizes it is handed — `generate-icons.ts` even carried a comment
+   asserting the opposite. So the lone 1024x1024 went to
+   `usr/share/icons/hicolor/1024x1024/`, which the freedesktop hicolor index
+   does not list (largest is 512x512), and `Icon=streamdock` resolved to
+   nothing. Session 7 raised the icon to 1024 to clear macOS's 512 minimum, and
+   that same change pushed Linux out of range. Now eight indexed sizes in
+   `assets/icons/`, with `build.linux.icon` pointing at the directory.
+
+**Both symptoms Isaac reported came from different layers, as usual here.** The
+"settings icon in the dock" was the theme lookup failing; the "app logo on the
+right of the dock" was the **system tray icon** working correctly
+(`setupTray()`, electron/main.ts) — same PNG, loaded by path, bypassing the
+lookup that fails for the dock. One icon, two paths, only one broken.
+
+**Diagnosis technique that settled the icon bug in one step:** query the icon
+theme directly rather than reasoning about it.
+`Gtk.IconTheme.lookup_icon('streamdock', 48)` returned `NOT FOUND` with the
+shipped layout installed, and resolved the instant an indexed size was added.
+Available on any GTK desktop via `python3 -c "import gi; ..."`.
+
+**Guards added, each validated by breaking it:** `verifyLinuxIcons()` in
+verify-engine (asserts the end state — what `assets/icons/` holds and what
+package.json points at, not what the generator does), and four naming tests that
+were confirmed red against the bug, with `%(playlist_title).150B/...` visible in
+the failure output.
+
+**Known rough edge for the next session.** Session 10's `verifyChangelogRendering()`
+means a version bump now *requires* regenerating `docs/index.html` in the same
+commit, or verify:engine fails. But `deploy-site.yml` triggers on `docs/`
+changes, so that commit publishes the site immediately — reintroducing, for the
+few minutes a release takes to build, exactly the window session 9 closed when
+it removed the `package.json` path trigger (site advertises a version whose
+installer is not published yet; the download button still serves the previous
+release). Transient and self-correcting, but the two guards are pulling against
+each other and it should be resolved deliberately.
+
+**Environment note:** this Ubuntu box had no node/npm. A user-local Node 20
+(`~/.local/node-v20.18.1-linux-x64`, no sudo) plus `npm ci` completed in **one
+minute** — the install timeouts CLAUDE.md records are a Windows/AV problem, not
+a project problem. Also of note: the Linux auto-updater logs a harmless 404 for
+`latest-linux.yml` until a release actually carries one; v1.6.0 is the first
+that does.
+
 ## Working agreements for future sessions on this repo
 
+- **Test the artifact CI produced, not one you built.** `gh run download` gives
+  the exact bytes a user gets. Session 12 verified Linux this way; a local build
+  would not have proved the CI job packages real engines.
+- **An icon that exists is not an icon the desktop can find.** Ask the theme:
+  `Gtk.IconTheme.lookup_icon(name, 48)`. A 1024x1024 PNG is outside hicolor's
+  index and resolves to nothing, which no file-existence check would catch.
+- **electron-builder downsamples icons for macOS and Windows but not Linux.**
+  Linux gets exactly the sizes you hand it. Point `build.linux.icon` at a
+  directory of indexed sizes, never at a single large PNG.
+- **A blocked resource is not a missing resource.** A broken-image glyph means
+  the src was set and the load failed; a missing value renders the placeholder
+  instead. Session 12's thumbnails were correct in the data and blocked by CSP —
+  check the policy before re-plumbing the value.
+- **When a fix has two routes into the bad branch, fix both.** Session 8 closed
+  the folderHint route to the folder branch; the playlistItems route stayed open
+  and produced the same "NA" folder four sessions later.
 - **A green build is not a working artifact.** CI's Build Linux job passed for
   months while packaging an app with no engines in it, because the download
   script exited 0 without downloading. Assert on the artifact's contents, not on
