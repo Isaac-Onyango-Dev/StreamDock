@@ -79,18 +79,14 @@ jobs:
             echo "::notice::$TAG is new — building and publishing it."
           fi
 
-  # Windows only, deliberately.
+  # Windows and Linux. macOS is deliberately absent.
   #
-  # `scripts/download-binaries.ts` fetches `yt-dlp.exe` and BtbN's win64 ffmpeg
-  # build unconditionally, on every platform. Running the release on macOS or
-  # Linux would therefore package Windows executables inside a .dmg/.AppImage:
-  # it would install, and then fail every download, because the engine it ships
-  # cannot run. Publishing that is worse than publishing nothing.
-  #
-  # ci.yml still builds macOS and Linux on every push to main, so the packaging
-  # path for those platforms stays exercised and cannot silently rot — they are
-  # just not published until the binaries script learns to fetch per-platform
-  # engines. That is the one change needed to add them to this matrix.
+  # download-binaries.ts is now platform-aware, so each runner fetches the
+  # engines that can actually run on it. macOS is still not published for two
+  # reasons that are not about the build: BtbN publishes no macOS ffmpeg, and an
+  # unsigned .dmg is refused by Gatekeeper as "damaged" — shipping that is worse
+  # than shipping nothing. ci.yml still builds macOS so the packaging path stays
+  # exercised.
   build:
     name: Build ${{ matrix.label }}
     needs: check
@@ -103,6 +99,9 @@ jobs:
           - os: windows-latest
             label: Windows
             artifact: streamdock-windows
+          - os: ubuntu-latest
+            label: Linux
+            artifact: streamdock-linux
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -116,8 +115,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Linux system dependencies
+        # electron-builder needs these to assemble an AppImage; ci.yml's Linux
+        # job already installed them, and the release job building the artifact
+        # users actually download must not be the one missing them.
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
       - name: Download engine binaries (yt-dlp, ffmpeg, ffprobe)
         run: npm run download:binaries
+
+      - name: Verify the engines are present and runnable
+        # Between fetching and packaging on purpose. electron-builder cannot
+        # tell an empty binaries/ from an intentional one, which is how v1.1.0
+        # shipped with no engines at all.
+        run: npm run check:binaries
 
       - name: Build app
         # --publish never so electron-builder only *generates* the artifacts and

@@ -15,7 +15,7 @@ Everything after the push is automatic:
 
 1. **Build & Release** (`.github/workflows/release.yml`) sees `package.json`'s
    version change on `main`, checks that no `v<version>` tag exists yet, and
-   builds the Windows installer.
+   builds the Windows installer and the Linux AppImage.
 2. It creates the `v<version>` tag and the GitHub Release, with the
    `CHANGELOG.md` section for that version as the body and GitHub's generated
    commit/PR list appended under it, and attaches every installer plus the
@@ -26,17 +26,43 @@ Everything after the push is automatic:
 
 There is no manual tagging step, and there should never be one again.
 
-### Why only Windows is published
+### Platforms
 
-`scripts/download-binaries.ts` fetches `yt-dlp.exe` and a win64 ffmpeg build
-unconditionally. Running the release on a macOS or Linux runner would package
-those Windows executables inside a `.dmg`/`.AppImage` — it would install and
-then fail every download, since the bundled engine cannot run. That is worse
-than shipping nothing for those platforms.
+| Platform | Built in CI | Published | Engines |
+| --- | --- | --- | --- |
+| Windows x64 | yes | yes — `StreamDock-Setup-Windows.exe` | `yt-dlp.exe` + BtbN win64 ffmpeg |
+| Linux x64 | yes | yes — `StreamDock-Linux.AppImage` | `yt-dlp_linux` + BtbN linux64 ffmpeg |
+| macOS | yes (compile check only) | **no** | none — see below |
 
-CI still builds macOS and Linux on every push to `main`, so their packaging path
-stays exercised. Teaching `download-binaries.ts` to fetch per-platform engines is
-the single change needed before adding them to the release matrix.
+`scripts/download-binaries.ts` is platform-aware: it picks the yt-dlp asset and
+the BtbN ffmpeg archive matching `process.platform`/`process.arch`, extracts
+them, and marks them executable off Windows. `linux-arm64` is in its table too,
+for developing on ARM hardware; only x64 is released.
+
+**macOS is not published**, and that is not a build problem — CI's macOS runner
+packages a `.dmg` fine. Two things block it:
+
+- BtbN publishes no macOS ffmpeg, so there is no automated source for the engine
+  from the same place as the other platforms.
+- An unsigned `.dmg` is refused by Gatekeeper as "damaged and can't be opened".
+  Signing and notarizing needs an Apple Developer account (~$99/yr).
+
+Publishing an unsigned, untested macOS build would be worse than publishing
+nothing, so the release matrix omits it while CI keeps the packaging path from
+rotting.
+
+### The engine check
+
+`npm run check:binaries` runs between fetching the engines and packaging them.
+It asserts each of `yt-dlp`, `ffmpeg` and `ffprobe` exists, is a plausible size,
+and **actually executes and prints the version it should**.
+
+It exists because "the build succeeded" has meant nothing twice: v1.1.0 shipped
+to users with an empty `resources/binaries/` (the download script only printed
+instructions back then), and the same bug was latent for Linux until this check
+was written — `download-binaries.ts` used to return early on non-Windows with a
+clean exit, so CI packaged an engine-less AppImage and reported success. A
+packaging step cannot tell "no engines needed" from "engines missing". This can.
 
 ### Before you bump
 

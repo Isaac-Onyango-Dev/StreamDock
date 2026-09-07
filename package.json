@@ -29,6 +29,7 @@
     "release:minor": "npm version minor -m \"chore(release): v%s\"",
     "release:major": "npm version major -m \"chore(release): v%s\"",
     "download:binaries": "tsx scripts/download-binaries.ts",
+    "check:binaries": "tsx scripts/check-binaries.ts",
     "download:plugins": "tsx scripts/download-plugins.ts",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -129,9 +130,19 @@
       "artifactName": "StreamDock-macOS.${ext}"
     },
     "linux": {
-      "target": "AppImage",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "assets/icon.png",
-      "artifactName": "StreamDock-Linux.${ext}"
+      "artifactName": "StreamDock-Linux.${ext}",
+      "category": "AudioVideo",
+      "synopsis": "Download videos and capture live streams",
+      "description": "StreamDock downloads videos and captures live streams from thousands of sites, powered by yt-dlp and ffmpeg."
     },
     "nsis": {
       "oneClick": false,

@@ -47,6 +47,7 @@ Desktop-only Electron app for downloading videos and capturing live streams with
   "What's New" section from `package.json` + `CHANGELOG.md`. Runs automatically
   in CI after every release, so the site and README can't drift from the
   shipped version.
+- `npm run check:binaries` — verify the bundled engines exist and actually run.
 - `npm run check:version` — verify the version is valid, documented in
   `CHANGELOG.md`, and not behind the newest released tag. CI runs this and
   fails the build if it doesn't hold.
@@ -73,8 +74,14 @@ was considered and rejected — is in [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Binaries
 
 Run `npm run download:binaries` to fetch real `yt-dlp`, `ffmpeg`, and `ffprobe`
-binaries into `binaries/` (Windows only — macOS/Linux aren't distributed yet).
-This step also runs in CI before every packaged build.
+binaries into `binaries/`. It picks the right build for your platform — Windows
+x64, Linux x64 and Linux arm64 are automated; on macOS it fetches yt-dlp and
+asks you to supply ffmpeg yourself, since the upstream ffmpeg builds this uses
+have no macOS target.
+
+`npm run check:binaries` then verifies they exist, are a plausible size, and
+actually run. Both steps run in CI before every packaged build, so an app can no
+longer be packaged with engines that are missing or cannot execute.
 
 Re-running it keeps `ffmpeg`/`ffprobe` if they're already present, but
 **refreshes `yt-dlp` once it's more than 30 days old**. That isn't housekeeping:
