@@ -1,5 +1,7 @@
 # StreamDock
 
+[![Downloads](https://img.shields.io/github/downloads/Isaac-Onyango-Dev/StreamDock/total?label=Downloads&style=for-the-badge&color=8B5CF6)](https://github.com/Isaac-Onyango-Dev/StreamDock/releases)
+
 Desktop-only Electron app for downloading videos and capturing live streams with `yt-dlp` and `ffmpeg`.
 
 ## ✨ What's New in v1.0.1
@@ -25,4 +27,9 @@ you launch the app.
 
 ## Binaries
 
-Place `yt-dlp` and `ffmpeg` binaries in `binaries/`, or install them on `PATH`. StreamDock surfaces missing-binary errors in the UI.
+Run `npm run download:binaries` to fetch real `yt-dlp`, `ffmpeg`, and `ffprobe`
+binaries into `binaries/` (Windows only — macOS/Linux aren't distributed yet).
+It's idempotent, so re-running it just skips files that are already there.
+This step also runs in CI before every packaged build. Alternatively, install
+the binaries on `PATH` yourself — StreamDock surfaces missing-binary errors
+in the UI either way.
