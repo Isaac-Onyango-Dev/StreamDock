@@ -852,8 +852,55 @@ repairs. The CHANGELOG keeps both sections, so the history stays honest.
 `release/latest*.yml` now; v1.5.0's stray asset was left in place rather than
 mutating a published release.
 
+### Session 10 — changelog truncation on the site (not a CSS bug)
+
+Bullets on the site's changelog card were cut off mid-sentence. Reported as a
+suspected CSS problem; it was not.
+
+**The giveaway was where the cuts landed**: every one ended exactly at the first
+line break of a hard-wrapped markdown bullet ("...reported as a login wall. Both
+are"). Confirmed in seconds by grepping the *generated* `docs/index.html` — the
+text was already absent there, so no stylesheet could be responsible. Checked
+`.release` anyway to answer the question properly: no `line-clamp`, no
+`max-height`, no `text-overflow`, no `nowrap`; the card sizes to content.
+
+**Cause: a duplicated parser.** `build-site.ts`'s `renderEntry` re-parsed
+`entry.body`'s raw lines with its own `/^-\s+(.*)$/`, keeping the first physical
+line of each bullet and dropping the indented continuations. `parseChangelog`
+had always joined them correctly, and `sync-readme.ts` used that — which is
+exactly why the README was right while the site was wrong. `renderEntry` now
+renders from `entry.sections`, so there is one parser and one consumer.
+
+Same root cause, second symptom: only the *first* `###` heading was kept, so
+v1.5.0's bullets all appeared under "Fixed" and "Changed" vanished.
+
+**Guard**: `verifyChangelogRendering()` in verify-engine compares the rendered
+`<li>`s against the parsed items and asserts each section heading is present —
+an end-state assertion, so it catches a regression whatever causes one.
+Validated by restoring the old renderer and watching it fail with
+`no changelog bullet is truncated on the site`.
+
+**Verified** with Playwright at 390/820/1440px on the live site: 34 bullets,
+none clipped, zero ending mid-sentence, cards growing to fit (3504px tall on
+mobile). Stress-tested with a synthetic 40-bullet release plus a 2-bullet patch:
+43 bullets, zero truncated, at every width. Left the height unbounded rather
+than adding a "show more" — a collapse control is what re-hides content, and
+the requirement was that nothing is silently cut off.
+
+**Noted, not changed**: at 390px the page has ~6 elements wider than the
+viewport (decorative `.blob-*` gradients and the nav), but `body` has
+`overflow-x: hidden` and the page is genuinely not scrollable sideways —
+verified by scripting a scroll. Pre-existing and not user-visible.
+
 ## Working agreements for future sessions on this repo
 
+- **Truncated text in a rendered page is not automatically a CSS bug.** Check
+  the generated HTML first: if the text is not in the source, no stylesheet did
+  it. Session 10's cuts landed exactly on markdown line breaks, which named the
+  culprit before any CSS was read.
+- **Two copies of a parser will drift, and only one of them gets fixed.** The
+  site and the README rendered the same changelog through different code; the
+  README was correct for months while the site silently truncated.
 - **"It's not automated" and "the automation never ran" are different bugs.**
   Session 9's release drift looked like a missing pipeline; the pipeline existed
   and worked. What was missing was the manual step that triggered it. Check
