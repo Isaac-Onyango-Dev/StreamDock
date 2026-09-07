@@ -654,23 +654,30 @@ footer {
         <span class="btn-dl btn-dl-outline">Not yet available</span>
       </div>
 
-      <div class="card is-disabled" data-platform-card="linux">
+      <div class="card" data-platform-card="linux">
         <div class="card-icon">{{ICON_LINUX_LG}}</div>
         <div class="card-header">
           <h3>Linux</h3>
-          <p>Ubuntu 20.04+ / Debian-based</p>
+          <p>x86-64 — Ubuntu 20.04+ / Debian-based</p>
         </div>
         <div class="card-meta">
           <span class="tag tag-violet">AppImage</span>
           <span class="tag tag-pink">.AppImage</span>
-          <span class="tag tag-muted">Coming Soon</span>
+          <span class="tag tag-muted">v{{VERSION}}</span>
         </div>
-        <span class="btn-dl btn-dl-outline">Not yet available</span>
+        <a class="btn-dl btn-dl-primary" id="linux-download-btn"
+           href="https://github.com/Isaac-Onyango-Dev/StreamDock/releases/latest/download/StreamDock-Linux.AppImage"
+           download>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download for Linux
+        </a>
       </div>
     </div>
 
     <p class="download-note">
-      macOS and Linux builds need bundled ffmpeg/yt-dlp binaries for each platform —
+      The Linux build ships as an AppImage — mark it executable
+      (<code>chmod +x StreamDock-Linux.AppImage</code>) and run it; nothing to install.
+      macOS still needs a signed, notarised build before it can be offered here —
       <a href="https://github.com/Isaac-Onyango-Dev/StreamDock/issues" target="_blank" rel="noopener">track progress here</a>.
     </p>
 
@@ -766,8 +773,8 @@ footer {
       <div class="req-item" style="opacity:.5;">
         <span class="req-emoji">{{ICON_LINUX_MD}}</span>
         <div class="req-text">
-          <h5>Linux — Coming Soon</h5>
-          <p>Ubuntu 20.04 / Debian 11 or compatible. Build not yet packaged.</p>
+          <h5>Linux</h5>
+          <p>Ubuntu 20.04 / Debian 11 or compatible, x86-64. AppImage — nothing to install.</p>
         </div>
       </div>
     </div>
@@ -802,16 +809,21 @@ footer {
   var heroBtn = document.getElementById('hero-download-btn');
   var heroLabel = document.getElementById('hero-download-label');
   var heroSub = document.getElementById('hero-download-sub');
-  var winBtn = document.getElementById('windows-download-btn');
+  // Driven by the download cards themselves, so a platform becomes available in
+  // the hero the moment its card gains a real button — the "coming soon" copy
+  // cannot be left behind the way Linux's was after its first release shipped.
+  var LABELS = { windows: 'Windows', mac: 'macOS', linux: 'Linux' };
+  var osBtn = os ? document.getElementById(os + '-download-btn') : null;
 
-  if (os === 'windows' && winBtn) {
-    heroBtn.href = winBtn.href;
+  if (osBtn) {
+    heroBtn.href = osBtn.href;
     heroBtn.setAttribute('download', '');
-    heroLabel.textContent = 'Download for Windows';
+    heroLabel.textContent = 'Download for ' + LABELS[os];
+    heroSub.textContent = '';
   } else {
     heroBtn.href = '#download';
     heroLabel.textContent = os ? 'Choose your platform below' : 'Get StreamDock';
-    heroSub.textContent = os ? '(' + os + ' coming soon)' : '';
+    heroSub.textContent = os ? '(' + LABELS[os] + ' coming soon)' : '';
   }
 
   if (os) {
