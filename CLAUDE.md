@@ -270,6 +270,56 @@ in CI or scope those jobs down to what a hosted runner can actually do.
 pushes could happen non-interactively. Worth knowing if a future session
 finds it already there.
 
+### Session 4 — brand match, download counter, and a critical binary-bundling bug
+
+Landed as 5 separate commits (`a0d2f96` brand tokens, `ca633fd` download
+counter, `1b5a965` engine-binaries fix, `c71928b` wallpaper button fix,
+`9135513` version bump), pushed and released as **v1.2.0**.
+
+**The most important finding this session**: v1.1.0 — the release from
+session 3, live for a few hours — was **actually broken for every user**.
+`binaries/` is gitignored, and `scripts/download-binaries.ts` had never
+actually downloaded anything; it only printed instructions. No CI workflow
+called it either, so `resources/binaries/` was silently empty in every
+packaged build. The evidence was in plain sight: v1.1.0's installer was
+~102MB; the real yt-dlp+ffmpeg+ffprobe alone are ~420MB. Rewrote the script
+to really fetch and extract them (yt-dlp from its own releases, ffmpeg from
+BtbN's GitHub-hosted build), wired it into `release.yml` and `ci.yml`, and
+verified end-to-end against a scratch directory — not the local `binaries/`,
+which already had real files from some earlier manual setup and would have
+masked the bug completely. v1.2.0's installer is ~287MB, confirming the fix.
+Also found and fixed a second bug *while fixing the first*: the extraction
+step's bare `tar` resolved to Git for Windows' GNU tar (present earlier on
+PATH than System32 in this environment), which misparses a `C:\...` argument
+as a remote host spec — fixed by calling System32's bsdtar explicitly.
+
+**Brand match**: `design/tokens.json` is now the single source of truth for
+the violet/pink/amber palette, generated into `client/src/styles/brand.css`
+(overrides the app's accent color, previously blue) and read directly by
+`scripts/build-site.ts` for the site — no more hand-typing the same hex
+values in two places. Regenerated `assets/icon.{svg,png,ico}` and
+`logo.svg` in place (no old-branding files left behind).
+
+**Download counter**: Tier 1 only (GitHub Releases-based), exactly as
+scoped — deliberately did *not* build the elaborate `client/`+`server/`+
+`VITE_TARGET` web-app mirror that `D:\tasks\streamdock-website-prompt.md`
+originally described (that prompt predates the actual `docs/`-based static
+site built in session 3; task2.md's own instructions explicitly scoped
+it down to fit reality, and following the old prompt literally would have
+built a second, redundant site).
+
+**Wallpaper button**: best-available fix (Chromium's native image-drag
+gesture intercepting the click — `draggable={false}` fixes it), but **not
+verified by an actual click** — this session only has Chrome tab
+automation, not desktop automation for the real Electron window. If it's
+still broken, that's the next thing to check, ideally with a screen
+recording or a description of exactly what happens when clicked.
+
+**Known limitation carried forward again**: `ci.yml`'s `Verify Engine` and
+`E2E Tests` jobs still fail (same pre-existing gap noted in session 3 —
+hosted runner has no real yt-dlp/ffmpeg/display). Untouched this session,
+unrelated to anything above.
+
 ## Working agreements for future sessions on this repo
 
 - **Verify before fixing.** Both sessions found that written task specs
