@@ -14,7 +14,22 @@ import { join } from 'path';
 const BINARIES_DIR = join(import.meta.dirname, '..', 'binaries');
 
 const YT_DLP_URL = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
-const FFMPEG_ZIP_URL = 'https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip';
+/**
+ * Pinned to BtbN's `latest` *tag*, not to `releases/latest/`.
+ *
+ * These are different things, and conflating them broke the Windows build.
+ * `releases/latest/download/...` resolves to whatever GitHub currently calls the
+ * latest release, and BtbN also publishes dated autobuilds
+ * (`autobuild-2026-09-07-15-39`) whose assets carry versioned names like
+ * `ffmpeg-N-126455-gecc7eb519e-win64-gpl.zip`. The moment one of those is
+ * published it becomes "latest", and the stable `ffmpeg-master-latest-*` name
+ * 404s — which is exactly what happened mid-session, with the same commit
+ * succeeding before the autobuild and failing after it.
+ *
+ * The `latest` tag is the rolling release BtbN maintains specifically to carry
+ * the stable filenames, so it is the one to pin to.
+ */
+const FFMPEG_ZIP_URL = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip';
 
 /**
  * Fetch with retry.
