@@ -37,25 +37,34 @@ function verifySmartNaming(): void {
     buildOutputTemplate({ mode: 'stream' }) === 'StreamDock Stream %(upload_date>%Y-%m-%d)s %(epoch>%H-%M-%S)s.%(ext)s',
     'stream captures use a timestamped output template',
   );
-  // These encoded the pre-rewrite templates ('%(playlist_index)03d-%(title)' and
-  // a zero-padded 'Season %02d'). The naming spec was deliberately changed to
-  // literal 'Episode (N)' with an unpadded 'Season N', and smart-naming.test.ts
-  // was updated at the time — this script was not, because it could not run.
+  // The "Episode (N)" / "Season N" scheme these used to assert was abolished:
+  // downloads are named after the real title the probe already resolved, and a
+  // folder appears only for a confirmed playlist.
   assert(
     buildOutputTemplate({ mode: 'video', isPlaylist: true, folderHint: 'Road Trip' }) ===
-      'Road Trip/%(season_number&Season %d/|)sEpisode (%(playlist_index)d).%(ext)s',
-    'playlists use a folder and literal "Episode (N)" naming',
+      'Road Trip/%(title).150B.%(ext)s',
+    'a confirmed playlist gets a named folder holding real per-item titles',
   );
   assert(
     buildOutputTemplate({ mode: 'video', playlistItems: '1-5' }) ===
-      '%(playlist_title).150B/%(season_number&Season %d/|)sEpisode (%(playlist_index)d).%(ext)s',
+      '%(playlist_title).150B/%(title).150B.%(ext)s',
     'playlist ranges fall back to playlist title metadata for the folder',
   );
   assert(
-    buildOutputTemplate({ mode: 'video', folderHint: 'Demon Slayer' }) ===
-      'Demon Slayer/%(season_number&Season %d/|)sEpisode (%(playlist_index)d).%(ext)s',
-    'series downloads include an optional, unpadded season folder',
+    buildOutputTemplate({ mode: 'video', titleHint: 'Some Episode' }) === 'Some Episode.%(ext)s',
+    'a single video is named after its title with no folder wrapping',
   );
+  for (const template of [
+    buildOutputTemplate({ mode: 'video' }),
+    buildOutputTemplate({ mode: 'video', isPlaylist: true }),
+    buildOutputTemplate({ mode: 'video', folderHint: 'Demon Slayer' }),
+  ]) {
+    assert(
+      !template.includes('Episode (') && !template.includes('season_number') &&
+      !template.includes('playlist_index'),
+      'no output template reintroduces the abolished episode/season numbering',
+    );
+  }
   assert(
     buildOutputTemplate({ mode: 'video' }) === '%(title).150B.%(ext)s',
     'single videos stay flat in the output directory',
@@ -78,11 +87,26 @@ function verifyEngineWiring(): void {
   assert(preloadSource.includes('type ClearRecordScope'), 'preload exposes the scoped clear type');
   assert(engineSource.includes("type ClearRecordScope = 'all' | 'completed' | 'failed' | 'cancelled'"), 'engine defines scoped clear behavior');
   assert(engineSource.includes('buildOutputTemplate('), 'download engine uses the smart-naming module');
-  assert(engineSource.includes('resolveOutputPath('), 'download engine resolves output templates before passing -o');
-  assert(engineSource.includes('isAbsolute(template)'), 'download engine preserves absolute output templates');
+  assert(engineSource.includes('resolveOutputTemplate('), 'download engine builds the -o template from smart-naming');
+  // The -o template must stay relative and be paired with --paths, or yt-dlp
+  // ignores the staging directory and writes partials straight into the user's
+  // download folder.
+  assert(engineSource.includes("'--paths', `home:"), 'download engine passes the destination as --paths home:');
+  assert(engineSource.includes("'--paths', `temp:"), 'download engine stages in-progress files under --paths temp:');
+  assert(engineSource.includes('STAGING_DIR_NAME'), 'download engine has a dedicated staging directory');
+  assert(engineSource.includes('clearStaging('), 'download engine clears staged partials when a download ends');
+  assert(engineSource.includes('classifyEngineFailure('), 'download engine classifies failures through the shared classifier');
+  assert(!engineSource.includes('toUserError(error)'), 'download engine no longer re-classifies failures without context');
   assert(engineSource.includes("'--retry-sleep', 'fragment:exp=1:10'"), 'download engine uses valid yt-dlp retry sleep syntax');
   assert(!engineSource.includes('fragment:exp=1:max=10'), 'download engine does not use invalid retry sleep max syntax');
   assert(mainSource.includes('resolveUpdatableYtDlpCommand()'), 'engine update uses a user-writable yt-dlp target');
+  // The duplicated title-bar wordmark was this macOS-convention app-name menu
+  // being added on every platform, then drawn as plain text by the in-window
+  // menu bar beside the gradient wordmark. It must stay macOS-gated.
+  assert(
+    /const appNameMenu[^;]*?isMac[^;]*?\?/s.test(mainSource),
+    'the app-name menu entry is macOS-only, so it cannot duplicate the wordmark',
+  );
 }
 
 interface HostConfig {

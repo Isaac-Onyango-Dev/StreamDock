@@ -13,17 +13,15 @@ import { BrowserWindow } from 'electron';
 import { ChildProcess, execFile, spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import { existsSync, mkdirSync, rmSync, readdirSync } from 'fs';
-import { basename, dirname, isAbsolute, join } from 'path';
+import { basename, dirname, join } from 'path';
 import log from 'electron-log';
 import { IPC } from './ipc-channels';
 import { buildPluginDirArgs, resolveBinary, resolveYtDlpCommand, type YtDlpCommand } from './binary-resolver';
 import {
-  toUserError,
   toErrorDetail,
-  isRateLimited,
-  isAuthRequired,
-  isGeoBlocked,
+  classifyEngineFailure,
   mentionsStaleEngine,
+  type FailureContext,
 } from './error-translator';
 import { extractManifest } from './manifest-extractor';
 import { ANIME_HOSTS, MANIFEST_PROBE_HOSTS, REFERENCE_HOSTS, type CaptureMode } from './url-router';
@@ -45,9 +43,16 @@ export interface DownloadRequest {
   /** A suggested folder name from the UI (e.g. series or playlist title) */
   folderHint?: string;
   /** Per-item title hint from the UI (e.g. "One Piece - Episode 1 - Romance Dawn").
-   *  Used as the output filename for manifest-based VOD downloads where yt-dlp
-   *  cannot derive a meaningful title from the CDN stream URL. */
+   *  Used as the output *filename* for manifest-based VOD downloads where yt-dlp
+   *  cannot derive a meaningful title from the CDN stream URL. Only ever set for
+   *  a spawn covering a single item — one hint across a playlist would give
+   *  every file in it the same name. */
   titleHint?: string;
+  /** Label for the queue row only; never used to build a filename.
+   *  Kept separate from titleHint precisely so a playlist can show its real
+   *  name in the UI without that name being forced onto every file it
+   *  contains — the queue row and the output template are different questions. */
+  displayTitle?: string;
   /** Whether to use browser cookies */
   useCookies?: boolean;
   /** Browser to impersonate for TLS fingerprinting */
@@ -134,6 +139,9 @@ interface ActiveTask {
 
 /** Known video CDN hosts whose manifest URLs need a specific referer. */
 const KNOWN_CDNS = ['s2.cinewave2.site', 'cinewave2.site'];
+
+/** Folder inside the download directory where in-progress files are staged. */
+const STAGING_DIR_NAME = '.streamdock-incomplete';
 
 const PRUNE_AGE_MS = 86_400_000; // 24 hours
 type ClearRecordScope = 'all' | 'completed' | 'failed' | 'cancelled';
@@ -278,7 +286,13 @@ export class DownloadEngine {
       id,
       url: request.url,
       mode: request.mode,
-      title: request.mode === 'stream' ? 'Live stream capture' : 'Video download',
+      // The probe already resolved the real title; use it. Falling back to the
+      // literal string "Video download" for every queued item is what made a
+      // finished batch indistinguishable in the UI and drove the whole
+      // episode-renaming workaround.
+      title: request.mode === 'stream'
+        ? 'Live stream capture'
+        : (request.displayTitle?.trim() || request.titleHint?.trim() || 'Video download'),
       status: 'queued',
       progress: 0,
       speed: '',
@@ -410,10 +424,12 @@ export class DownloadEngine {
     const record = this.records.get(id);
     if (record && record.status !== 'completed') {
       record.status = 'cancelled';
+      const request = this.savedRequests.get(id);
       this.savedRequests.delete(id);
       this.emitProgress(record);
       // Clean up any partial files for this download
       this.cleanPartialFiles(record);
+      this.clearStaging(request, id);
       this.saveState();
     }
   }
@@ -737,7 +753,13 @@ export class DownloadEngine {
       ? (request.titleHint || (!statusStrings.has(record.title) ? record.title : undefined))
       : undefined;
 
-    record.title = request.mode === 'stream' ? 'Live stream capture' : 'Video download';
+    // Restore a real title after the extraction phase overwrote it with the
+    // 'Extracting stream manifest…' status. Only fall back to the generic label
+    // when nothing better is known — yt-dlp's own Destination/MoveFiles lines
+    // will replace it as soon as the real filename is decided.
+    record.title = request.mode === 'stream'
+      ? 'Live stream capture'
+      : (request.displayTitle?.trim() || request.titleHint?.trim() || episodeTitle || 'Video download');
     this.emitProgress(record);
 
     const ffmpeg = resolveBinary('ffmpeg');
@@ -745,8 +767,8 @@ export class DownloadEngine {
 
     // Use the captured episode title (not record.title which is now 'Video download').
     const forcedTitle = episodeTitle;
-    
-    const args = this.buildArgs(request, ffmpeg, originalPageUrl, referer, forcedTitle);
+
+    const args = this.buildArgs(request, ffmpeg, originalPageUrl, referer, forcedTitle, this.stagingDir(request, id));
 
     // Inject --cookies before the -- URL separator if the manifest extractor
     // captured session cookies from the embed CDN response.
@@ -841,6 +863,18 @@ export class DownloadEngine {
 
       log.debug(`[engine:${id}] ${trimmed.substring(0, 200)}`);
 
+      // The finishing move out of the staging directory. This is the last word
+      // on where the file actually lives: every earlier Destination/Merger line
+      // points inside `temp:`, so without this "Open file" and "Show in folder"
+      // would target a staging path that no longer exists.
+      const moved = trimmed.match(/\[MoveFiles\]\s+Moving file\s+"(.+?)"\s+to\s+"(.+?)"/i);
+      if (moved) {
+        task.record.outputPath = moved[2].trim();
+        task.record.title = basename(moved[2].trim()).replace(/\.[^.]+$/, '');
+        this.emitProgress(task.record);
+        continue;
+      }
+
       // Final merged file destination
       const merger = trimmed.match(/\[Merger\]\s+Merging formats into\s+"(.+)"/i);
       if (merger) {
@@ -905,41 +939,20 @@ export class DownloadEngine {
     }
   }
 
-  /** Classify a single yt-dlp error line into a user-facing message. */
+  /**
+   * Classify a single yt-dlp error line into a user-facing message.
+   *
+   * Delegates to the shared classifier so a line seen mid-stream and the same
+   * stderr seen at process close cannot disagree — they used to, and because
+   * close() always runs last its context-free answer replaced this one.
+   * The staleness signal is the one thing only the streaming view has: it
+   * arrives as a WARNING above the ERROR, so the whole accumulated stderr is
+   * passed rather than the single line.
+   */
   private classifyErrorLine(line: string, task: ActiveTask): string | null {
-    // yt-dlp announces its own staleness in a WARNING above the ERROR line. When
-    // both are present the staleness is the actionable cause: an out-of-date
-    // engine gets 403/429'd by sites that work fine with a current one.
-    if (mentionsStaleEngine(task.stderr)) {
-      log.warn(`[engine] Stale yt-dlp implicated in failure for ${task.record.id}`);
-      return 'The download engine is out of date, which is likely why this failed. Update it in Settings and retry.';
-    }
-
-    if (isRateLimited(line)) {
-      log.warn(`[engine] Rate limited for ${task.record.id}`);
-      return 'Rate limited by the site. Waiting before retrying…';
-    }
-
-    // A 403 on a CDN manifest URL is a session/token problem, not a login wall.
-    // Guard: skip the auth check when we have already resolved a manifest URL
-    // (manifestAttempted=true) or when the error line mentions a known CDN domain.
-    const isCdnContext =
-      task.manifestAttempted ||
-      /cdn\.|mewstream|nekostream|megaplay\.buzz|cinewave|gogocdn/i.test(line);
-
-    if (isAuthRequired(line) && !isCdnContext) {
-      log.warn(`[engine] Auth required for ${task.record.id}`);
-      return 'This content requires a login. Please log in on the site first.';
-    }
-    if (isGeoBlocked(line)) {
-      log.warn(`[engine] Geo-blocked for ${task.record.id}`);
-      return 'This content may not be available in your region.';
-    }
-    if (isCdnContext && isAuthRequired(line)) {
-      log.warn(`[engine] CDN access denied for ${task.record.id} — likely a session/token expiry`);
-      return 'Could not access the video stream. The link may have expired — try again.';
-    }
-    return toUserError(line);
+    const context = { manifestAttempted: task.manifestAttempted, url: task.request.url };
+    const combined = mentionsStaleEngine(task.stderr) ? `${task.stderr}\n${line}` : line;
+    return classifyEngineFailure(combined, context);
   }
 
   // ──────────────────────────────────────────────────────────── Process Events
@@ -968,9 +981,12 @@ export class DownloadEngine {
     this.pruneOldRecords();
 
     if (task.record.status === 'cancelled' || task.record.status === 'paused') {
-      // Clean partial files on cancel, keep them on pause (for resume)
+      // Clean partial files on cancel, keep them on pause (for resume) — a
+      // paused download resumes from the .part still sitting in its staging
+      // directory, so that directory must survive a pause.
       if (task.record.status === 'cancelled') {
         this.cleanPartialFiles(task.record);
+        this.clearStaging(task.request, id);
         this.savedRequests.delete(id);
       }
       this.emitProgress(task.record);
@@ -979,6 +995,9 @@ export class DownloadEngine {
     }
 
     if (code === 0) {
+      // yt-dlp has moved the finished file to the download folder; whatever is
+      // left in staging is scratch.
+      this.clearStaging(task.request, id);
       task.record.status = 'completed';
       task.record.progress = 100;
       task.record.speed = '';
@@ -1015,7 +1034,10 @@ export class DownloadEngine {
       }
     }
 
-    this.fail(id, new Error(task.stderr || `yt-dlp exited with code ${code ?? 'unknown'}`), task.record);
+    this.fail(id, new Error(task.stderr || `yt-dlp exited with code ${code ?? 'unknown'}`), task.record, {
+      manifestAttempted: task.manifestAttempted,
+      url: task.request.url,
+    });
   }
 
   private retryWithManifest(id: string, failedTask: ActiveTask): void {
@@ -1062,7 +1084,9 @@ export class DownloadEngine {
           : undefined;
 
         // Pass the original page URL for impersonation host check (not the CDN manifest URL)
-        const args = this.buildArgs(retryRequest, ffmpeg, request.url, result.referer, forcedTitle);
+        const args = this.buildArgs(
+          retryRequest, ffmpeg, request.url, result.referer, forcedTitle, this.stagingDir(retryRequest, id),
+        );
 
         // Propagate any session cookies from the manifest extractor.
         if (result.cookiesFile && existsSync(result.cookiesFile)) {
@@ -1122,7 +1146,13 @@ export class DownloadEngine {
       });
   }
 
-  private fail(id: string, error: unknown, knownRecord?: DownloadRecord): void {
+  /**
+   * @param context What was known about the attempt. close() removes the task
+   *   from the map before failing, so the classification context cannot be
+   *   recovered here — it has to be handed in, or a resolved-manifest 403 gets
+   *   read as a login wall.
+   */
+  private fail(id: string, error: unknown, knownRecord?: DownloadRecord, context?: FailureContext): void {
     const task = this.tasks.get(id);
     const record = knownRecord ?? task?.record;
     if (task) {
@@ -1133,13 +1163,24 @@ export class DownloadEngine {
 
     if (record.status === 'cancelled' || record.status === 'paused') return;
 
-    const userMsg = toUserError(error);
+    // Classify with the same context the streaming classifier had. Without it
+    // this call re-read the identical stderr as a context-free blob and, running
+    // last, overwrote the accurate message with a generic one — a CDN bot-block
+    // surfaced to the user as "This content requires a login".
+    const userMsg = classifyEngineFailure(error, context ?? {
+      manifestAttempted: task?.manifestAttempted,
+      url: task?.request.url ?? record.url,
+    });
     const detail = toErrorDetail(error);
     log.error(`[engine] Download ${id} failed: ${userMsg}`);
     if (detail) log.error(`[engine] Download ${id} engine output:\n${detail}`);
 
     // Preserve the request for retry
     if (task) this.savedRequests.set(id, task.request);
+
+    // A failed download leaves nothing usable behind — drop the staged partials
+    // rather than letting them accumulate in a hidden folder forever.
+    this.clearStaging(task?.request ?? this.savedRequests.get(id), id);
 
     record.status = 'failed';
     record.error = userMsg;
@@ -1180,11 +1221,12 @@ export class DownloadEngine {
   }
 
   private buildArgs(
-    request: DownloadRequest, 
-    ffmpeg: string, 
-    originalPageUrl?: string, 
+    request: DownloadRequest,
+    ffmpeg: string,
+    originalPageUrl?: string,
     referer?: string,
-    forcedTitle?: string
+    forcedTitle?: string,
+    stagingDir = join(request.outputDir, STAGING_DIR_NAME, 'shared'),
   ): string[] {
     const finalUrl = this.resolveFinalUrl(request.url);
     const detection = detectFormat(request.url);
@@ -1203,11 +1245,17 @@ export class DownloadEngine {
       '--sleep-requests', '0.5',
       ...(this.buildImpersonationArgs(request, originalPageUrl, referer)),
       ...this.buildPluginDirArgs(request.pluginDirs),
-      '-o', this.resolveOutputPath(request, forcedTitle),
-      // yt-dlp writes to a .part file and renames on success by default (atomicity).
+      '-o', this.resolveOutputTemplate(request, forcedTitle),
+      // Atomic delivery: everything in progress — .part files, per-format
+      // fragments, the pre-mux stream, subtitle files awaiting embedding — is
+      // written under `temp:`, and yt-dlp moves only the finished file into
+      // `home:` at the very end. So the download folder never shows a partial
+      // file the user could open or an AV scanner could quarantine mid-write.
+      '--paths', `home:${request.outputDir}`,
+      '--paths', `temp:${stagingDir}`,
       // '--write-thumbnail' is intentionally omitted: passing it without '--embed-thumbnail'
       // causes yt-dlp to leave a loose .webp/.jpg file next to the merged .mp4 (Bug 1 fix).
-      // Naming spec: re-downloads must never silently clobber an existing file at the
+      // Re-downloads must never silently clobber an existing file at the
       // resolved output path — skip instead of overwriting when one is already there.
       '--no-overwrites',
     ];
@@ -1322,22 +1370,74 @@ export class DownloadEngine {
     }
 
     if (wantsSubs) {
+      // Default is plain 'en', not 'en.*'. The wildcard also matches YouTube's
+      // machine-translated tracks (en-en, en-de, …), turning one subtitle fetch
+      // into a burst of them — enough to earn a 429 that aborts the entire
+      // video download, reported to the user as a rate limit on the video.
       const langs = request.selectedSubtitleLanguages?.length
         ? request.selectedSubtitleLanguages.join(',')
-        : 'en.*,en';
-      if (!args.includes('--write-subs')) args.push('--write-subs');
-      if (!args.includes('--write-auto-subs')) args.push('--write-auto-subs');
+        : 'en';
       args.push('--sub-langs', langs);
-      if (request.subtitleMode === 'embed') args.push('--embed-subs');
+
+      // Embedding and writing sidecars are separate requests, and asking for
+      // both is what left `.vtt` / `.en-orig.vtt` files sitting beside the
+      // finished .mp4: `--write-subs` means "keep the file", so yt-dlp embedded
+      // the track *and* kept it. On its own, `--embed-subs` fetches the
+      // subtitles it needs and deletes them again after muxing.
+      const wantsSidecar = request.subtitleMode === 'sidecar'
+        || request.subsOnly
+        || request.downloadPackaging === 'subs-only';
+
+      if (wantsSidecar) {
+        if (!args.includes('--write-subs')) args.push('--write-subs');
+        if (!args.includes('--write-auto-subs')) args.push('--write-auto-subs');
+      } else if (!args.includes('--embed-subs')) {
+        args.push('--embed-subs');
+      }
+
       if (request.subtitleConvertFormat === 'srt') args.push('--convert-subs', 'srt');
       if (request.subtitleConvertFormat === 'vtt') args.push('--convert-subs', 'vtt');
     }
-
   }
 
-  private resolveOutputPath(request: DownloadRequest, forcedTitle?: string): string {
-    const template = buildOutputTemplate({ ...request, forcedTitle });
-    return isAbsolute(template) ? template : join(request.outputDir, template);
+  /**
+   * The `-o` template, relative to the download folder.
+   *
+   * Deliberately relative: the destination is supplied separately as
+   * `--paths home:`, which is what lets `--paths temp:` stage the download
+   * elsewhere. An absolute `-o` overrides both and would put every partial
+   * file, fragment and pre-mux artefact straight into the user's folder.
+   */
+  private resolveOutputTemplate(request: DownloadRequest, forcedTitle?: string): string {
+    return buildOutputTemplate({ ...request, forcedTitle });
+  }
+
+  /**
+   * Staging directory for one download's in-progress files.
+   *
+   * Inside the destination folder so the finishing move is a same-volume
+   * rename rather than a full copy of a multi-gigabyte file, but in a dot
+   * directory of its own so nothing half-written is ever sitting next to the
+   * user's finished media — not a `.part`, not a `.f137.mp4` fragment, not a
+   * pre-mux `.webm`, and not a file an antivirus scanner or a double-click
+   * can reach mid-write.
+   */
+  private stagingDir(request: DownloadRequest, id: string): string {
+    return join(request.outputDir, STAGING_DIR_NAME, id);
+  }
+
+  /** Remove a download's staging directory, and the parent once it runs dry. */
+  private clearStaging(request: DownloadRequest | undefined, id: string): void {
+    if (!request?.outputDir) return;
+    try {
+      rmSync(this.stagingDir(request, id), { recursive: true, force: true });
+      const parent = join(request.outputDir, STAGING_DIR_NAME);
+      if (existsSync(parent) && readdirSync(parent).length === 0) {
+        rmSync(parent, { recursive: true, force: true });
+      }
+    } catch (err) {
+      log.debug('[engine] Could not clear staging directory:', err);
+    }
   }
 
   private buildImpersonationArgs(request: DownloadRequest, originalUrl?: string, referer?: string): string[] {

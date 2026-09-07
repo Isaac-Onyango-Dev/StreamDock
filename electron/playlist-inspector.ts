@@ -1,5 +1,6 @@
 // Role: safe metadata probe for single videos, playlists, and stream pages.
 import { spawn } from 'child_process';
+import { get as httpsGet } from 'https';
 import { buildPluginDirArgs, resolveBinary, resolveYtDlpCommand } from './binary-resolver';
 import { ANIME_HOSTS, MANIFEST_PROBE_HOSTS, PLUGIN_EXTRACTOR_HOSTS, REFERENCE_HOSTS } from './url-router';
 
@@ -41,8 +42,12 @@ interface YtDlpInfo {
   extractor?: string;
   extractor_key?: string;
   live_status?: string;
+  /** Real playlist length, independent of --playlist-end. */
+  playlist_count?: number;
   duration?: number;
   thumbnail?: string;
+  /** Present instead of `thumbnail` on --flat-playlist entries. */
+  thumbnails?: Array<{ url?: string }>;
   formats?: Array<{
     height?: number;
     vcodec?: string;
@@ -53,6 +58,15 @@ interface YtDlpInfo {
 
 const PROBE_TIMEOUT_MS = 25_000;
 const FULL_PROBE_TIMEOUT_MS = 60_000;
+const PAGE_FETCH_TIMEOUT_MS = 15_000;
+
+/**
+ * How many probed items to hand the UI.
+ *
+ * A display cap only. It never affects `itemCount`, which always reports the
+ * real total — a preview list that stops at N must not become a claim that
+ * there are N items, in either direction.
+ */
 const PREVIEW_LIMIT = 200;
 
 interface EpisodePattern {
@@ -69,13 +83,33 @@ function matchesHost(host: string, domains: string[]): boolean {
   return domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
 }
 
+/**
+ * Best available poster for one probed item.
+ *
+ * `--flat-playlist` entries carry a `thumbnails[]` array and no scalar
+ * `thumbnail`, so reading only the scalar found nothing for every playlist
+ * item — which is why playlist rows showed a placeholder icon in both the
+ * preview list and the download queue. The array is ordered smallest-first,
+ * so the last entry is the largest.
+ */
+export function pickThumbnail(entry: YtDlpInfo | null): string | undefined {
+  if (entry?.thumbnail) return entry.thumbnail;
+  const list = entry?.thumbnails;
+  if (!Array.isArray(list) || list.length === 0) return undefined;
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const url = list[i]?.url;
+    if (url) return url;
+  }
+  return undefined;
+}
+
 function toItem(entry: YtDlpInfo | null, index: number): PlaylistProbeItem {
   return {
     id: entry?.id,
     title: entry?.title || `Episode ${index + 1}`,
     url: entry?.webpage_url || entry?.url,
     duration: entry?.duration,
-    thumbnail: entry?.thumbnail,
+    thumbnail: pickThumbnail(entry),
   };
 }
 
@@ -122,29 +156,147 @@ function detectEpisodePattern(rawUrl: string): EpisodePattern | null {
   return null;
 }
 
-function episodeRangeProbe(url: string, pattern: EpisodePattern): PlaylistProbe {
-  const start = pattern.currentEpisode;
-  const preview = Array.from({ length: PREVIEW_LIMIT }, (_, index) => {
-    const episode = start + index;
-    return {
-      id: String(episode),
-      title: `${pattern.title} - Episode ${episode}`,
-      url: pattern.createUrl(episode),
-    };
+/**
+ * Series metadata read from the source page itself.
+ *
+ * The episode total has to come from the site. Deriving it from the URL is what
+ * produced the overshoot: the previous version generated a fixed 200 synthetic
+ * entries starting at whatever episode the user happened to paste, and reported
+ * `itemCount: 999` regardless — so a 366-episode show was listed as having 999,
+ * and the "episodes" past the real end were URLs that resolve to nothing.
+ */
+interface SeriesInfo {
+  totalEpisodes?: number;
+  title?: string;
+  thumbnail?: string;
+}
+
+/** Fetch a page as text, following redirects. Resolves to null on any failure. */
+function fetchPage(url: string, redirectsLeft = 3): Promise<string | null> {
+  return new Promise((resolve) => {
+    const request = httpsGet(
+      url,
+      {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+            '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+      },
+      (response) => {
+        const status = response.statusCode ?? 0;
+        const location = response.headers.location;
+        if (status >= 300 && status < 400 && location && redirectsLeft > 0) {
+          response.resume();
+          resolve(fetchPage(new URL(location, url).toString(), redirectsLeft - 1));
+          return;
+        }
+        if (status !== 200) {
+          response.resume();
+          resolve(null);
+          return;
+        }
+        let body = '';
+        response.setEncoding('utf-8');
+        response.on('data', (chunk: string) => {
+          // Series metadata lives in the document head/meta block; no need to
+          // buffer megabytes of episode-grid markup to find it.
+          if (body.length < 512_000) body += chunk;
+        });
+        response.on('end', () => resolve(body));
+      },
+    );
+    request.on('error', () => resolve(null));
+    request.setTimeout(PAGE_FETCH_TIMEOUT_MS, () => {
+      request.destroy();
+      resolve(null);
+    });
   });
+}
+
+/** Read the real episode total, series title and poster out of a series page. */
+export function parseSeriesInfo(html: string): SeriesInfo {
+  const info: SeriesInfo = {};
+
+  // "Episodes: <span> 366</span>" and the common structured-data variants.
+  const totalMatch =
+    html.match(/Episodes?\s*:?\s*<\/?[a-z][^>]*>\s*(\d{1,5})\s*</i) ||
+    html.match(/"numberOfEpisodes"\s*:\s*"?(\d{1,5})"?/i) ||
+    html.match(/\b(?:total_?episodes|episodeCount)\b["'\s:=]+(\d{1,5})/i);
+  if (totalMatch) {
+    const total = Number(totalMatch[1]);
+    if (Number.isFinite(total) && total > 0 && total <= 10_000) info.totalEpisodes = total;
+  }
+
+  const titleMatch =
+    html.match(/itemprop=["']name["'][^>]*class=["'][^"']*d-title[^"']*["'][^>]*>\s*([^<]{1,120}?)\s*</i) ||
+    html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']{1,160})["']/i);
+  if (titleMatch) info.title = decodeEntities(titleMatch[1].trim());
+
+  const thumbMatch = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
+  if (thumbMatch) info.thumbnail = thumbMatch[1].trim();
+
+  return info;
+}
+
+function decodeEntities(value: string): string {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;|&apos;/g, "'")
+    .replace(/&nbsp;/g, ' ');
+}
+
+/**
+ * Build an episode-range probe from the episodes that actually exist.
+ *
+ * Every entry is a real episode of a series whose length the source page
+ * reported. When the page does not state a length, nothing is extrapolated —
+ * the probe returns only the episode the user actually pasted, and says so.
+ * Guessing a longer list is what put episodes 367..999 of a 366-episode show
+ * in front of the user.
+ */
+async function episodeRangeProbe(url: string, pattern: EpisodePattern): Promise<PlaylistProbe> {
+  const html = await fetchPage(url);
+  const series = html ? parseSeriesInfo(html) : {};
+  const seriesTitle = series.title || pattern.title;
+  const total = series.totalEpisodes;
+
+  const notes: string[] = [];
+  let episodes: number[];
+
+  if (total) {
+    episodes = Array.from({ length: total }, (_, index) => index + 1);
+    notes.push(`${seriesTitle} has ${total} episodes according to ${hostFromUrl(url)}.`);
+  } else {
+    // Unknown length: offer exactly what we can stand behind.
+    episodes = [pattern.currentEpisode];
+    notes.push(
+      `Could not read an episode count from ${hostFromUrl(url)}, so only episode ` +
+      `${pattern.currentEpisode} is listed. Use Range to queue a span you know exists.`,
+    );
+  }
+
+  notes.push('StreamDock will still use browser manifest probing for each episode page.');
 
   return {
     url,
     host: hostFromUrl(url),
-    title: pattern.title,
+    title: seriesTitle,
     support: 'episode-range',
-    itemCount: 999,
-    preview,
+    itemCount: episodes.length,
+    preview: episodes.map((episode) => ({
+      id: String(episode),
+      title: `${seriesTitle} - Episode ${episode}`,
+      url: pattern.createUrl(episode),
+      thumbnail: series.thumbnail,
+    })),
+    thumbnail: series.thumbnail,
     isLive: false,
-    notes: [
-      `Episode pattern detected at episode ${pattern.currentEpisode}. Choose First or Range to queue generated episode URLs.`,
-      'StreamDock will still use browser manifest probing for each episode page.',
-    ],
+    notes,
   };
 }
 
@@ -152,7 +304,14 @@ function parseInfo(url: string, stdout: string): PlaylistProbe {
   const info = JSON.parse(stdout) as YtDlpInfo;
   const host = hostFromUrl(url);
   const entries = Array.isArray(info.entries) ? info.entries.filter(Boolean) : [];
-  const itemCount = entries.length || 1;
+
+  // The probe passes --playlist-end 500, so `entries` is capped and is not a
+  // count of the playlist. yt-dlp reports the real total separately; prefer it
+  // so a 900-item playlist is not announced as having exactly 500.
+  const reportedTotal = Number(info.playlist_count);
+  const itemCount = Number.isFinite(reportedTotal) && reportedTotal > 0
+    ? reportedTotal
+    : (entries.length || 1);
   const support: ProbeSupport = entries.length > 1 ? 'playlist' : 'direct';
 
   return {
@@ -163,12 +322,14 @@ function parseInfo(url: string, stdout: string): PlaylistProbe {
     itemCount,
     preview: entries.length > 0 ? entries.slice(0, PREVIEW_LIMIT).map(toItem) : [toItem(info, 0)],
     qualityOptions: entries.length === 0 ? extractQualityOptions(info) : undefined,
-    thumbnail: info.thumbnail,
+    // A playlist has no poster of its own; fall back to its first item's, so
+    // the queue row and preview header are not left with a placeholder icon.
+    thumbnail: pickThumbnail(info) ?? pickThumbnail(entries[0] ?? null),
     extractor: info.extractor_key || info.extractor,
     isLive: info.live_status === 'is_live',
     notes: [
       entries.length > PREVIEW_LIMIT
-        ? `Showing first ${PREVIEW_LIMIT} of ${entries.length} detected items.`
+        ? `Showing the first ${PREVIEW_LIMIT} of ${itemCount} items.`
         : 'Metadata probe completed.',
     ],
   };
@@ -189,7 +350,7 @@ function extractQualityOptions(info: YtDlpInfo): QualityOption[] | undefined {
   return sorted.map((height) => ({ height, label: `${height}p` }));
 }
 
-function fallbackProbe(url: string, reason: string): PlaylistProbe {
+async function fallbackProbe(url: string, reason: string): Promise<PlaylistProbe> {
   const host = hostFromUrl(url);
   if (matchesHost(host, REFERENCE_HOSTS())) {
     return {
@@ -354,11 +515,11 @@ export async function inspectUrl(url: string): Promise<PlaylistProbe> {
   // slipped past the reference message entirely and was treated as real content.
   const refHost = hostFromUrl(url);
   if (matchesHost(refHost, REFERENCE_HOSTS())) {
-    return fallbackProbe(url, 'This page is a reference index, not a direct media source.');
+    return await fallbackProbe(url, 'This page is a reference index, not a direct media source.');
   }
 
   if (shouldSkipYtDlpProbe(url)) {
-    return fallbackProbe(url, 'This page will be probed in a hidden browser when the download starts.');
+    return await fallbackProbe(url, 'This page will be probed in a hidden browser when the download starts.');
   }
 
   // Known anime sites rely on bundled/local yt-dlp plugins. Prefer the bundled
@@ -393,5 +554,5 @@ export async function inspectUrl(url: string): Promise<PlaylistProbe> {
   }
 
   if (probe) return probe;
-  return fallbackProbe(url, result.stderr.trim() || 'The metadata probe failed. You can still try starting the download.');
+  return await fallbackProbe(url, result.stderr.trim() || 'The metadata probe failed. You can still try starting the download.');
 }

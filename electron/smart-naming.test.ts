@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeName, buildOutputTemplate } from './smart-naming';
+import { isAbsolute } from 'path';
+import { sanitizeName, buildOutputTemplate, isConfirmedMultiItem } from './smart-naming';
 
 describe('smart-naming', () => {
   describe('sanitizeName', () => {
@@ -47,50 +48,56 @@ describe('smart-naming', () => {
   });
 
   describe('buildOutputTemplate', () => {
-    it('branch 1: stream mode uses timestamp template, no folder', () => {
+    it('a live stream keeps the timestamp name and is never put in a folder', () => {
       const result = buildOutputTemplate({ mode: 'stream' });
       expect(result).toBe('StreamDock Stream %(upload_date>%Y-%m-%d)s %(epoch>%H-%M-%S)s.%(ext)s');
     });
 
-    it('branch 2: multi-episode with folderHint uses "Episode (N)" naming, optional season nesting', () => {
+    it('a single video is just <title>.<ext> — no folder, no numbering', () => {
+      expect(buildOutputTemplate({ mode: 'video' })).toBe('%(title).150B.%(ext)s');
+    });
+
+    it('a single video with a known title uses that title verbatim', () => {
+      const result = buildOutputTemplate({ mode: 'video', titleHint: 'Me at the zoo' });
+      expect(result).toBe('Me at the zoo.%(ext)s');
+    });
+
+    it('a confirmed playlist puts real per-item titles inside a named folder', () => {
       const result = buildOutputTemplate({
         mode: 'video',
         isPlaylist: true,
         folderHint: 'My Series',
       });
-      expect(result).toBe('My Series/%(season_number&Season %d/|)sEpisode (%(playlist_index)d).%(ext)s');
+      expect(result).toBe('My Series/%(title).150B.%(ext)s');
     });
 
-    it('branch 2: playlist without folderHint falls back to playlist_title for the folder', () => {
-      const result = buildOutputTemplate({
-        mode: 'video',
-        isPlaylist: true,
-      });
-      expect(result).toBe('%(playlist_title).150B/%(season_number&Season %d/|)sEpisode (%(playlist_index)d).%(ext)s');
+    it('a playlist with no folder name falls back to the playlist title', () => {
+      const result = buildOutputTemplate({ mode: 'video', isPlaylist: true });
+      expect(result).toBe('%(playlist_title).150B/%(title).150B.%(ext)s');
     });
 
-    it('branch 2: non-empty playlistItems alone triggers multi-item mode', () => {
-      const result = buildOutputTemplate({
-        mode: 'video',
-        playlistItems: '1-5',
-      });
-      expect(result).toContain('Episode (%(playlist_index)d)');
+    it('a --playlist-items selection is a playlist, so it gets a folder', () => {
+      const result = buildOutputTemplate({ mode: 'video', playlistItems: '1-5' });
+      expect(result).toBe('%(playlist_title).150B/%(title).150B.%(ext)s');
     });
 
-    it('branch 2: season folder is not zero-padded, per spec example ("Season 1")', () => {
-      const result = buildOutputTemplate({
-        mode: 'video',
-        folderHint: 'My Show',
-      });
-      expect(result).toBe('My Show/%(season_number&Season %d/|)sEpisode (%(playlist_index)d).%(ext)s');
+    it('never emits the abolished Episode (N) or Season templating', () => {
+      const everyShape = [
+        buildOutputTemplate({ mode: 'video' }),
+        buildOutputTemplate({ mode: 'video', isPlaylist: true }),
+        buildOutputTemplate({ mode: 'video', playlistItems: '1-5' }),
+        buildOutputTemplate({ mode: 'video', folderHint: 'Series' }),
+        buildOutputTemplate({ mode: 'video', folderHint: 'Series', titleHint: 'Ep 1' }),
+      ];
+      for (const template of everyShape) {
+        expect(template).not.toContain('Episode (');
+        expect(template).not.toContain('playlist_index');
+        expect(template).not.toContain('season_number');
+        expect(template).not.toContain('Season ');
+      }
     });
 
-    it('branch 3: single video no context uses plain title, no folder', () => {
-      const result = buildOutputTemplate({ mode: 'video' });
-      expect(result).toBe('%(title).150B.%(ext)s');
-    });
-
-    it('titleHint takes precedence over forcedTitle, and skips season/episode-number templating', () => {
+    it('titleHint takes precedence over the engine-derived forcedTitle', () => {
       const result = buildOutputTemplate({
         mode: 'video',
         folderHint: 'Series',
@@ -98,6 +105,11 @@ describe('smart-naming', () => {
         forcedTitle: 'Fallback Title',
       });
       expect(result).toBe('Series/Episode 1 - Title.%(ext)s');
+    });
+
+    it('falls back to forcedTitle when the UI supplied no title', () => {
+      const result = buildOutputTemplate({ mode: 'video', forcedTitle: 'Fallback Title' });
+      expect(result).toBe('Fallback Title.%(ext)s');
     });
 
     it('sanitizes folderHint and titleHint', () => {
@@ -109,23 +121,38 @@ describe('smart-naming', () => {
       expect(result).toBe('My_Series_/Ep_1_Name.%(ext)s');
     });
 
-    it('resolved titleHint inside a playlist uses the literal title, not a numbered prefix', () => {
-      const result = buildOutputTemplate({
-        mode: 'video',
-        isPlaylist: true,
-        folderHint: 'Series',
-        titleHint: 'Episode 1',
-      });
-      expect(result).toBe('Series/Episode 1.%(ext)s');
+    it('the returned template is relative, so --paths home: decides the location', () => {
+      const templates = [
+        buildOutputTemplate({ mode: 'video' }),
+        buildOutputTemplate({ mode: 'stream' }),
+        buildOutputTemplate({ mode: 'video', isPlaylist: true, folderHint: 'Series' }),
+      ];
+      for (const template of templates) {
+        expect(isAbsolute(template)).toBe(false);
+        expect(template.startsWith('/')).toBe(false);
+      }
+    });
+  });
+
+  describe('isConfirmedMultiItem', () => {
+    it('a plain single video is not multi-item, so it gets no folder', () => {
+      expect(isConfirmedMultiItem({ mode: 'video' })).toBe(false);
+      expect(isConfirmedMultiItem({ mode: 'video', titleHint: 'Some video' })).toBe(false);
     });
 
-    it('a resolved title with no folderHint falls back to the resolved title as the folder', () => {
-      const result = buildOutputTemplate({
-        mode: 'video',
-        isPlaylist: true,
-        titleHint: 'One Piece - Episode 5 - Storm',
-      });
-      expect(result).toBe('One Piece - Episode 5 - Storm/One Piece - Episode 5 - Storm.%(ext)s');
+    it('only a confirmed playlist, item selection or folder name counts', () => {
+      expect(isConfirmedMultiItem({ mode: 'video', isPlaylist: true })).toBe(true);
+      expect(isConfirmedMultiItem({ mode: 'video', playlistItems: '1-5' })).toBe(true);
+      expect(isConfirmedMultiItem({ mode: 'video', folderHint: 'Series' })).toBe(true);
+    });
+
+    it('ignores a blank folderHint rather than creating a folder named after nothing', () => {
+      expect(isConfirmedMultiItem({ mode: 'video', folderHint: '   ' })).toBe(false);
+      expect(isConfirmedMultiItem({ mode: 'video', playlistItems: '' })).toBe(false);
+    });
+
+    it('a live stream is never foldered, whatever else is set', () => {
+      expect(isConfirmedMultiItem({ mode: 'stream', isPlaylist: true, folderHint: 'X' })).toBe(false);
     });
   });
 });

@@ -7,11 +7,19 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { promisify } from 'util';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { resolveYtDlpCommand } from './binary-resolver';
 import { getProbeStrategy } from './url-router';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+/**
+ * `--dump-json` for a single YouTube video is routinely several megabytes —
+ * every format, every fragment list. The default 1MB stdout buffer aborted the
+ * probe with ERR_CHILD_PROCESS_STDIO_MAXBUFFER before a line of it was parsed,
+ * which is what silently cost the UI its title and thumbnail on YouTube.
+ */
+const PROBE_MAX_BUFFER = 64 * 1024 * 1024;
 
 export interface StreamManifest {
   title: string;
@@ -28,9 +36,17 @@ export interface StreamManifest {
 
 export async function probeViaYtDlp(url: string): Promise<StreamManifest> {
   const ytDlpCmd = resolveYtDlpCommand();
-  const result = await execAsync(
-    `"${ytDlpCmd.command}" --dump-json --no-download --no-warnings "${url}"`,
-    { windowsHide: true }
+  // execFile with an argument array rather than a shell string: no quoting to
+  // get wrong, and a URL containing shell metacharacters cannot be interpreted
+  // as anything but an argument. `--` ends option parsing.
+  const result = await execFileAsync(
+    ytDlpCmd.command,
+    // --no-playlist because this probe describes ONE media item. Without it a
+    // URL carrying `list=` (every YouTube radio mix, every "watch later" link)
+    // makes yt-dlp emit one JSON object per entry — for a radio mix, an
+    // effectively endless stream of them that no buffer size can absorb.
+    [...ytDlpCmd.args, '--dump-json', '--no-playlist', '--no-download', '--no-warnings', '--', url],
+    { windowsHide: true, maxBuffer: PROBE_MAX_BUFFER, encoding: 'utf-8' },
   );
   const data = JSON.parse(result.stdout);
   return {

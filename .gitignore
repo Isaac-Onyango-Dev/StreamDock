@@ -28,3 +28,7 @@ test-*.py
 .gemini/
 .opencode/
 .kiro/
+
+# Playwright output
+playwright-report/
+test-results/

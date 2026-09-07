@@ -12,7 +12,22 @@ const {
   isGeoBlocked,
   mentionsStaleEngine,
   pickFatalLine,
+  sanitizeRaw,
+  isBotChallenged,
+  classifyEngineFailure,
 } = await import('./error-translator');
+
+/**
+ * Captured verbatim from streamdock.log, download 64b62cd0 — the failure behind
+ * the "This content requires a login" report. anikoto.cz's CDN sits behind
+ * Cloudflare bot management: the ?token= is valid and freshly minted, and the
+ * request is refused at the edge before it ever reaches the origin. There is no
+ * account on any site that would change the outcome.
+ */
+const CDN_MANIFEST_403 =
+  'ERROR: [generic] master.m3u8?token=MTc4ODc5NDE4M3xkNTgwNzJiZTI4MjBlODY4MmMwYTI3YzA1' +
+  'MThlODA1ZS81ZWM4ZTIzNmExYTljYjZmYjBlMjNkNGZmY2M4ZGFlZg: Unable to download webpage: ' +
+  'HTTP Error 403: Forbidden (caused by <HTTPError 403: Forbidden>)';
 
 /**
  * Captured verbatim from the bundled 2026.03.17 yt-dlp failing a plain YouTube
@@ -148,5 +163,111 @@ describe('toErrorDetail', () => {
     const detail = toErrorDetail(`${'noise\n'.repeat(500)}ERROR: the real problem`, 200);
     expect(detail).toContain('ERROR: the real problem');
     expect(detail!.length).toBeLessThanOrEqual(201);
+  });
+});
+
+describe('secret redaction keeps the diagnosis intact', () => {
+  it('redacts a query-string token without swallowing the rest of the line', () => {
+    const cleaned = sanitizeRaw(CDN_MANIFEST_403);
+    // The secret is gone…
+    expect(cleaned).not.toContain('MTc4ODc5NDE4M3');
+    expect(cleaned).toContain('[REDACTED]');
+    // …but everything that explains the failure survives. The previous
+    // end-of-line redaction left only "master.m3u8?token=[REDACTED]", which is
+    // why the UI's "Show details" panel was useless on exactly the failures
+    // that needed it.
+    expect(cleaned).toContain('HTTP Error 403');
+    expect(cleaned).toContain('Forbidden');
+    expect(cleaned).toContain('Unable to download webpage');
+  });
+
+  it('still redacts a Cookie header to end of line', () => {
+    const cleaned = sanitizeRaw('Cookie: session=abc123; cf_clearance=xyz789');
+    expect(cleaned).not.toContain('abc123');
+    expect(cleaned).not.toContain('xyz789');
+  });
+
+  it('redacts passwords and api keys without eating neighbouring text', () => {
+    const cleaned = sanitizeRaw('login failed: password=hunter2 after 3 attempts');
+    expect(cleaned).not.toContain('hunter2');
+    expect(cleaned).toContain('after 3 attempts');
+  });
+
+  it('surfaces the real status through toErrorDetail', () => {
+    const detail = toErrorDetail(CDN_MANIFEST_403);
+    expect(detail).toContain('HTTP Error 403');
+    expect(detail).not.toContain('MTc4ODc5NDE4M3');
+  });
+});
+
+describe('isBotChallenged', () => {
+  it('recognises yt-dlp naming a Cloudflare challenge', () => {
+    expect(isBotChallenged(
+      'ERROR: [generic] Got HTTP Error 403 caused by Cloudflare anti-bot challenge; try again with --extractor-args',
+    )).toBe(true);
+  });
+
+  it("recognises Cloudflare's own block page", () => {
+    expect(isBotChallenged('Sorry, you have been blocked')).toBe(true);
+    expect(isBotChallenged('<title>Just a moment...</title>')).toBe(true);
+  });
+
+  it('does not fire on an incidental mention of a CDN vendor', () => {
+    expect(isBotChallenged('[download] Destination: cdn.cloudflare-assets.example/video.mp4')).toBe(false);
+    expect(isBotChallenged('ERROR: HTTP Error 404: Not Found')).toBe(false);
+  });
+});
+
+describe('classifyEngineFailure', () => {
+  it('does NOT call a resolved-manifest 403 a login wall', () => {
+    const message = classifyEngineFailure(CDN_MANIFEST_403, { manifestAttempted: true });
+    expect(message).not.toMatch(/requires a login/i);
+    expect(message).not.toMatch(/log in/i);
+    expect(message).toMatch(/403/);
+  });
+
+  it('reaches the same verdict from the URL alone, without the manifest flag', () => {
+    // close() drops the task before failing, so the flag is not always available;
+    // the CDN shape of the URL has to be enough on its own.
+    const message = classifyEngineFailure(CDN_MANIFEST_403, {
+      url: 'https://cdn.imgnex.top/anime/abc/master.m3u8?token=x',
+    });
+    expect(message).not.toMatch(/requires a login/i);
+  });
+
+  it('does not claim the link expired — that was never established', () => {
+    const message = classifyEngineFailure(CDN_MANIFEST_403, { manifestAttempted: true });
+    expect(message).not.toMatch(/expired/i);
+  });
+
+  it('still reports a genuine login wall as one', () => {
+    const message = classifyEngineFailure(
+      'ERROR: [youtube] abc123: Sign in to confirm your age. This video may be inappropriate for some users.',
+      {},
+    );
+    expect(message).toMatch(/log in|login/i);
+  });
+
+  it('prefers a bot-challenge reading over a login reading for the same 403', () => {
+    const message = classifyEngineFailure(
+      'ERROR: [generic] Got HTTP Error 403 caused by Cloudflare anti-bot challenge',
+      {},
+    );
+    expect(message).toMatch(/automated-traffic|browser/i);
+    expect(message).not.toMatch(/requires a login/i);
+  });
+
+  it('a stale engine outranks the status it produced', () => {
+    const message = classifyEngineFailure(
+      `WARNING: your yt-dlp version 2026.03.17 is older than 90 days
+${CDN_MANIFEST_403}`,
+      { manifestAttempted: true },
+    );
+    expect(message).toMatch(/out of date/i);
+  });
+
+  it('reports a rate limit as a rate limit', () => {
+    const message = classifyEngineFailure('ERROR: HTTP Error 429: Too Many Requests', {});
+    expect(message).toMatch(/rate limited/i);
   });
 });

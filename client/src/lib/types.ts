@@ -150,6 +150,8 @@ export interface StartRequest {
   folderHint?: string;
   /** Per-item title for episode/series downloads (e.g. "One Piece - Episode 1 - Romance Dawn"). */
   titleHint?: string;
+  /** Queue-row label only; never used to build a filename. */
+  displayTitle?: string;
   impersonate?: string;
   pluginDirs?: string[];
   priority?: number;

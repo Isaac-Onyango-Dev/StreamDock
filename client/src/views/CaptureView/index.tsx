@@ -21,9 +21,24 @@ interface CaptureViewProps {
   mode: CaptureMode;
   setMode: (mode: CaptureMode) => void;
   outputDir: string;
+  /**
+   * A URL delivered from outside the view (clipboard watcher, Edit > Paste).
+   *
+   * This is a prop rather than the app writing into the input's DOM node,
+   * because the input is a controlled React input: assigning `input.value` and
+   * firing a synthetic `input` event also updates React's internal value
+   * tracker, so React sees no change, never calls onChange, and re-renders the
+   * field back to its state value — leaving an empty box and its placeholder.
+   * That is why a captured URL only appeared until the next render and had to
+   * be re-pasted by hand.
+   */
+  incomingUrl?: { url: string; seq: number } | null;
   onError: (message: string) => void;
   onStarted: (info: { title: string; itemCount?: number }) => void;
 }
+
+/** How many probed items are shown per page in the preview list. */
+const PREVIEW_BATCH_SIZE = 50;
 
 type SelectionMode = 'all' | 'first' | 'range' | 'schedule';
 type AudioPreference = 'auto' | 'dub' | 'sub';
@@ -112,7 +127,7 @@ function selectedEpisodeUrls(
   return urls;
 }
 
-export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: CaptureViewProps) {
+export function CaptureView({ mode, setMode, outputDir, incomingUrl, onError, onStarted }: CaptureViewProps) {
   const [url, setUrl] = useState('');
   const [analysis, setAnalysis] = useState<UrlAnalysis | null>(null);
   const [probe, setProbe] = useState<PlaylistProbe | null>(null);
@@ -160,6 +175,21 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
   const clearSelection = useCallback(() => setSelectedIndices(new Set()), []);
   const hasSelection = selectedIndices.size > 0;
 
+  // Long series are paged into groups of 50 so a 366-episode list is navigable.
+  // This is presentation only: `probe.preview` and `probe.itemCount` are the
+  // real, already-detected episodes, and paging neither adds to them nor
+  // truncates them — it just decides which slice is on screen.
+  const [batchIndex, setBatchIndex] = useState(0);
+  const batchCount = probe ? Math.max(1, Math.ceil(probe.preview.length / PREVIEW_BATCH_SIZE)) : 1;
+  const batchStart = batchIndex * PREVIEW_BATCH_SIZE;
+  const visiblePreview = probe
+    ? probe.preview.slice(batchStart, batchStart + PREVIEW_BATCH_SIZE)
+    : [];
+
+  // A new probe replaces the list; stay on a page that no longer exists and the
+  // preview renders empty.
+  useEffect(() => { setBatchIndex(0); }, [probe]);
+
   useEffect(() => {
     if (!probe) return;
     const total = probe.preview.length;
@@ -205,6 +235,16 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
     setMode(inferModeFromText(newUrl));
     resetPlan();
   }, [resetPlan, setMode]);
+
+  // A URL captured outside this view goes through the same path as typing or
+  // dropping one, so the field, the mode inference and any stale plan all end
+  // up consistent. Keyed on `seq` so re-copying the same URL delivers again.
+  useEffect(() => {
+    if (!incomingUrl?.url) return;
+    handleInputUrl(incomingUrl.url);
+    // handleInputUrl is stable (useCallback over stable deps); seq is the signal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incomingUrl?.seq]);
 
   // Window-wide drag-and-drop: dropping a URL anywhere in the capture view fills the input.
   useEffect(() => {
@@ -486,20 +526,29 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
       return;
     }
 
-    const isPlaylist = current && probe?.support === 'playlist';
-    const isEpisodeRange = probe?.support === 'episode-range';
+    // Make sure we actually have probe metadata before queueing.
+    //
+    // start() only ever ran analyze() (which resolves the URL) and then read
+    // `probe` out of the render closure. Pressing Download without pressing
+    // Analyze first therefore queued with `probe === null` — no title, no
+    // thumbnail, no playlist detection — which is why single videos showed up
+    // as "Video download" behind a placeholder icon.
+    const activeProbe = probe && analysis?.url === url.trim() ? probe : await inspect();
+
+    const isPlaylist = activeProbe?.support === 'playlist';
+    const isEpisodeRange = activeProbe?.support === 'episode-range';
     let batchUrls: string[];
     let playlistItems: string | undefined;
 
-    if (selection === 'all' && probe?.support === 'playlist' && selectedIndices.size === probe.preview.length) {
+    if (selection === 'all' && activeProbe?.support === 'playlist' && selectedIndices.size === activeProbe.preview.length) {
       batchUrls = [current.url];
       playlistItems = undefined;
     } else if (hasSelection && selection !== 'schedule') {
       const sorted = Array.from(selectedIndices).sort((a, b) => a - b);
-      if (isEpisodeRange && probe) {
+      if (isEpisodeRange && activeProbe) {
         const urls: string[] = [];
         for (const i of sorted) {
-          const item = probe.preview[i];
+          const item = activeProbe.preview[i];
           if (item?.url) urls.push(item.url);
         }
         batchUrls = urls;
@@ -521,16 +570,32 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
       : isEpisodeRange
         ? episodeUrls.length
         : playlistItems
-          ? (probe?.itemCount ?? 0)
+          ? (activeProbe?.itemCount ?? 0)
           : 1;
 
     setBusy(true);
     try {
       for (const batchUrl of batchUrls) {
-        let titleHint: string | undefined;
-        if (isEpisodeRange && probe) {
-          titleHint = probe.preview.find((item) => item.url === batchUrl)?.title;
-        }
+        // One spawn handles many media items when yt-dlp is walking a playlist
+        // itself; naming those from a single hint would give every file the
+        // same name. Only a spawn that covers exactly one item gets a title.
+        const spawnCoversOneItem = !playlistItems && !(isPlaylist && !playlistItems);
+        const previewItem = activeProbe?.preview.find((item) => item.url === batchUrl)
+          ?? (spawnCoversOneItem && activeProbe?.preview.length === 1 ? activeProbe.preview[0] : undefined);
+
+        // The real title and thumbnail the probe already resolved. Previously
+        // only episode-range downloads passed a title and nothing ever passed a
+        // thumbnail, so ordinary videos queued as "Video download" behind a
+        // placeholder icon.
+        //
+        // The naming hint is withheld for a multi-item spawn, but the *display*
+        // title is not: a playlist should still show its own name in the queue
+        // while yt-dlp names each file inside it from that file's own metadata.
+        const titleHint = spawnCoversOneItem
+          ? (previewItem?.title ?? activeProbe?.title)
+          : undefined;
+        const displayTitle = previewItem?.title ?? activeProbe?.title;
+        const thumbnail = previewItem?.thumbnail ?? activeProbe?.thumbnail;
         let parsedScheduledAt: string | undefined;
         if (selection === 'schedule' && scheduledAt) {
           const [hours, minutes] = scheduledAt.split(':').map(Number);
@@ -543,7 +608,11 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
         // Get the selected stream option if available
         const selectedOption = selectedStreamOption ? streamOptions?.options.find(o => o.manifestUrl === selectedStreamOption) : undefined;
 
-        const folderHint = isEpisodeRange ? probe?.title : undefined;
+        // A folder is created only once more than one item is actually being
+        // queued. This used to be set for every episode-range download, so
+        // grabbing a single episode still buried it inside a show folder —
+        // the "folder appears even for a single video" report.
+        const folderHint = batchUrls.length > 1 ? activeProbe?.title : undefined;
 
         await window.streamDock?.startDownload(mode, {
           url: batchUrl,
@@ -555,6 +624,8 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
           isPlaylist: isPlaylist && !playlistItems,
           folderHint,
           titleHint,
+          displayTitle,
+          thumbnail,
           impersonate: impersonate || undefined,
           scheduledAt: parsedScheduledAt,
           selectedAudioLanguage,
@@ -572,7 +643,7 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
       }
       setUrl('');
       resetPlan();
-      onStarted({ title: probe?.title || current.url, itemCount: totalItems > 1 ? totalItems : undefined });
+      onStarted({ title: activeProbe?.title || current.url, itemCount: totalItems > 1 ? totalItems : undefined });
     } catch (error) {
       onError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -810,7 +881,9 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
 
             {probe && (
               <div className="max-h-72 space-y-1 overflow-y-auto custom-scrollbar pr-1">
-                {probe.preview.map((item, index) => (
+                {visiblePreview.map((item, offset) => {
+                  const index = batchStart + offset;
+                  return (
                   <label
                     key={`${item.id || item.title}-${index}`}
                     className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-surface-3"
@@ -833,7 +906,32 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
                       </span>
                     )}
                   </label>
-                ))}
+                  );
+                })}
+              </div>
+            )}
+
+            {probe && batchCount > 1 && (
+              <div className="mt-2 flex items-center justify-between gap-2 border-t border-border-subtle pt-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setBatchIndex((i) => Math.max(0, i - 1))}
+                  disabled={batchIndex === 0}
+                  className="rounded-md bg-surface-3 px-2 py-1 text-text-secondary transition-colors hover:text-text-primary disabled:opacity-40"
+                >
+                  Previous
+                </button>
+                <span className="tabular-nums text-text-secondary">
+                  {batchStart + 1}–{Math.min(batchStart + PREVIEW_BATCH_SIZE, probe.preview.length)} of {probe.preview.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setBatchIndex((i) => Math.min(batchCount - 1, i + 1))}
+                  disabled={batchIndex >= batchCount - 1}
+                  className="rounded-md bg-surface-3 px-2 py-1 text-text-secondary transition-colors hover:text-text-primary disabled:opacity-40"
+                >
+                  Next
+                </button>
               </div>
             )}
 
