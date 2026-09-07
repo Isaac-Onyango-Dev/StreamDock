@@ -1,0 +1,53 @@
+name: Deploy Site
+
+on:
+  release:
+    types: [published]
+  push:
+    branches: [main]
+    paths:
+      - 'docs/index.template.html'
+      - 'docs/assets/**'
+      - 'docs/404.html'
+      - 'docs/robots.txt'
+      - 'docs/sitemap.xml'
+      - 'CHANGELOG.md'
+      - 'scripts/build-site.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    name: Build and sync docs/index.html
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build site
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: npm run build:site
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- docs/index.html; then
+            echo "No site changes to deploy."
+          else
+            git add docs/index.html
+            git commit -m "chore: sync site to ${{ github.event.release.tag_name || 'current version' }} [skip ci]"
+            git push
+          fi

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>StreamDock — Page Not Found</title>
+<meta name="robots" content="noindex" />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%238B5CF6'/%3E%3Cstop offset='.55' stop-color='%23EC4899'/%3E%3Cstop offset='1' stop-color='%23FBBF24'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='16' fill='url(%23g)'/%3E%3Cpath d='M25 20 L44 32 L25 44 Z' fill='%230A0716'/%3E%3Ccircle cx='50' cy='14' r='4' fill='%23fff'/%3E%3C/svg%3E" />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;800&family=Inter:wght@400;600&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0A0716; --surface: #170F2B; --border: rgba(167,139,250,.2);
+    --violet: #8B5CF6; --pink: #EC4899; --amber: #FBBF24;
+    --text: #F7F3FF; --muted: #AC9FD4;
+    --brand-grad: linear-gradient(120deg, var(--violet) 0%, var(--pink) 55%, var(--amber) 100%);
+  }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: 'Inter', system-ui, sans-serif;
+    min-height: 100vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    padding: 24px; gap: 20px; overflow: hidden;
+  }
+  .blob { position: fixed; width: 480px; height: 480px; border-radius: 50%; filter: blur(100px); opacity: .35; z-index: 0; }
+  .blob-a { background: var(--violet); top: -160px; left: -140px; }
+  .blob-b { background: var(--pink); bottom: -160px; right: -140px; }
+  * > * { position: relative; z-index: 1; }
+  .code {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: clamp(4rem, 14vw, 8rem);
+    font-weight: 800;
+    background: var(--brand-grad);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    line-height: 1;
+  }
+  h1 { font-family: 'Space Grotesk', sans-serif; font-size: 1.4rem; font-weight: 700; }
+  p { color: var(--muted); max-width: 420px; line-height: 1.6; }
+  a.home {
+    display: inline-flex; align-items: center; gap: 8px;
+    margin-top: 8px; padding: 13px 26px; border-radius: 12px;
+    background: var(--brand-grad); color: #14071E; font-weight: 700;
+    text-decoration: none; transition: transform .2s ease;
+  }
+  a.home:hover { transform: translateY(-2px); }
+</style>
+</head>
+<body>
+  <div class="blob blob-a"></div>
+  <div class="blob blob-b"></div>
+  <span class="code">404</span>
+  <h1>This stream doesn't exist.</h1>
+  <p>The page you're looking for got lost in the buffer. Let's get you back to somewhere real.</p>
+  <a class="home" href="/StreamDock/">← Back to StreamDock</a>
+</body>
+</html>
