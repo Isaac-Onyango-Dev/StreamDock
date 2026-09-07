@@ -1,8 +1,15 @@
 name: Deploy Site
 
+# release.yml's automated release is created with the default GITHUB_TOKEN,
+# and GitHub Actions does not let GITHUB_TOKEN-driven events trigger other
+# workflows (anti-recursion protection) — so `on: release: published` alone
+# would silently never fire here. workflow_run instead reacts to the
+# upstream workflow *run* completing, which isn't subject to that
+# restriction, and is the pattern GitHub recommends for this exact case.
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: ['Build & Release']
+    types: [completed]
   push:
     branches: [main]
     paths:
@@ -13,6 +20,7 @@ on:
       - 'docs/sitemap.xml'
       - 'CHANGELOG.md'
       - 'scripts/build-site.ts'
+      - 'package.json'
   workflow_dispatch:
 
 permissions:
@@ -22,9 +30,12 @@ jobs:
   build-and-deploy:
     name: Build and sync docs/index.html
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -37,7 +48,7 @@ jobs:
 
       - name: Build site
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.event.workflow_run.head_branch || github.event.release.tag_name || '' }}
         run: npm run build:site
 
       - name: Commit and push if changed
@@ -48,6 +59,6 @@ jobs:
             echo "No site changes to deploy."
           else
             git add docs/index.html
-            git commit -m "chore: sync site to ${{ github.event.release.tag_name || 'current version' }} [skip ci]"
-            git push
+            git commit -m "chore: sync site to $(node -p "require('./package.json').version") [skip ci]"
+            git push origin HEAD:main
           fi
