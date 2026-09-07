@@ -1,6 +1,6 @@
 {
   "name": "streamdock",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Desktop video downloader and live stream capture app",
   "type": "module",
   "main": "dist-electron/main.cjs",
@@ -138,7 +138,7 @@
           ]
         }
       ],
-      "icon": "assets/icon.png",
+      "icon": "assets/icons",
       "artifactName": "StreamDock-Linux.${ext}",
       "category": "AudioVideo",
       "synopsis": "Download videos and capture live streams",

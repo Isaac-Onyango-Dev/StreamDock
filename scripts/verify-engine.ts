@@ -11,7 +11,7 @@
 // also the better check for a verification script: it asserts against the
 // configuration actually shipped, rather than against the hardcoded fallback the
 // router uses when that file is missing.
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { buildOutputTemplate, sanitizeName } from '../electron/smart-naming';
 import { parseChangelog } from './lib/changelog';
@@ -256,10 +256,57 @@ function verifySiteRendering(): void {
   }
 }
 
+/**
+ * The Linux icon must be installed at sizes the desktop can actually find.
+ *
+ * electron-builder downsamples a single PNG when producing a macOS .icns or a
+ * Windows .ico, but for Linux it ships only the sizes it is handed. Pointing
+ * `build.linux.icon` at the lone 1024x1024 assets/icon.png therefore installed
+ * it to usr/share/icons/hicolor/1024x1024/ — a directory the freedesktop
+ * hicolor index does not list, its largest being 512x512 — so `Icon=streamdock`
+ * resolved to nothing and every Linux desktop drew a generic fallback icon.
+ *
+ * Asserted on the end state (what assets/icons/ contains and what package.json
+ * points at) rather than on the generator, so any route back to a single-size
+ * icon is caught.
+ */
+function verifyLinuxIcons(): void {
+  const pkg = JSON.parse(readProjectFile('package.json')) as {
+    build?: { linux?: { icon?: string } };
+  };
+  const configured = pkg.build?.linux?.icon;
+  assert(
+    configured === 'assets/icons',
+    `build.linux.icon points at the multi-size directory, not ${String(configured)}`,
+  );
+
+  const dir = join(root, 'assets', 'icons');
+  assert(existsSync(dir), 'assets/icons/ exists (run `npm run icons:build`)');
+
+  const present = new Set(readdirSync(dir).filter((f) => f.endsWith('.png')));
+
+  // 48 is what a GNOME/KDE launcher asks for most often; 256 covers HiDPI docks.
+  // Both are indexed by hicolor, which is the property that actually matters.
+  for (const size of [16, 32, 48, 64, 128, 256, 512]) {
+    assert(
+      present.has(`${size}x${size}.png`),
+      `assets/icons/ ships an indexed ${size}x${size}.png`,
+    );
+  }
+
+  // A size outside hicolor's index is invisible to the desktop, so shipping one
+  // as the *only* icon is the bug this guard exists for.
+  assert(
+    !present.has('1024x1024.png'),
+    'assets/icons/ contains no 1024x1024.png — hicolor does not index that size',
+  );
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
 verifyChangelogRendering();
 verifySiteRendering();
+verifyLinuxIcons();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);
