@@ -117,10 +117,13 @@ jobs:
       - name: Build app
         run: npm run build:app
 
+      # No DISPLAY / Xvfb: these specs drive headless Chromium against the Vite
+      # dev server, not a real Electron window. A `DISPLAY: ':99'` was set here
+      # with no X server ever started on :99, which made this job's failures look
+      # environmental when they were a bad Playwright project config and an
+      # ambiguous selector.
       - name: Run E2E tests
         run: npm run test:e2e
-        env:
-          DISPLAY: ':99'
         timeout-minutes: 20
 
       - name: Upload E2E artifacts
@@ -153,7 +156,11 @@ jobs:
         run: npm run download:binaries
 
       - name: Build Windows app
-        run: npm run build
+        # --publish never: release.yml is the only thing that uploads. The
+        # publish config in package.json exists so electron-builder emits the
+        # latest.yml update manifest, which it still does here; it must not also
+        # push artifacts of its own.
+        run: npm run build -- --publish never
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
@@ -181,7 +188,11 @@ jobs:
         run: npm ci
 
       - name: Build macOS app
-        run: npm run build
+        # --publish never: release.yml is the only thing that uploads. The
+        # publish config in package.json exists so electron-builder emits the
+        # latest.yml update manifest, which it still does here; it must not also
+        # push artifacts of its own.
+        run: npm run build -- --publish never
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
@@ -214,7 +225,11 @@ jobs:
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Build Linux app
-        run: npm run build
+        # --publish never: release.yml is the only thing that uploads. The
+        # publish config in package.json exists so electron-builder emits the
+        # latest.yml update manifest, which it still does here; it must not also
+        # push artifacts of its own.
+        run: npm run build -- --publish never
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4

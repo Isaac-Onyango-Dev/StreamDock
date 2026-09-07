@@ -177,9 +177,14 @@ code — flagged honestly rather than faked a fix:**
   hits this, don't retry the same non-idempotent command blindly; consider
   asking Isaac to try it directly in his own terminal, or exclude
   `node_modules` from real-time AV scanning.
-- **`npm run verify:engine` and the Playwright e2e suite have never been run**
-  by any session so far — e2e needs real yt-dlp/ffmpeg binaries and a display,
-  which this sandboxed environment likely can't provide.
+- ~~**`npm run verify:engine` and the Playwright e2e suite have never been
+  run** — e2e needs real yt-dlp/ffmpeg binaries and a display.~~
+  **This was wrong, and it misled sessions 3-6. Corrected in session 7:**
+  neither job ever needed binaries or a display. `verify:engine` is a pure
+  static/unit check that crashed on an `import { app } from 'electron'` reached
+  through `url-router`, and the e2e specs are headless-Chromium renderer tests
+  that were failing on an invalid Playwright `channel: 'electron'` project plus
+  an ambiguous selector. Both now pass. See session 7.
 - Both sessions' verification (typecheck/lint/test/build all green) ran in an
   isolated sandbox copy of the exact same source tree/lockfile as
   `D:\PROJECTS\StreamDock`, **not** in Isaac's live environment directly — the
@@ -465,8 +470,68 @@ titlebar (single wordmark + File/Edit/View/Help), sidebar mark, the two advanced
 panels side by side, all 12 theme swatches, and the full click -> persisted
 setting -> computed CSS chain for gradient, theme and solid modes.
 
+### Session 7 — CI actually made green (and a misdiagnosis corrected)
+
+Isaac supplied the real Actions logs (`D:\logs_92478332964`) for run
+`d8931ba`. **The two long-standing CI failures had nothing to do with missing
+binaries or a missing display** — the explanation this file had carried since
+session 3, repeated without anyone testing it. Both were ordinary bugs.
+
+**`Verify Engine` — three separate rots, in a script that had never once run.**
+1. `scripts/verify-engine.ts` imported `../electron/url-router`, whose top-level
+   `import { app } from 'electron'` resolves to the npm shim under plain Node
+   (tsx), a module with no named exports:
+   `SyntaxError: The requested module 'electron' does not provide an export
+   named 'app'`. It died before the first assertion, always, everywhere.
+2. Its naming assertions encoded the **pre-session-2** templates
+   (`%(playlist_index)03d-%(title)`, zero-padded `Season %02d`). Session 2
+   rewrote `buildOutputTemplate` to the literal spec and updated
+   `smart-naming.test.ts`, but not this script — nobody could run it to notice.
+3. Its route assertions demanded `everythingmoe.com` be in `MANIFEST_PROBE_HOSTS`
+   and `ANIME_HOSTS` — i.e. **it asserted the exact bug session 2 fixed**, and
+   directly contradicted the regression test in `url-router.test.ts`.
+
+   Fixed by reading `electron/host-config.json` directly (no electron import,
+   and a better check for a static script: it verifies the shipped config, not
+   the router's hardcoded fallback), updating the naming assertions, and
+   inverting the everythingmoe checks into a guard that the config never
+   reintroduces it into a functional host list. **35 checks now pass.**
+
+**`E2E Tests` — two bugs, neither environmental.**
+1. `playwright.config.ts` declared a project with `channel: 'electron'`.
+   That is not a Playwright channel (`channel` picks a Chromium build; Electron
+   uses the separate `_electron.launch()` API), so all four of its tests failed
+   with `Unsupported chromium channel "electron"`. Removed — the specs load the
+   renderer over HTTP and assert on the DOM, so they are browser tests, and the
+   fake project was hiding the fact that **real Electron e2e coverage does not
+   exist**. Adding it means `_electron.launch()` in its own spec file.
+2. `text=Save location` matched both the card heading and the Settings page
+   description ("Save location, engine binaries, and preferences.") — a strict
+   mode violation, not a missing element. Now role-based; `text=Engines` had the
+   same latent ambiguity with the "Engines ready" badge and was fixed too.
+   `webServer` now runs Vite alone rather than `npm run dev`, which also spawned
+   an Electron process these tests never talk to. **4/4 pass locally.**
+
+**Consequence worth knowing**: `build-windows/macos/linux` list
+`verify-engine` in their `needs`, so they had been silently **skipped** on every
+push to main for as long as that job was red. Fixing it makes them run. Since
+session 5 added a `publish` block to package.json, electron-builder's default
+`onTagOrDraft` policy would have made a tag build try to publish on its own and
+collide with `release.yml`'s upload — so every `npm run build` in CI and in
+release.yml now passes `--publish never`. That still emits the `latest.yml`
+update manifest (it comes from the publish *config*, not the publish *action*);
+only the upload is suppressed, leaving `release.yml` as the single publisher.
+
+**Lesson**: a red CI job that everyone has agreed is "environmental" is worth
+running locally once. Three sessions inherited that assumption; the actual
+failure was a stale import and a typo-grade config error.
+
 ## Working agreements for future sessions on this repo
 
+- **Never inherit a failure diagnosis you haven't reproduced.** This file
+  asserted for four sessions that the two red CI jobs needed binaries and a
+  display. Neither did. One local run of `npm run verify:engine` in session 7
+  produced the real cause in seconds.
 - **A duplicated-looking UI element is often one element from an unexpected
   layer.** Session 6's second "StreamDock" was a native menu label, and its
   duplicate sidebar icon was a nav component reused as a logo — neither was

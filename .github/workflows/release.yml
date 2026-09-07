@@ -29,7 +29,11 @@ jobs:
         run: npm run download:binaries
 
       - name: Build Windows app
-        run: npm run build
+        # --publish never so electron-builder only *generates* the artifacts and
+        # the latest.yml update manifest; the upload below is the single
+        # publishing path. Without this, a tag build satisfies electron-builder's
+        # default onTagOrDraft policy and it would try to create its own release.
+        run: npm run build -- --publish never
 
       - name: Create GitHub Release & Upload Assets
         uses: softprops/action-gh-release@v2
