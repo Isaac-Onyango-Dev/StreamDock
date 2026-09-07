@@ -547,6 +547,9 @@ footer {
 </style>
 </head>
 <body>
+<!-- Platform icons: Font Awesome Free 6.7.2 brand marks (fontawesome.com),
+     icons licensed CC BY 4.0. Sources kept in docs/assets/icons/ and inlined
+     at build time by scripts/build-site.ts so they inherit currentColor. -->
 <div class="blob blob-1"></div>
 <div class="blob blob-2"></div>
 <div class="blob blob-3"></div>
@@ -593,9 +596,9 @@ footer {
         <small id="hero-download-sub">v{{VERSION}}</small>
       </a>
       <div class="platform-picker" id="platform-picker">
-        <a class="platform-pill" data-os="windows" href="#download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><rect x="3" y="4" width="8" height="8" rx="1"/><rect x="13" y="4" width="8" height="8" rx="1"/><rect x="3" y="14" width="8" height="6" rx="1"/><rect x="13" y="14" width="8" height="6" rx="1"/></svg> Windows</a>
-        <a class="platform-pill" data-os="mac" href="#download"><svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M16.365 1.43c.16 1.09-.31 2.18-.99 2.95-.7.79-1.85 1.4-2.95 1.31-.15-1.06.34-2.18 1-2.92.73-.83 1.98-1.44 2.94-1.34z"/><path d="M20.94 17.24c-.53 1.2-.78 1.73-1.46 2.79-.95 1.47-2.28 3.3-3.94 3.31-1.47.02-1.85-.96-3.84-.95-1.99.01-2.41.97-3.88.95-1.66-.02-2.92-1.68-3.87-3.14-2.65-4.06-2.93-8.83-1.29-11.37 1.16-1.8 2.99-2.85 4.71-2.85 1.75 0 2.85 1 4.3 1 1.4 0 2.26-1 4.3-1 1.53 0 3.16.83 4.31 2.27-3.79 2.08-3.18 7.5.66 8.99z"/></svg> macOS</a>
-        <a class="platform-pill" data-os="linux" href="#download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3"/><path d="M12 15h5"/></svg> Linux</a>
+        <a class="platform-pill" data-os="windows" href="#download">{{ICON_WINDOWS_SM}} Windows</a>
+        <a class="platform-pill" data-os="mac" href="#download">{{ICON_APPLE_SM}} macOS</a>
+        <a class="platform-pill" data-os="linux" href="#download">{{ICON_LINUX_SM}} Linux</a>
       </div>
     </div>
 
@@ -619,7 +622,7 @@ footer {
     <div class="cards">
 
       <div class="card" data-platform-card="windows">
-        <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="8" height="8" rx="1"/><rect x="13" y="4" width="8" height="8" rx="1"/><rect x="3" y="14" width="8" height="6" rx="1"/><rect x="13" y="14" width="8" height="6" rx="1"/></svg></div>
+        <div class="card-icon">{{ICON_WINDOWS_LG}}</div>
         <div class="card-header">
           <h3>Windows</h3>
           <p>Windows 10 / 11 — 64-bit</p>
@@ -638,7 +641,7 @@ footer {
       </div>
 
       <div class="card is-disabled" data-platform-card="mac">
-        <div class="card-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.365 1.43c.16 1.09-.31 2.18-.99 2.95-.7.79-1.85 1.4-2.95 1.31-.15-1.06.34-2.18 1-2.92.73-.83 1.98-1.44 2.94-1.34z"/><path d="M20.94 17.24c-.53 1.2-.78 1.73-1.46 2.79-.95 1.47-2.28 3.3-3.94 3.31-1.47.02-1.85-.96-3.84-.95-1.99.01-2.41.97-3.88.95-1.66-.02-2.92-1.68-3.87-3.14-2.65-4.06-2.93-8.83-1.29-11.37 1.16-1.8 2.99-2.85 4.71-2.85 1.75 0 2.85 1 4.3 1 1.4 0 2.26-1 4.3-1 1.53 0 3.16.83 4.31 2.27-3.79 2.08-3.18 7.5.66 8.99z"/></svg></div>
+        <div class="card-icon">{{ICON_APPLE_LG}}</div>
         <div class="card-header">
           <h3>macOS</h3>
           <p>macOS 12 Monterey or later</p>
@@ -652,7 +655,7 @@ footer {
       </div>
 
       <div class="card is-disabled" data-platform-card="linux">
-        <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3"/><path d="M12 15h5"/></svg></div>
+        <div class="card-icon">{{ICON_LINUX_LG}}</div>
         <div class="card-header">
           <h3>Linux</h3>
           <p>Ubuntu 20.04+ / Debian-based</p>
@@ -740,7 +743,7 @@ footer {
     <h2 class="section-title">System Requirements</h2>
     <div class="req-grid">
       <div class="req-item">
-        <span class="req-emoji"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="8" height="8" rx="1"/><rect x="13" y="4" width="8" height="8" rx="1"/><rect x="3" y="14" width="8" height="6" rx="1"/><rect x="13" y="14" width="8" height="6" rx="1"/></svg></span>
+        <span class="req-emoji">{{ICON_WINDOWS_MD}}</span>
         <div class="req-text">
           <h5>Windows</h5>
           <p>Windows 10 (64-bit) or later. No extra runtime required — everything's bundled.</p>
@@ -753,15 +756,15 @@ footer {
           <p><code>yt-dlp</code> and <code>ffmpeg</code> ship inside the installer — nothing extra to download or configure.</p>
         </div>
       </div>
-      <div class="req-item" style="opacity:.5;">
-        <span class="req-emoji"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.365 1.43c.16 1.09-.31 2.18-.99 2.95-.7.79-1.85 1.4-2.95 1.31-.15-1.06.34-2.18 1-2.92.73-.83 1.98-1.44 2.94-1.34z"/><path d="M20.94 17.24c-.53 1.2-.78 1.73-1.46 2.79-.95 1.47-2.28 3.3-3.94 3.31-1.47.02-1.85-.96-3.84-.95-1.99.01-2.41.97-3.88.95-1.66-.02-2.92-1.68-3.87-3.14-2.65-4.06-2.93-8.83-1.29-11.37 1.16-1.8 2.99-2.85 4.71-2.85 1.75 0 2.85 1 4.3 1 1.4 0 2.26-1 4.3-1 1.53 0 3.16.83 4.31 2.27-3.79 2.08-3.18 7.5.66 8.99z"/></svg></span>
+      <div class="req-item">
+        <span class="req-emoji">{{ICON_APPLE_MD}}</span>
         <div class="req-text">
           <h5>macOS — Coming Soon</h5>
           <p>macOS 12 Monterey or later (Apple Silicon &amp; Intel). Build not yet packaged.</p>
         </div>
       </div>
       <div class="req-item" style="opacity:.5;">
-        <span class="req-emoji"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3"/><path d="M12 15h5"/></svg></span>
+        <span class="req-emoji">{{ICON_LINUX_MD}}</span>
         <div class="req-text">
           <h5>Linux — Coming Soon</h5>
           <p>Ubuntu 20.04 / Debian 11 or compatible. Build not yet packaged.</p>

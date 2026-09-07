@@ -204,9 +204,62 @@ function verifyChangelogRendering(): void {
   }
 }
 
+/**
+ * The generated site must be fully substituted and structurally complete.
+ *
+ * Two failures this catches, both real:
+ *
+ *  - An unsubstituted `{{PLACEHOLDER}}` shipping to the live site. Every one of
+ *    these is a typo between the template and build-site.ts, and the page
+ *    renders the literal braces to visitors.
+ *  - Content deleted during a bulk template edit. Swapping the platform icons
+ *    with a regex whose `.*?` could backtrack across a sibling silently ate the
+ *    entire "Nothing else to install" requirement card; the build succeeded and
+ *    only a screenshot showed three cards where there had been four.
+ */
+function verifySiteRendering(): void {
+  const html = readProjectFile('docs/index.html');
+
+  const leftover = html.match(/\{\{[A-Z_]+\}\}/g);
+  assert(
+    leftover === null,
+    `docs/index.html has no unsubstituted placeholders${leftover ? ` (found ${leftover.join(', ')})` : ''}`,
+  );
+
+  // The real Font Awesome brand marks, inlined from docs/assets/icons/. Their
+  // viewBoxes are distinctive: a generic 24x24 icon here means a placeholder
+  // glyph crept back in.
+  const brandIcons: Array<[string, string]> = [
+    ['Windows', '0 0 448 512'],
+    ['Linux', '0 0 448 512'],
+    ['Apple', '0 0 384 512'],
+  ];
+  for (const [label, viewBox] of brandIcons) {
+    assert(
+      html.includes(`viewBox="${viewBox}"`),
+      `the site inlines the real ${label} brand icon (viewBox ${viewBox})`,
+    );
+  }
+
+  // Each OS mark appears in the hero pill, the requirements grid and the
+  // download card — three instances apiece.
+  const appleCount = (html.match(/viewBox="0 0 384 512"/g) || []).length;
+  assert(appleCount === 3, `the Apple mark appears 3 times, not ${appleCount}`);
+  const wideCount = (html.match(/viewBox="0 0 448 512"/g) || []).length;
+  assert(wideCount === 6, `the Windows and Linux marks appear 6 times combined, not ${wideCount}`);
+
+  for (const heading of ['Windows', 'Nothing else to install', 'macOS', 'Linux']) {
+    assert(
+      html.includes(`<h5>${heading}`),
+      `the System Requirements grid still lists "${heading}"`,
+    );
+  }
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
 verifyChangelogRendering();
+verifySiteRendering();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);
