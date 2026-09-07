@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { resolvePluginDirs, buildPluginDirArgs, executableNames } from './binary-resolver';
+import { resolvePluginDirs, buildPluginDirArgs, executableNames, getBinaryStatus } from './binary-resolver';
 
 vi.mock('fs', () => {
   // binary-resolver.ts imports all six of these from 'fs'. The mock previously covered
@@ -27,9 +27,6 @@ vi.mock('electron', () => ({
     }),
     getAppPath: vi.fn(() => '/tmp/app'),
     isPackaged: false,
-  },
-  process: {
-    resourcesPath: '/tmp/resources',
   },
 }));
 
@@ -87,6 +84,59 @@ describe('binary-resolver', () => {
       vi.mocked(existsSync).mockReturnValue(false);
       const args = buildPluginDirArgs();
       expect(args).toEqual([]);
+    });
+  });
+
+  describe('getBinaryStatus (packaged-mode path resolution)', () => {
+    // Regression coverage for the "engines show Not Loaded in packaged build"
+    // bug: the real defect was that binaries/ was never populated before
+    // packaging (see scripts/download-binaries.ts), not this resolution logic
+    // — but that logic had zero test coverage, so nothing would have caught
+    // a real regression here either. These pin down both outcomes.
+    it('reports available:true when the binary exists under process.resourcesPath (packaged mode)', async () => {
+      const electron = await import('electron');
+      // @ts-expect-error — mocked module, isPackaged is writable here
+      electron.app.isPackaged = true;
+      // Real Electron augments the global `process` object with resourcesPath at
+      // runtime — binary-resolver.ts reads it as an ambient global, not an import
+      // from 'electron', so it must be set here rather than in the electron mock.
+      const originalResourcesPath = (process as unknown as { resourcesPath?: string }).resourcesPath;
+      (process as unknown as { resourcesPath: string }).resourcesPath = '/tmp/resources';
+
+      const { existsSync } = await import('fs');
+      vi.mocked(existsSync).mockImplementation(
+        (path: unknown) => typeof path === 'string' && path === '/tmp/resources/binaries/yt-dlp.exe',
+      );
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+
+      const status = getBinaryStatus();
+      const ytDlp = status.find((s) => s.name === 'yt-dlp');
+      expect(ytDlp).toEqual({ name: 'yt-dlp', path: '/tmp/resources/binaries/yt-dlp.exe', available: true });
+
+      // @ts-expect-error — reset for other tests
+      electron.app.isPackaged = false;
+      (process as unknown as { resourcesPath?: string }).resourcesPath = originalResourcesPath;
+    });
+
+    it('reports available:false when packaged resources have no binaries and PATH has none either', async () => {
+      const electron = await import('electron');
+      // @ts-expect-error — mocked module, isPackaged is writable here
+      electron.app.isPackaged = true;
+
+      const { existsSync } = await import('fs');
+      vi.mocked(existsSync).mockReturnValue(false);
+      const originalPathEnv = process.env.PATH;
+      process.env.PATH = '';
+
+      const status = getBinaryStatus();
+      expect(status).toEqual([
+        { name: 'yt-dlp', path: null, available: false },
+        { name: 'ffmpeg', path: null, available: false },
+      ]);
+
+      process.env.PATH = originalPathEnv;
+      // @ts-expect-error — reset for other tests
+      electron.app.isPackaged = false;
     });
   });
 });
