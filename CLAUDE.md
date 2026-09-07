@@ -522,9 +522,22 @@ release.yml now passes `--publish never`. That still emits the `latest.yml`
 update manifest (it comes from the publish *config*, not the publish *action*);
 only the upload is suppressed, leaving `release.yml` as the single publisher.
 
+**Then the macOS build failed — a job that had never run before.** With
+verify-engine green, `Build Windows` and `Build Linux` passed on the first
+attempt, but `Build macOS` died after 17s: far too fast to have packaged
+anything. Cause: `assets/icon.png` was 256x256, under the 512x512 minimum
+electron-builder enforces converting an icon to `.icns`. Windows uses
+`icon.ico` and Linux is lenient, so only macOS cared, and nothing had ever
+built macOS. Added `scripts/generate-icons.ts` (`npm run icons:build`), which
+rasterizes `assets/icon.svg` — the canonical mark — to a 1024x1024 PNG via
+Playwright and refuses to write anything under 512, so this cannot silently
+recur. Manual, not part of `npm run build`: a normal build needs no browser.
+
 **Lesson**: a red CI job that everyone has agreed is "environmental" is worth
 running locally once. Three sessions inherited that assumption; the actual
-failure was a stale import and a typo-grade config error.
+failure was a stale import and a typo-grade config error. And a job that is
+skipped is not a job that passes — the build jobs were green-by-absence for
+months because their `needs` was red.
 
 ## Working agreements for future sessions on this repo
 
