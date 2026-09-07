@@ -21,7 +21,18 @@ export interface NamingRequest {
    * what decides whether a folder gets created at all.
    */
   isPlaylist?: boolean;
-  /** A yt-dlp --playlist-items selection, which implies a real playlist. */
+  /**
+   * A yt-dlp --playlist-items selection.
+   *
+   * A selection naming exactly one item is not a multi-item batch, however it
+   * was produced — grabbing episode 5 of a series should land beside your other
+   * downloads, not alone inside a folder. Treating any non-empty value as
+   * "playlist" is how an ordinary single video ended up in a folder called
+   * "NA": the renderer auto-selects the sole preview item of a one-item probe,
+   * which used to emit `playlistItems: '1'`, and with no folderHint to use the
+   * template fell back to %(playlist_title)s, which yt-dlp renders as NA when
+   * there is no playlist.
+   */
   playlistItems?: string;
   /**
    * Folder name for a confirmed multi-item batch (playlist or series title).
@@ -76,9 +87,24 @@ export function sanitizeName(value: string): string {
 export function isConfirmedMultiItem(request: NamingRequest): boolean {
   return request.mode === 'video' && (
     request.isPlaylist === true ||
-    Boolean(request.playlistItems?.trim()) ||
+    selectsMultipleItems(request.playlistItems) ||
     Boolean(request.folderHint?.trim())
   );
+}
+
+/**
+ * True when a `--playlist-items` spec can match more than one item.
+ *
+ * Deliberately conservative: only a spec that is exactly one plain integer
+ * ("5", " 12 ") is treated as single. Ranges, lists and open-ended or stepped
+ * specs ("1-3", "1,2", "3:", "::2") all count as multiple, so an unfamiliar
+ * form errs towards creating the folder rather than dropping many files loose
+ * into the download directory.
+ */
+function selectsMultipleItems(spec: string | undefined): boolean {
+  const trimmed = spec?.trim();
+  if (!trimmed) return false;
+  return !/^\d+$/.test(trimmed);
 }
 
 /**

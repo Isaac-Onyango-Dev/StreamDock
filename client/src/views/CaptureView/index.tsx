@@ -555,14 +555,20 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, onError, on
         playlistItems = undefined;
       } else {
         batchUrls = [current.url];
-        playlistItems = sorted.map((i) => i + 1).join(',');
+        // Only a real playlist can be addressed by --playlist-items. A single
+        // video's probe still returns a one-item preview, and the auto-select
+        // effect ticks it, so this branch used to emit playlistItems: '1' for
+        // an ordinary video — which buildOutputTemplate reads as a confirmed
+        // multi-item batch and wraps in a folder named from %(playlist_title)s,
+        // i.e. the literal "NA" folder single downloads kept landing in.
+        playlistItems = isPlaylist ? sorted.map((i) => i + 1).join(',') : undefined;
       }
     } else if (isEpisodeRange) {
       batchUrls = episodeUrls;
       playlistItems = undefined;
     } else {
       batchUrls = [current.url];
-      playlistItems = canUsePlaylistControls ? plannedItems : undefined;
+      playlistItems = canUsePlaylistControls && isPlaylist ? plannedItems : undefined;
     }
 
     const totalItems = hasSelection

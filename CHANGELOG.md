@@ -4,6 +4,37 @@ All notable changes to StreamDock are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] - 2026-09-08
+
+### Added
+- **Linux release.** StreamDock now ships an x86-64 AppImage with the same
+  bundled engines the Windows build carries — yt-dlp and a full ffmpeg/ffprobe
+  pair, no system Python and nothing else to install. Verified end to end on
+  Ubuntu 26.04: the app boots, the bundled engines execute, and a real download
+  completes and lands in the chosen folder.
+
+### Fixed
+- **Single videos no longer land in a folder called "NA".** The preview list
+  auto-selects its only entry for a one-item probe, which sent yt-dlp a
+  `--playlist-items 1` selection; anything in that field counted as a confirmed
+  multi-item batch, so the output template took its playlist branch, found no
+  playlist title to use and fell back to yt-dlp's literal `NA`. A selection
+  naming exactly one item is no longer treated as a batch, wherever it came
+  from — so pulling a single episode out of a series also stops creating a
+  folder for it.
+- **Video thumbnails are visible again.** The probe had been resolving them
+  correctly all along; the renderer's Content-Security-Policy allowed images
+  only from `bing.com`, so every thumbnail was blocked and drew a broken-image
+  glyph. Thumbnails come from whatever site is being downloaded from, which no
+  allowlist can enumerate, so `img-src` now permits any https origin. Images
+  only — no plain http, and script and network policy are unchanged.
+- **The Linux app icon shows the StreamDock mark instead of a generic
+  placeholder.** electron-builder downsamples a single PNG into a macOS `.icns`
+  or a Windows `.ico`, but for Linux it ships only the sizes it is handed — so
+  the lone 1024x1024 source was installed to a hicolor directory the freedesktop
+  icon index does not list (it stops at 512x512), and every desktop fell back to
+  a default icon. The build now ships eight indexed sizes from 16 to 512.
+
 ## [1.5.0] - 2026-09-07
 
 ### Fixed

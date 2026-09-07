@@ -154,5 +154,35 @@ describe('smart-naming', () => {
     it('a live stream is never foldered, whatever else is set', () => {
       expect(isConfirmedMultiItem({ mode: 'stream', isPlaylist: true, folderHint: 'X' })).toBe(false);
     });
+
+    // Regression: a single video was landing in a folder literally named "NA".
+    // The renderer auto-selects the only preview item of a one-item probe, which
+    // emitted playlistItems: '1'; that read as a confirmed batch, and with no
+    // folderHint the template fell back to %(playlist_title)s, which yt-dlp
+    // renders as NA when there is no playlist.
+    it('a selection naming exactly one item is not a batch', () => {
+      expect(isConfirmedMultiItem({ mode: 'video', playlistItems: '1' })).toBe(false);
+      expect(isConfirmedMultiItem({ mode: 'video', playlistItems: ' 12 ' })).toBe(false);
+    });
+
+    it('ranges, lists and open-ended selections still count as a batch', () => {
+      for (const spec of ['1,2', '1-3', '3:', ':4', '::2', '2-', 'all']) {
+        expect(isConfirmedMultiItem({ mode: 'video', playlistItems: spec })).toBe(true);
+      }
+    });
+  });
+
+  describe('the single-video folder regression', () => {
+    it('builds a bare filename for a one-item selection, not "NA/<title>"', () => {
+      const template = buildOutputTemplate({ mode: 'video', playlistItems: '1' });
+      expect(template).toBe('%(title).150B.%(ext)s');
+      expect(template).not.toContain('/');
+      expect(template).not.toContain('playlist_title');
+    });
+
+    it('still folders a genuine playlist that has no folder name of its own', () => {
+      expect(buildOutputTemplate({ mode: 'video', isPlaylist: true }))
+        .toBe('%(playlist_title).150B/%(title).150B.%(ext)s');
+    });
   });
 });
