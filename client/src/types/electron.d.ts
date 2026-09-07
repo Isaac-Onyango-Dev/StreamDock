@@ -18,6 +18,9 @@ declare global {
       getVersion: () => Promise<string>;
       getSettings: () => Promise<Settings>;
       updateSettings: (updates: Partial<Settings>) => Promise<Settings>;
+      pluginsList: () => Promise<Array<{ name: string; path: string }>>;
+      /** Best-effort advisory only. Never throws; resolves 'unknown' on failure. */
+      checkSourceStatus: (host: string) => Promise<'active' | 'retired' | 'unknown'>;
       selectDownloadFolder: () => Promise<string | null>;
       readClipboard: () => Promise<string>;
       analyzeUrl: (
@@ -51,7 +54,11 @@ declare global {
           scheduledAt?: string;
           priority?: number;
           selectedAudioLanguage?: string;
+          selectedAudioFormatId?: string;
+          selectedAudioManifestUrl?: string;
           selectedSubtitleLanguages?: string[];
+          selectedSubtitleFormatIds?: string[];
+          selectedSubtitleManifestUrls?: string[];
           subtitleConvertFormat?: 'original' | 'srt' | 'vtt';
           subsOnly?: boolean;
           downloadPackaging?: DownloadPackagingMode;
@@ -97,8 +104,8 @@ declare global {
       stopClipboardWatcher: () => Promise<boolean>;
       onClipboardUrl: (callback: (data: { url: string; sourceText: string }) => void) => () => void;
       // Background
-      getBingDailyImage: () => Promise<string | null>;
-      getBingRefreshInfo?: () => Promise<{ lastRefresh: number }>;
+      rotateNow: () => Promise<string | null>;
+      onWallpaperUpdated: (callback: (url: string) => void) => () => void;
     };
   }
 }

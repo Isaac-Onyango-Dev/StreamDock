@@ -1,5 +1,5 @@
 import { X } from 'lucide-react';
-import type { MediaTrackProbe, DownloadPackagingMode, SubtitleFormat, StreamOption, StreamOptionsProbeResult } from '../lib/types';
+import type { MediaTrackProbe, DownloadPackagingMode, StreamOptionsProbeResult } from '../lib/types';
 import { MediaLanguagePanel } from './MediaLanguagePanel';
 
 interface MediaLanguageSelectionModalProps {
@@ -14,10 +14,13 @@ interface MediaLanguageSelectionModalProps {
     selectedStreamOption?: string;
     onAudioSelect: (id: string | null) => void;
     onSubtitleToggle: (id: string) => void;
+    onSubtitleClear: () => void;
     onSubtitleModeChange: (mode: 'none' | 'embed' | 'sidecar') => void;
     onSubtitleConvertChange: (format: 'original' | 'srt' | 'vtt') => void;
     onSubsOnlyChange: (value: boolean) => void;
     onStreamOptionSelect?: (manifestUrl: string) => void;
+    resolvedFormat: string;
+    resolvedSubtitleArgs: string;
     onConfirm: () => void;
     onCancel: () => void;
 }
@@ -34,14 +37,17 @@ export function MediaLanguageSelectionModal({
     selectedStreamOption,
     onAudioSelect,
     onSubtitleToggle,
+    onSubtitleClear,
     onSubtitleModeChange,
     onSubtitleConvertChange,
     onSubsOnlyChange,
     onStreamOptionSelect,
+    resolvedFormat,
+    resolvedSubtitleArgs,
     onConfirm,
     onCancel,
 }: MediaLanguageSelectionModalProps) {
-    const hasAudio = (probe?.audioTracks?.length ?? 0) > 0;
+    const hasAudio = (probe?.audioTracks?.length ?? 0) > 1;
     const hasSubs = (probe?.subtitleTracks?.length ?? 0) > 0;
     const hasAlternateTracks = hasAudio || hasSubs;
     const hasStreamOptions = streamOptions?.options && streamOptions.options.length > 1;
@@ -81,6 +87,9 @@ export function MediaLanguageSelectionModal({
                                         />
                                         <span className="min-w-0 flex-1 truncate text-text-primary">{option.label}</span>
                                         {option.isDefault && <span className="badge bg-surface-3 text-text-secondary">Default</span>}
+                                        {/* Language/DUB-SUB classification is always populated ('Unknown' when
+                                            undetectable) so this badge is never blank — see stream-options-probe.ts */}
+                                        <span className="badge bg-accent/15 text-accent" title="Detected language">{option.language}</span>
                                         <span className="badge bg-surface-3 text-text-disabled">{option.manifestType.toUpperCase()}</span>
                                     </label>
                                 ))}
@@ -99,10 +108,19 @@ export function MediaLanguageSelectionModal({
                             packagingMode={packagingMode}
                             onAudioSelect={onAudioSelect}
                             onSubtitleToggle={onSubtitleToggle}
+                            onSubtitleClear={onSubtitleClear}
                             onSubtitleModeChange={onSubtitleModeChange}
                             onSubtitleConvertChange={onSubtitleConvertChange}
                             onSubsOnlyChange={onSubsOnlyChange}
                         />
+                    )}
+
+                    {(hasAudio || hasSubs) && (
+                        <section className="mt-3 space-y-2 rounded-md border border-border-subtle bg-surface-2 p-3">
+                            <p className="text-xs font-medium uppercase tracking-[0.07em] text-text-secondary">yt-dlp command preview</p>
+                            <p className="break-all font-mono text-xs text-text-primary">-f {resolvedFormat}</p>
+                            <p className="break-all font-mono text-xs text-text-primary">{resolvedSubtitleArgs}</p>
+                        </section>
                     )}
 
                     {probe && probe.audioTracks.length === 0 && probe.subtitleTracks.length === 0 && (

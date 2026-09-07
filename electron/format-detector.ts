@@ -45,6 +45,19 @@ export function detectFormat(url: string): FormatDetection {
     return { format: 'dash', isLive: false, requiresRange: false };
   }
 
+  // ── Fragmented MP4 (fMP4) detection ─────────────────────────────────────────
+  // Must run BEFORE the generic ".mp4" direct-file check below: a fragment/init-
+  // segment URL commonly still ends in ".mp4" (e.g. "/fragment.mp4",
+  // "/init.mp4"), and previously the direct-file branch always matched first,
+  // so fMP4 URLs were silently misclassified as plain 'mp4'. That mattered in
+  // practice — buildFormatArgs() gives 'mp4' `--concurrent-fragments 4`
+  // (parallel range-request downloading), which is the wrong strategy for a
+  // fragmented/init-segment stream and 'fmp4' deliberately doesn't request it.
+  if (lower.includes('/fragment') || lower.includes('/seg') || lower.includes('fmp4') ||
+      lower.includes('/init.mp4') || lower.includes('segment_duration')) {
+    return { format: 'fmp4', isLive: false, requiresRange: false };
+  }
+
   // ── Direct file formats ──────────────────────────────────────────────────────
   if (path.endsWith('.mp4') || lower.includes('.mp4?')) {
     return { format: 'mp4', isLive: false, requiresRange: true };
@@ -60,12 +73,6 @@ export function detectFormat(url: string): FormatDetection {
     return { format: 'audio', isLive: false, requiresRange: true };
   }
 
-  // ── Fragmented MP4 (fMP4) detection ─────────────────────────────────────────
-  if (lower.includes('/fragment') || lower.includes('/seg') || lower.includes('fmp4') ||
-      lower.includes('/init.mp4') || lower.includes('segment_duration')) {
-    return { format: 'fmp4', isLive: false, requiresRange: false };
-  }
-
   // ── Live stream hosts ────────────────────────────────────────────────────────
   const isLiveHost = LIVE_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
   const isLivePath = LIVE_PATH_PATTERNS.some((p) => path.includes(p));
@@ -73,21 +80,25 @@ export function detectFormat(url: string): FormatDetection {
     (host === 'youtube.com' || host.endsWith('.youtube.com')) &&
     (path.includes('/live') || parsed.searchParams.has('v'));
 
-  if (isLiveHost && (isLivePath || host.includes('twitch') || host.includes('kick'))) {
-    return {
-      format: 'live',
-      isLive: true,
-      requiresRange: false,
-      liveMessage: 'Live stream detected — recording mode active.',
-    };
-  }
-
+  // Check the YouTube-specific case FIRST: youtube.com is also in LIVE_HOSTS, so
+  // the generic isLiveHost branch below would otherwise always match first for
+  // youtube.com/live/... URLs and this more specific, more informative message
+  // ("YouTube Live detected — recording from start.") would never be reachable.
   if (isYouTubeLive && path.includes('/live')) {
     return {
       format: 'live',
       isLive: true,
       requiresRange: false,
       liveMessage: 'YouTube Live detected — recording from start.',
+    };
+  }
+
+  if (isLiveHost && (isLivePath || host.includes('twitch') || host.includes('kick'))) {
+    return {
+      format: 'live',
+      isLive: true,
+      requiresRange: false,
+      liveMessage: 'Live stream detected — recording mode active.',
     };
   }
 

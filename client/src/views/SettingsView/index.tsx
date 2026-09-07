@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { CheckCircle2, FolderOpen, RefreshCw, XCircle } from 'lucide-react';
 import type { EngineStatus, Settings } from '../../lib/types';
 import { BackgroundSettings } from './BackgroundSettings';
+import { YtDlpSettings } from './YtDlpSettings';
 import { Toggle } from '../../components/Toggle';
 
 interface SettingsPanelProps {
@@ -77,7 +78,7 @@ export function SettingsView({
               <Toggle
                 label="Use Chrome cookies"
                 ariaLabel="Use Chrome cookies for age-gated or login-protected sites"
-                enabled={settings.useCookies}
+                enabled={settings.useCookies ?? false}
                 onChange={(val) => {
                   void window.streamDock?.updateSettings({ useCookies: val }).then((next) => {
                     if (next) onSettingsChange(next);
@@ -113,7 +114,7 @@ export function SettingsView({
               <Toggle
                 label="Clipboard URL watcher"
                 ariaLabel="Auto-detect URLs copied to clipboard"
-                enabled={settings.clipboardWatcher}
+                enabled={settings.clipboardWatcher ?? false}
                 onChange={(val) => {
                   void window.streamDock?.updateSettings({ clipboardWatcher: val }).then((next) => {
                     if (next) onSettingsChange(next);
@@ -180,7 +181,8 @@ export function SettingsView({
           )}
         </section>
 
-        <BackgroundSettings />
+        <BackgroundSettings settings={settings} onSettingsChange={onSettingsChange} />
+        <YtDlpSettings settings={settings} onSettingsChange={onSettingsChange} />
       </div>
     </div>
   );

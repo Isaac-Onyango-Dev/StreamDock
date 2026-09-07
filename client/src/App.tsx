@@ -6,7 +6,7 @@ import { VersionWarningBanner } from './components/VersionWarningBanner';
 import { SettingsView } from './views/SettingsView';
 import { CaptureView } from './views/CaptureView';
 import { OverlayBus } from './components/OverlayBus';
-import type { CaptureMode, EngineStatus, Settings, Tab, BackgroundMode } from './lib/types';
+import type { CaptureMode, EngineStatus, Settings, Tab } from './lib/types';
 import { downloadStore } from './store/DownloadStore';
 import { useDownloadRecords, useActiveCount } from './store/useDownloadStore';
 
@@ -129,28 +129,16 @@ export default function App() {
     if (next) setSettings(next);
   };
 
-  const handleBackgroundModeChange = async (backgroundMode: BackgroundMode) => {
-    const next = await window.streamDock?.updateSettings({ backgroundMode });
-    if (next) setSettings(next);
-  };
-
-  const handleBackgroundImageUrlChange = async (backgroundImageUrl: string) => {
-    const next = await window.streamDock?.updateSettings({ backgroundImageUrl });
-    if (next) setSettings(next);
-  };
-
-  // Auto-fetch Bing daily image when mode is 'bing'
+  // Listen for background wallpaper rotations globally
   useEffect(() => {
-    if (settings.backgroundMode === 'bing' && window.streamDock?.getBingDailyImage) {
-      window.streamDock.getBingDailyImage().then((url) => {
-        if (url) {
-          void window.streamDock?.updateSettings({ backgroundImageUrl: url }).then((next) => {
-            if (next) setSettings(next);
-          });
-        }
+    if (window.streamDock?.onWallpaperUpdated) {
+      return window.streamDock.onWallpaperUpdated((url) => {
+        void window.streamDock?.updateSettings({ backgroundImageUrl: url }).then((next) => {
+          if (next) setSettings(next);
+        });
       });
     }
-  }, [settings.backgroundMode]);
+  }, []);
 
   const scrollableTab = currentTab !== 'transfers';
 

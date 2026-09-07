@@ -1,4 +1,7 @@
 // Role: authoritative main-process URL analysis and mode suggestion.
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { app } from 'electron';
 
 export type CaptureMode = 'video' | 'stream';
 
@@ -10,63 +13,53 @@ export interface UrlAnalysis {
   reason: string;
 }
 
-export const STREAM_HOSTS = ['twitch.tv', 'kick.com', 'trovo.live', 'afreecatv.com', 'movies-central.com', 'supernova.to'];
-export const REFERENCE_HOSTS = ['everythingmoe.com', 'everythingmoe.org'];
-export const PLUGIN_EXTRACTOR_HOSTS = [
-  'anikoto.cz',
-  'anikototv.to',
-  'animepahe.com',
-  'animepahe.pw',
-  'animepahe.org',
-  'aniwatchtv.to',
-  'kaido.to',
-];
-export const MANIFEST_PROBE_HOSTS = [
-  ...REFERENCE_HOSTS,
-  'anikoto.cz',
-  'anidap.se',
-  'animedao.watch',
-  'anikototv.to',
-  'shuttletv.su',
-  'gojoora.com',
-  'gojoora.net',
-  'movies-central.com',
-  'supernova.to',
-  // hianime variants — in ANIME_HOSTS but also need manifest probe fallback
-  'hianime.to',
-  'hianime.com',
-  'hianime.re',
-  'aniwatch.to',
-  'aniwatch.com',
-  // fmovies variants
-  'fmovies.to',
-  'fmovies.ps',
-  'fmovies.wtf',
-];
+interface HostConfig {
+  streamHosts: string[];
+  referenceHosts: string[];
+  pluginExtractorHosts: string[];
+  manifestProbeHosts: string[];
+  animeHosts: string[];
+  ytDlpSupportedHosts: string[];
+}
 
-/**
- * Anime-oriented hosts that should use the bundled/local plugin path where possible.
- */
-export const ANIME_HOSTS = [
-  ...PLUGIN_EXTRACTOR_HOSTS,
-  'anikoto.cz',
-  'anidap.se',
-  'animedao.watch',
-  'anikototv.to',
-  'animepahe.com',
-  'animepahe.pw',
-  'animepahe.org',
-  'aniwatchtv.to',
-  'kaido.to',
-  'hianime.to',
-  'hianime.com',
-  'hianime.re',
-  'aniwatch.to',
-  'aniwatch.com',
-  'gojoora.com',
-  'gojoora.net',
-  ...REFERENCE_HOSTS,
-].filter((host, index, list) => list.indexOf(host) === index);
+let configCache: HostConfig | null = null;
+
+function loadHostConfig(): HostConfig {
+  if (configCache) return configCache;
+
+  // Path resolution itself (app.getAppPath() / process.resourcesPath) used to sit
+  // outside the try/catch below, so if either was unavailable — e.g. app not yet
+  // ready, or a restricted/mocked runtime — this threw instead of falling back to
+  // the hardcoded defaults the catch block promises. Everything now goes through
+  // one try/catch so ANY failure to obtain a usable config falls back safely.
+  try {
+    const isDev = !app.isPackaged || process.env.NODE_ENV === 'development';
+    const configPath = isDev
+      ? join(app.getAppPath(), 'electron', 'host-config.json')
+      : join(process.resourcesPath, 'electron', 'host-config.json');
+    const content = readFileSync(configPath, 'utf-8');
+    configCache = JSON.parse(content) as HostConfig;
+    return configCache;
+  } catch {
+    // Fallback to hardcoded defaults if config file not found
+    configCache = {
+      streamHosts: ['twitch.tv', 'kick.com', 'trovo.live', 'afreecatv.com', 'movies-central.com', 'supernova.to'],
+      referenceHosts: ['everythingmoe.com', 'everythingmoe.org'],
+      pluginExtractorHosts: ['anikoto.cz', 'anikototv.to', 'animepahe.com', 'animepahe.pw', 'animepahe.org', 'aniwatchtv.to', 'kaido.to'],
+      manifestProbeHosts: ['anikoto.cz', 'anidap.se', 'animedao.watch', 'anikototv.to', 'shuttletv.su', 'gojoora.com', 'gojoora.net', 'movies-central.com', 'supernova.to', 'hianime.to', 'hianime.com', 'hianime.re', 'aniwatch.to', 'aniwatch.com', 'fmovies.to', 'fmovies.ps', 'fmovies.wtf'],
+      animeHosts: ['anikoto.cz', 'anidap.se', 'animedao.watch', 'anikototv.to', 'animepahe.com', 'animepahe.pw', 'animepahe.org', 'aniwatchtv.to', 'kaido.to', 'hianime.to', 'hianime.com', 'hianime.re', 'aniwatch.to', 'aniwatch.com', 'gojoora.com', 'gojoora.net'],
+      ytDlpSupportedHosts: ['youtube.com', 'youtu.be', 'vimeo.com', 'tiktok.com', 'instagram.com', 'twitter.com', 'x.com', 'twitch.tv'],
+    };
+    return configCache;
+  }
+}
+
+export const STREAM_HOSTS = () => loadHostConfig().streamHosts;
+export const REFERENCE_HOSTS = () => loadHostConfig().referenceHosts;
+export const PLUGIN_EXTRACTOR_HOSTS = () => loadHostConfig().pluginExtractorHosts;
+export const MANIFEST_PROBE_HOSTS = () => loadHostConfig().manifestProbeHosts;
+export const ANIME_HOSTS = () => loadHostConfig().animeHosts;
+export const YTDLP_SUPPORTED_HOSTS = () => loadHostConfig().ytDlpSupportedHosts;
 
 function matchesHost(host: string, domains: string[]): boolean {
   return domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
@@ -92,7 +85,7 @@ export function analyzeUrl(value: string): UrlAnalysis {
     return { url, host, valid: true, suggestedMode: 'stream', reason: 'Manifest URL detected.' };
   }
 
-  if (matchesHost(host, REFERENCE_HOSTS)) {
+  if (matchesHost(host, REFERENCE_HOSTS())) {
     return {
       url,
       host,
@@ -102,11 +95,11 @@ export function analyzeUrl(value: string): UrlAnalysis {
     };
   }
 
-  if (matchesHost(host, STREAM_HOSTS)) {
+  if (matchesHost(host, STREAM_HOSTS())) {
     return { url, host, valid: true, suggestedMode: 'stream', reason: 'Known live streaming host.' };
   }
 
-  if (matchesHost(host, PLUGIN_EXTRACTOR_HOSTS)) {
+  if (matchesHost(host, PLUGIN_EXTRACTOR_HOSTS())) {
     return {
       url,
       host,
@@ -116,7 +109,7 @@ export function analyzeUrl(value: string): UrlAnalysis {
     };
   }
 
-  if (matchesHost(host, MANIFEST_PROBE_HOSTS)) {
+  if (matchesHost(host, MANIFEST_PROBE_HOSTS())) {
     return {
       url,
       host,
@@ -141,4 +134,16 @@ export function analyzeUrl(value: string): UrlAnalysis {
   }
 
   return { url, host, valid: true, suggestedMode: 'video', reason: 'Standard media URL.' };
+}
+
+export function getProbeStrategy(url: string): 'ytdlp' | 'browser' {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+    if (matchesHost(host, YTDLP_SUPPORTED_HOSTS())) {
+      return 'ytdlp';
+    }
+    return 'browser';
+  } catch {
+    return 'browser';
+  }
 }

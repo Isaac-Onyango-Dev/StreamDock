@@ -23,7 +23,7 @@ export function playDiscovery(): void {
     gain.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
     osc.start(t);
     osc.stop(t + 0.45);
-  } catch {}
+  } catch { /* no-op: playback is best-effort UI feedback */ }
 }
 
 export function playPop(delay = 0): void {
@@ -40,7 +40,7 @@ export function playPop(delay = 0): void {
     gain.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
     osc.start(t);
     osc.stop(t + 0.06);
-  } catch {}
+  } catch { /* no-op: playback is best-effort UI feedback */ }
 }
 
 export function playComplete(): void {
@@ -59,7 +59,7 @@ export function playComplete(): void {
     gain.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
     osc.start(t);
     osc.stop(t + 0.6);
-  } catch {}
+  } catch { /* no-op: playback is best-effort UI feedback */ }
 }
 
 export function playError(): void {
@@ -77,5 +77,5 @@ export function playError(): void {
     gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
     osc.start(t);
     osc.stop(t + 0.35);
-  } catch {}
+  } catch { /* no-op: playback is best-effort UI feedback */ }
 }

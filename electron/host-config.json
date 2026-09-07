@@ -1,0 +1,70 @@
+{
+  "streamHosts": [
+    "twitch.tv",
+    "kick.com",
+    "trovo.live",
+    "afreecatv.com",
+    "movies-central.com",
+    "supernova.to"
+  ],
+  "referenceHosts": [
+    "everythingmoe.com",
+    "everythingmoe.org"
+  ],
+  "pluginExtractorHosts": [
+    "anikoto.cz",
+    "anikototv.to",
+    "animepahe.com",
+    "animepahe.pw",
+    "animepahe.org",
+    "aniwatchtv.to",
+    "kaido.to"
+  ],
+  "manifestProbeHosts": [
+    "anikoto.cz",
+    "anidap.se",
+    "animedao.watch",
+    "anikototv.to",
+    "shuttletv.su",
+    "gojoora.com",
+    "gojoora.net",
+    "movies-central.com",
+    "supernova.to",
+    "hianime.to",
+    "hianime.com",
+    "hianime.re",
+    "aniwatch.to",
+    "aniwatch.com",
+    "fmovies.to",
+    "fmovies.ps",
+    "fmovies.wtf"
+  ],
+  "animeHosts": [
+    "anikoto.cz",
+    "anidap.se",
+    "animedao.watch",
+    "anikototv.to",
+    "animepahe.com",
+    "animepahe.pw",
+    "animepahe.org",
+    "aniwatchtv.to",
+    "kaido.to",
+    "hianime.to",
+    "hianime.com",
+    "hianime.re",
+    "aniwatch.to",
+    "aniwatch.com",
+    "gojoora.com",
+    "gojoora.net"
+  ],
+  "ytDlpSupportedHosts": [
+    "youtube.com",
+    "youtu.be",
+    "vimeo.com",
+    "tiktok.com",
+    "instagram.com",
+    "twitter.com",
+    "x.com",
+    "twitch.tv"
+  ]
+}

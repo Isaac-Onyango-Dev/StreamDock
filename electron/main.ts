@@ -1,8 +1,9 @@
 // Role: StreamDock Electron main process — window lifecycle, IPC, logging, crash handling.
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell, nativeImage, Notification, Tray, net } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell, nativeImage, Notification, Tray, net, protocol } from 'electron';
 import type { OpenDialogOptions, MenuItemConstructorOptions } from 'electron';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { dirname, join } from 'path';
+import { existsSync, mkdirSync } from 'fs';
+import { basename, join } from 'path';
+import { pathToFileURL } from 'url';
 import log from 'electron-log';
 import { IPC } from './ipc-channels';
 import { DownloadEngine, type DownloadRequest } from './download-engine';
@@ -10,91 +11,26 @@ import { analyzeUrl } from './url-router';
 import { inspectUrl } from './playlist-inspector';
 import { probeMediaTracks } from './media-track-probe';
 import { probeStreamOptions } from './stream-options-probe';
-import { getBinaryStatus, resolveUpdatableYtDlpCommand, resolveYtDlpCommand } from './binary-resolver';
+import { getBinaryStatus, resolveUpdatableYtDlpCommand, resolveYtDlpCommand, resolvePluginDirs } from './binary-resolver';
 import { toUserError } from './error-translator';
 import { checkYtDlpVersion } from './version-checker';
 import { installCrashReporter } from './crash-reporter';
 
-const BING_CACHE_DIR = join(app.getPath('userData'), 'backgrounds');
-const BING_API_URL = 'https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=en-US';
+import { initWallpaperManager, rotateNow, onSettingsChanged } from './wallpaper-manager';
+import { checkSourceStatus } from './source-status';
 
-let bingRefreshTimer: NodeJS.Timeout | null = null;
-let lastBingRefresh = 0;
-
-function getBingCacheInfo() {
-  const cacheFile = join(BING_CACHE_DIR, 'bing-daily.json');
-  if (existsSync(cacheFile)) {
-    try {
-      const data = JSON.parse(readFileSync(cacheFile, 'utf-8'));
-      // Migrate old format {date: string} to {timestamp: number}
-      if (data.date && !data.timestamp) {
-        data.timestamp = new Date(data.date).getTime();
-      }
-      return data;
-    } catch {}
-  }
-  return { timestamp: 0, url: null };
-}
-
-async function fetchBingDailyImage(force = false): Promise<string | null> {
-  try {
-    if (!existsSync(BING_CACHE_DIR)) mkdirSync(BING_CACHE_DIR, { recursive: true });
-    const cacheFile = join(BING_CACHE_DIR, 'bing-daily.json');
-    const settings = persistence.getSettings();
-    const intervalMs = (settings.bingRefreshInterval || 24) * 3600000;
-    
-    const cached = getBingCacheInfo();
-    const now = Date.now();
-    
-    // Return cached if not forced and interval hasn't passed
-    if (!force && cached.url && (now - cached.timestamp < intervalMs)) {
-      log.info('[background] Using cached Bing image');
-      lastBingRefresh = cached.timestamp;
-      return cached.url;
-    }
-
-    const response = await fetch(BING_API_URL);
-    const data = await response.json() as { images?: Array<{ url: string }> };
-    const image = data?.images?.[0];
-    if (!image?.url) return null;
-
-    const fullUrl = `https://www.bing.com${image.url}`;
-    lastBingRefresh = now;
-    writeFileSync(cacheFile, JSON.stringify({ timestamp: now, url: fullUrl }), 'utf-8');
-    log.info('[background] Fetched new Bing daily image');
-    return fullUrl;
-  } catch (err) {
-    log.warn('[background] Failed to fetch Bing image:', err);
-    return null;
-  }
-}
-
-function scheduleBingRefresh() {
-  if (bingRefreshTimer) {
-    clearTimeout(bingRefreshTimer);
-    bingRefreshTimer = null;
-  }
-  
-  const settings = persistence.getSettings();
-  if (settings.backgroundMode !== 'bing') return;
-  
-  const intervalMs = (settings.bingRefreshInterval || 24) * 3600000;
-  const cached = getBingCacheInfo();
-  lastBingRefresh = cached.timestamp || Date.now();
-  
-  const timeSinceLastRefresh = Date.now() - lastBingRefresh;
-  const timeUntilNext = Math.max(0, intervalMs - timeSinceLastRefresh);
-  
-  log.info(`[background] Next Bing refresh scheduled in ${Math.round(timeUntilNext/60000)} minutes`);
-  
-  bingRefreshTimer = setTimeout(async () => {
-    const url = await fetchBingDailyImage(true);
-    if (url) {
-      persistence.updateSettings({ backgroundImageUrl: url });
-    }
-    scheduleBingRefresh(); // loop
-  }, timeUntilNext);
-}
+// MUST be top-level, before app.whenReady()
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'wallpaper',
+    privileges: {
+      bypassCSP: true,
+      secure: true,
+      standard: true,
+      supportFetchAPI: true,
+    },
+  },
+]);
 
 // Clipboard watcher
 let clipboardWatcherInterval: NodeJS.Timeout | null = null;
@@ -149,7 +85,6 @@ import { persistence, type AppSettings } from './persistence';
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let engine: DownloadEngine;
-let hasOnboarded = false;
 
 function createWindow(): void {
   const isDev = !app.isPackaged || process.env.NODE_ENV === 'development';
@@ -180,7 +115,10 @@ function createWindow(): void {
     },
   });
 
-  mainWindow.once('ready-to-show', () => mainWindow?.show());
+  mainWindow.once('ready-to-show', () => {
+    mainWindow?.show();
+    if (mainWindow) initWallpaperManager(mainWindow);
+  });
 
   // Forward focus/blur to renderer so AppChrome can apply the blur filter (REQ-27.4)
   mainWindow.on('focus', () => mainWindow?.webContents.send(IPC.WINDOW_FOCUSED));
@@ -223,10 +161,37 @@ function setupIpc(): void {
       engine.setMaxConcurrent(updates.maxConcurrent);
     }
     // Update interval timer if related settings changed
-    if (updates.bingRefreshInterval !== undefined || updates.backgroundMode !== undefined) {
-      scheduleBingRefresh();
+    if (
+      updates.bingRefreshInterval !== undefined ||
+      updates.backgroundMode !== undefined ||
+      updates.backgroundImageUrl !== undefined
+    ) {
+      onSettingsChanged();
     }
     return next;
+  });
+
+  ipcMain.handle(IPC.PLUGINS_LIST, () => {
+    try {
+      const dirs = resolvePluginDirs();
+      return dirs.map(dir => {
+        // Assume plugin name is the folder name (e.g., 'plugins/foo' -> 'foo')
+        const name = basename(dir);
+        return { name, path: dir };
+      });
+    } catch {
+      return [];
+    }
+  });
+
+  ipcMain.handle(IPC.SOURCE_STATUS_CHECK, async (_event, host: string) => {
+    try {
+      return await checkSourceStatus(host);
+    } catch {
+      // Advisory-only lookup: any failure here must never surface as an
+      // app error — just report "unknown" and let the caller say nothing.
+      return 'unknown';
+    }
   });
 
   // ── Dialog ─────────────────────────────────────────────────────────────────
@@ -371,8 +336,11 @@ function setupIpc(): void {
   });
 
   // ── Onboarding ─────────────────────────────────────────────────────────────
+  // Previously only flipped an in-memory flag that nothing ever read and that
+  // was lost on restart — calling markOnboarded() from the renderer had no
+  // durable effect. Persist it like every other setting instead.
   ipcMain.handle(IPC.APP_MARK_ONBOARDED, () => {
-    hasOnboarded = true;
+    persistence.updateSettings({ hasOnboarded: true });
     return true;
   });
 
@@ -411,12 +379,12 @@ function setupIpc(): void {
   });
 
   // ── Background ──────────────────────────────────────────────────────────────
-  ipcMain.handle(IPC.BACKGROUND_GET_BING_IMAGE, async () => {
-    return await fetchBingDailyImage(true);
-  });
-  
-  ipcMain.handle(IPC.BACKGROUND_GET_BING_INFO, async () => {
-    return { lastRefresh: lastBingRefresh || getBingCacheInfo().timestamp };
+  ipcMain.handle(IPC.WALLPAPER_ROTATE_NOW, async () => {
+    const url = await rotateNow();
+    if (url) {
+      persistence.updateSettings({ backgroundImageUrl: url });
+    }
+    return url;
   });
 
   // ── Active Count / Tray Badge ──────────────────────────────────────────────
@@ -575,7 +543,6 @@ function setupBeforeQuit(): void {
 }
 
 app.whenReady().then(async () => {
-  scheduleBingRefresh();
   log.info(`Starting StreamDock v${app.getVersion()}`);
 
   // Configure electron-log file path
@@ -586,14 +553,72 @@ app.whenReady().then(async () => {
   // Apply saved settings
   const settings = persistence.getSettings();
   if (settings.maxConcurrent) engine.setMaxConcurrent(settings.maxConcurrent);
-  hasOnboarded = !!settings.hasOnboarded;
   if (settings.clipboardWatcher) startClipboardWatcher();
 
   buildAppMenu();
   setupIpc();
   setupTray();
   setupBeforeQuit();
+  // Core app logic (window, IPC, menu, tray) is now fully up regardless of what
+  // happens below. The wallpaper feature is cosmetic and must never be able to
+  // prevent the window from ever appearing.
   createWindow();
+
+  // Wallpaper cache dir + custom protocol handler. Deliberately isolated in its
+  // own try/catch and run AFTER createWindow(): previously this block ran FIRST,
+  // before the window was created at all. Any throw here (a locked/inaccessible
+  // userData path, disk full, AV interference, etc.) became an unhandled promise
+  // rejection that halted this entire async callback -- createWindow() below it
+  // never ran, no window ever appeared, and the process just sat there with
+  // nothing visible: indistinguishable from "the app is bricked" to a user, for
+  // a failure that has nothing to do with core download functionality. Timing is
+  // still safe here: initWallpaperManager() (called from createWindow()'s
+  // 'ready-to-show' handler, which only fires after the window's initial page
+  // load completes) is the first thing that can send a renderer-facing
+  // 'wallpaper://' URL, and that happens well after this synchronous
+  // registration below.
+  try {
+    const CACHE_DIR = join(app.getPath('userData'), 'wallpapers');
+    if (!existsSync(CACHE_DIR)) {
+      mkdirSync(CACHE_DIR, { recursive: true });
+    }
+
+    protocol.handle('wallpaper', async (request) => {
+      try {
+        const url = new URL(request.url);
+        const raw = decodeURIComponent(url.hostname || url.pathname.replace(/^\/+/, ''));
+        const filename = raw.replace(/[/\\]/g, '');
+
+        if (!filename || filename !== raw || filename.includes('..')) {
+          console.error(`[wallpaper] Invalid wallpaper URL: ${request.url}`);
+          return new Response('Invalid wallpaper URL', { status: 400 });
+        }
+
+        const filePath = join(CACHE_DIR, filename);
+
+        if (!existsSync(filePath)) {
+          console.error(`[wallpaper] File not found: ${filePath}`);
+          return new Response('Not found', { status: 404 });
+        }
+
+        // CRITICAL FIX: use pathToFileURL, not string concatenation
+        const fileUrl = pathToFileURL(filePath).toString();
+        return net.fetch(fileUrl);
+      } catch (err) {
+        // A failure serving one wallpaper request must degrade to a plain
+        // 404/500 response, never crash the main process.
+        console.error('[wallpaper] protocol handler request failed:', err);
+        return new Response('Internal error', { status: 500 });
+      }
+    });
+  } catch (err) {
+    log.error(
+      '[wallpaper] Failed to initialize wallpaper cache/protocol handler -- ' +
+      'background wallpapers will be unavailable this session; the solid-color ' +
+      'background and every other app feature are unaffected:',
+      err,
+    );
+  }
 
   // Version check (GOAL 3) — run after window ready
   try {

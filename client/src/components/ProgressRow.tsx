@@ -45,6 +45,8 @@ function statusTone(status: DownloadRecord['status']) {
       return 'bg-error-subtle text-error';
     case 'paused':
       return 'bg-warning-muted text-warning';
+    case 'scheduled':
+      return 'bg-accent-muted text-accent';
     default:
       return 'bg-surface-3 text-text-secondary';
   }
@@ -52,6 +54,7 @@ function statusTone(status: DownloadRecord['status']) {
 
 function statusLabel(status: DownloadRecord['status']) {
   if (status === 'retrying') return 'Reconnecting';
+  if (status === 'scheduled') return 'Scheduled';
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
@@ -249,7 +252,7 @@ export function ProgressRow({
               </span>
             </div>
 
-            {item.stallMessage && isRunning && (
+            {item.stallMessage && (isRunning || isPaused) && (
               <div role="alert" className="mt-2 flex items-start gap-1.5 rounded-md bg-warning-muted px-2 py-1 text-xs text-warning">
                 <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
                 {item.stallMessage}

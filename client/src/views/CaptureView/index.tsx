@@ -69,6 +69,16 @@ function fallbackQualityChoices(mode: CaptureMode): QualityChoice[] {
   return choices;
 }
 
+function defaultAudioTrackId(probe: MediaTrackProbe): string | null {
+  if (probe.audioTracks.length <= 1) return null;
+  return (
+    probe.audioTracks.find((track) => track.isOriginal)?.id ||
+    probe.audioTracks.find((track) => track.isDefault)?.id ||
+    probe.audioTracks[0]?.id ||
+    null
+  );
+}
+
 function selectedEpisodeUrls(
   probe: PlaylistProbe | null,
   selection: SelectionMode,
@@ -132,50 +142,6 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
   const [selectedStreamOption, setSelectedStreamOption] = useState<string | null>(null);
   const [probingStreamOptions, setProbingStreamOptions] = useState(false);
 
-  useEffect(() => {
-    let dragCounter = 0;
-    const onDragEnter = (e: DragEvent) => {
-      if (e.dataTransfer?.types.includes('text/uri-list') || e.dataTransfer?.types.includes('text/plain')) {
-        e.preventDefault();
-        dragCounter++;
-        setDragOverWindow(true);
-      }
-    };
-    const onDragLeave = (e: DragEvent) => {
-      e.preventDefault();
-      dragCounter--;
-      if (dragCounter === 0) setDragOverWindow(false);
-    };
-    const onDragOver = (e: DragEvent) => e.preventDefault();
-    const onDrop = (e: DragEvent) => {
-      e.preventDefault();
-      dragCounter = 0;
-      setDragOverWindow(false);
-      const text = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain');
-      if (text) {
-        const firstUrl = text.split(/[\s\r\n]+/).find((t) => t.startsWith('http'));
-        if (firstUrl) handleInputUrl(firstUrl);
-      }
-    };
-
-    document.addEventListener('dragenter', onDragEnter);
-    document.addEventListener('dragleave', onDragLeave);
-    document.addEventListener('dragover', onDragOver);
-    document.addEventListener('drop', onDrop);
-    return () => {
-      document.removeEventListener('dragenter', onDragEnter);
-      document.removeEventListener('dragleave', onDragLeave);
-      document.removeEventListener('dragover', onDragOver);
-      document.removeEventListener('drop', onDrop);
-    };
-  }, []);
-
-  const handleInputUrl = (newUrl: string) => {
-    setUrl(newUrl);
-    setMode(inferModeFromText(newUrl));
-    resetPlan();
-  };
-
   const toggleIndex = useCallback((index: number) => {
     setSelectedIndices((prev) => {
       const next = new Set(prev);
@@ -218,7 +184,10 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
     [firstCount, probe, rangeEnd, rangeStart, selection],
   );
 
-  const resetPlan = () => {
+  // useCallback (with all-stable deps: setState setters plus the already-memoized
+  // clearSelection) so handleInputUrl below can depend on this without picking up a
+  // new identity — and therefore without re-running — on every render.
+  const resetPlan = useCallback(() => {
     setAnalysis(null);
     setProbe(null);
     setTrackProbe(null);
@@ -229,7 +198,52 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
     setSelectedStreamOption(null);
     clearSelection();
     setQuality('');
-  };
+  }, [clearSelection]);
+
+  const handleInputUrl = useCallback((newUrl: string) => {
+    setUrl(newUrl);
+    setMode(inferModeFromText(newUrl));
+    resetPlan();
+  }, [resetPlan, setMode]);
+
+  // Window-wide drag-and-drop: dropping a URL anywhere in the capture view fills the input.
+  useEffect(() => {
+    let dragCounter = 0;
+    const onDragEnter = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes('text/uri-list') || e.dataTransfer?.types.includes('text/plain')) {
+        e.preventDefault();
+        dragCounter++;
+        setDragOverWindow(true);
+      }
+    };
+    const onDragLeave = (e: DragEvent) => {
+      e.preventDefault();
+      dragCounter--;
+      if (dragCounter === 0) setDragOverWindow(false);
+    };
+    const onDragOver = (e: DragEvent) => e.preventDefault();
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault();
+      dragCounter = 0;
+      setDragOverWindow(false);
+      const text = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain');
+      if (text) {
+        const firstUrl = text.split(/[\s\r\n]+/).find((t) => t.startsWith('http'));
+        if (firstUrl) handleInputUrl(firstUrl);
+      }
+    };
+
+    document.addEventListener('dragenter', onDragEnter);
+    document.addEventListener('dragleave', onDragLeave);
+    document.addEventListener('dragover', onDragOver);
+    document.addEventListener('drop', onDrop);
+    return () => {
+      document.removeEventListener('dragenter', onDragEnter);
+      document.removeEventListener('dragleave', onDragLeave);
+      document.removeEventListener('dragover', onDragOver);
+      document.removeEventListener('drop', onDrop);
+    };
+  }, [handleInputUrl]);
 
   const loadMediaTracks = useCallback(async (pageUrl: string) => {
     if (!window.streamDock?.probeMediaTracks) return;
@@ -244,6 +258,7 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
       setTrackProbe(result.data);
       const defaultSubs = result.data.subtitleTracks.filter((t) => t.isDefault).map((t) => t.id);
       if (defaultSubs.length > 0) setSelectedSubtitleIds(new Set(defaultSubs));
+      setSelectedAudioId(defaultAudioTrackId(result.data));
     } catch (error) {
       console.error('[StreamDock] probeMediaTracks error:', error);
     } finally {
@@ -270,7 +285,7 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
               setTrackProbe(trackResult.data);
               const defaultSubs = trackResult.data.subtitleTracks.filter((t) => t.isDefault).map((t) => t.id);
               if (defaultSubs.length > 0) setSelectedSubtitleIds(new Set(defaultSubs));
-              setSelectedAudioId(null);
+              setSelectedAudioId(defaultAudioTrackId(trackResult.data));
             }
           } catch (error) {
             console.error('[StreamDock] probeMediaTracks for default stream option error:', error);
@@ -296,6 +311,11 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
     return trackProbe.audioTracks.find((t) => t.id === selectedAudioId)?.language;
   }, [trackProbe, selectedAudioId]);
 
+  const selectedAudioTrack = useMemo(() => {
+    if (!trackProbe || !selectedAudioId) return undefined;
+    return trackProbe.audioTracks.find((t) => t.id === selectedAudioId);
+  }, [trackProbe, selectedAudioId]);
+
   const selectedSubtitleLanguages = useMemo(() => {
     if (!trackProbe || selectedSubtitleIds.size === 0) return [];
     const langs = new Set<string>();
@@ -306,6 +326,11 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
     return Array.from(langs);
   }, [trackProbe, selectedSubtitleIds]);
 
+  const selectedSubtitleTracks = useMemo(() => {
+    if (!trackProbe || selectedSubtitleIds.size === 0) return [];
+    return trackProbe.subtitleTracks.filter((t) => selectedSubtitleIds.has(t.id));
+  }, [trackProbe, selectedSubtitleIds]);
+
   const packagingMode: DownloadPackagingMode = useMemo(
     () => computePackagingMode({
       subsOnly,
@@ -314,6 +339,20 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
     }),
     [subsOnly, selectedAudioLanguage, selectedSubtitleLanguages],
   );
+
+  const resolvedYtDlpSummary = useMemo(() => {
+    const format = selectedAudioTrack?.formatId
+      ? `${quality || 'bestvideo'}+${selectedAudioTrack.formatId}`
+      : quality || 'bestvideo+bestaudio/best';
+    const subLangs = selectedSubtitleLanguages.length ? selectedSubtitleLanguages.join(',') : undefined;
+    const subtitleArgs = subLangs && subtitleMode !== 'none'
+      ? `--write-subs --sub-langs ${subLangs}${subtitleMode === 'embed' ? ' --embed-subs' : ''}`
+      : 'no subtitles';
+    return {
+      format,
+      subtitleArgs,
+    };
+  }, [quality, selectedAudioTrack?.formatId, selectedSubtitleLanguages, subtitleMode]);
 
   const qualityChoices = useMemo(() => {
     const detectedHeights = Array.from(
@@ -423,7 +462,7 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
       }
       void loadMediaTracks(current.url);
       // For stream mode or anime sites, probe for separate language manifest URLs
-      if (mode === 'stream' || ['anikoto', 'animepahe', 'hianime', 'gojoora', 'everythingmoe'].some(h => current.host.includes(h))) {
+      if (mode === 'stream' || ['anikoto', 'animepahe', 'hianime', 'gojoora'].some(h => current.host.includes(h))) {
         void loadStreamOptions(current.url);
       }
       return result.data;
@@ -519,7 +558,11 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
           impersonate: impersonate || undefined,
           scheduledAt: parsedScheduledAt,
           selectedAudioLanguage,
+          selectedAudioFormatId: selectedAudioTrack?.formatId,
+          selectedAudioManifestUrl: selectedAudioTrack?.manifestUrl,
           selectedSubtitleLanguages: selectedSubtitleLanguages.length ? selectedSubtitleLanguages : undefined,
+          selectedSubtitleFormatIds: selectedSubtitleTracks.map((track) => track.formatId).filter(Boolean) as string[],
+          selectedSubtitleManifestUrls: Array.from(new Set(selectedSubtitleTracks.map((track) => track.manifestUrl).filter(Boolean) as string[])),
           subtitleConvertFormat: subtitleConvert,
           subsOnly,
           downloadPackaging: packagingMode,
@@ -558,9 +601,16 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
           subtitleConvert={subtitleConvert}
           subsOnly={subsOnly}
           packagingMode={packagingMode}
+          resolvedFormat={resolvedYtDlpSummary.format}
+          resolvedSubtitleArgs={resolvedYtDlpSummary.subtitleArgs}
           selectedStreamOption={selectedStreamOption || undefined}
           onAudioSelect={setSelectedAudioId}
           onSubtitleToggle={toggleSubtitleTrack}
+          onSubtitleClear={() => {
+            setSelectedSubtitleIds(new Set());
+            setSubtitleMode('none');
+            setSubsOnly(false);
+          }}
           onSubtitleModeChange={setSubtitleMode}
           onSubtitleConvertChange={setSubtitleConvert}
           onSubsOnlyChange={setSubsOnly}
@@ -576,7 +626,7 @@ export function CaptureView({ mode, setMode, outputDir, onError, onStarted }: Ca
                     setTrackProbe(result.data);
                     const defaultSubs = result.data.subtitleTracks.filter((t) => t.isDefault).map((t) => t.id);
                     if (defaultSubs.length > 0) setSelectedSubtitleIds(new Set(defaultSubs));
-                    setSelectedAudioId(null);
+                    setSelectedAudioId(defaultAudioTrackId(result.data));
                   }
                 } catch (error) {
                   console.error('[StreamDock] probeMediaTracks for stream option error:', error);

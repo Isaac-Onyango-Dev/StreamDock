@@ -120,9 +120,38 @@ function subtitleFormatFromExt(ext: string): SubtitleFormat {
 }
 
 interface YtDlpJson {
-  subtitles?: Record<string, Array<{ ext?: string; url?: string }>>;
-  automatic_captions?: Record<string, Array<{ ext?: string; url?: string }>>;
-  formats?: Array<{ acodec?: string; vcodec?: string; language?: string; format_note?: string; abr?: number }>;
+  subtitles?: Record<string, Array<{ ext?: string; url?: string; name?: string; format_id?: string }>>;
+  automatic_captions?: Record<string, Array<{ ext?: string; url?: string; name?: string; format_id?: string }>>;
+  formats?: Array<{
+    format_id?: string;
+    format?: string;
+    ext?: string;
+    acodec?: string;
+    vcodec?: string;
+    language?: string;
+    format_note?: string;
+    abr?: number;
+    asr?: number;
+    audio_channels?: number;
+    tbr?: number;
+    width?: number;
+    height?: number;
+    url?: string;
+    manifest_url?: string;
+  }>;
+}
+
+function labelForUnknownAudio(index: number, fmt: NonNullable<YtDlpJson['formats']>[number]): string {
+  const hint = fmt.format_note || fmt.format || fmt.format_id;
+  return hint && !/^unknown$/i.test(hint) ? `Audio Track ${index} (${hint})` : `Audio Track ${index}`;
+}
+
+function audioTrackKey(fmt: NonNullable<YtDlpJson['formats']>[number], fallbackIndex: number): string {
+  const language = normalizeLanguageCode(fmt.language);
+  const note = (fmt.format_note || fmt.format || '').toLowerCase().trim();
+  if (language !== 'unknown') return `lang:${language}:${note}`;
+  if (note) return `note:${note}`;
+  return `format:${fmt.format_id || fallbackIndex}`;
 }
 
 async function probeWithYtDlp(url: string): Promise<{ audio: AudioTrackInfo[]; subs: SubtitleTrackInfo[]; notes: string[] }> {
@@ -181,27 +210,45 @@ async function probeWithYtDlp(url: string): Promise<{ audio: AudioTrackInfo[]; s
     return { audio, subs, notes };
   }
 
-  const audioLangs = new Map<string, AudioTrackInfo>();
-  for (const fmt of data.formats || []) {
+  const audioTracksByKey = new Map<string, AudioTrackInfo>();
+  let unknownAudioIndex = 1;
+  for (const [index, fmt] of (data.formats || []).entries()) {
     if (!fmt.acodec || fmt.acodec === 'none') continue;
+    const isAudioOnly = !fmt.vcodec || fmt.vcodec === 'none';
+    if (!isAudioOnly && !fmt.language && !fmt.format_note) continue;
+
     const lang = normalizeLanguageCode(fmt.language);
-    if (audioLangs.has(lang)) continue;
-    const label = getLanguageName(lang, fmt.format_note);
-    audioLangs.set(lang, {
-      id: `ytdlp-audio-${audioLangs.size + 1}`,
+    const key = audioTrackKey(fmt, index);
+    if (audioTracksByKey.has(key)) continue;
+
+    // Extractor-agnostic fallback: many HLS/generic extractors expose alternate
+    // dubs as separate audio-only format IDs but leave `language` empty. Keep
+    // those format IDs and surface neutral labels instead of hiding them.
+    const label = lang === 'unknown'
+      ? labelForUnknownAudio(unknownAudioIndex++, fmt)
+      : getLanguageName(lang, fmt.format_note);
+
+    audioTracksByKey.set(key, {
+      id: `ytdlp-audio-${audioTracksByKey.size + 1}`,
       language: lang,
+      formatId: fmt.format_id,
       label,
       name: fmt.format_note,
-      isDefault: audioLangs.size === 0,
+      isDefault: audioTracksByKey.size === 0,
       isOriginal: isOriginalLanguageHint(lang, fmt.format_note),
       isDub: /\bdub\b/i.test(fmt.format_note || ''),
       codec: fmt.acodec,
       bitrate: fmt.abr,
+      uri: fmt.url,
+      manifestUrl: fmt.manifest_url,
     });
   }
-  audio.push(...audioLangs.values());
+  audio.push(...audioTracksByKey.values());
 
-  const addSubs = (bucket: Record<string, Array<{ ext?: string; url?: string }>> | undefined, auto: boolean) => {
+  const addSubs = (
+    bucket: Record<string, Array<{ ext?: string; url?: string; name?: string; format_id?: string }>> | undefined,
+    auto: boolean,
+  ) => {
     if (!bucket) return;
     for (const [langRaw, entries] of Object.entries(bucket)) {
       const language = normalizeLanguageCode(langRaw);
@@ -210,6 +257,7 @@ async function probeWithYtDlp(url: string): Promise<{ audio: AudioTrackInfo[]; s
       subs.push({
         id: `ytdlp-sub-${subs.length + 1}`,
         language,
+        formatId: entry?.format_id,
         label: `${getLanguageName(language)}${auto ? ' (auto)' : ''}`,
         format: subtitleFormatFromExt(ext),
         isDefault: false,

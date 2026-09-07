@@ -2,7 +2,7 @@ import { app } from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 
-export type BackgroundMode = 'solid' | 'bing' | 'gradient';
+export type BackgroundMode = 'solid' | 'bing' | 'picsum' | 'gradient';
 
 export interface AppSettings {
   downloadDir: string;
@@ -16,6 +16,12 @@ export interface AppSettings {
   solidColorBg?: string;
   bingRefreshInterval?: number;
   clipboardWatcher?: boolean;
+  ytdlpOptions?: {
+    embedSubs?: boolean;
+    embedMetadata?: boolean;
+    sponsorBlock?: boolean;
+    customArgs?: string;
+  };
 }
 
 export class PersistenceGateway {
@@ -31,8 +37,14 @@ export class PersistenceGateway {
       densityMode: 'comfortable',
       backgroundMode: 'solid',
       solidColorBg: '#0b1014', // Default matches hsl(220, 14%, 6%)
-      bingRefreshInterval: 24,
+      bingRefreshInterval: 1440,
       clipboardWatcher: true,
+      ytdlpOptions: {
+        embedSubs: true,
+        embedMetadata: true,
+        sponsorBlock: false,
+        customArgs: '',
+      },
     };
   }
 

@@ -169,7 +169,7 @@ class DownloadStore {
     this.updateActiveCount();
   }
 
-  public async clearRecords(scope: 'all' | 'completed' | 'failed') {
+  public async clearRecords(scope: 'all' | 'completed' | 'failed' | 'cancelled') {
     if (scope === 'all') {
       const active = this.getActiveCount();
       if (active > 0) {

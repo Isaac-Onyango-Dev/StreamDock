@@ -46,6 +46,11 @@ export const IPC = {
   // Settings
   SETTINGS_GET:    'settings:get',
   SETTINGS_UPDATE: 'settings:update',
+  PLUGINS_LIST:    'plugins:list',
+
+  // Best-effort advisory: is this host still listed as active by the
+  // reference index, or moved to its "graveyard"? See source-status.ts.
+  SOURCE_STATUS_CHECK: 'source-status:check',
 
   // Events (main → renderer)
   EVENT_DOWNLOAD_PROGRESS:  'event:download-progress',
@@ -70,6 +75,8 @@ export const IPC = {
   // Background
   BACKGROUND_GET_BING_IMAGE: 'background:get-bing-image',
   BACKGROUND_GET_BING_INFO:  'background:get-bing-info',
+  WALLPAPER_ROTATE_NOW:      'wallpaper:rotate-now',
+  EVENT_WALLPAPER_UPDATED:   'event:wallpaper-updated',
 
   // Clipboard watcher
   CLIPBOARD_WATCHER_START: 'clipboard:watch-start',

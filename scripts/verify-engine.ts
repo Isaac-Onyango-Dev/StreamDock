@@ -71,10 +71,10 @@ function verifyEngineWiring(): void {
 
 function verifyRouteCoverage(): void {
   for (const host of ['fmovies.to', 'fmovies.ps', 'everythingmoe.com', 'hianime.re', 'aniwatch.to', 'aniwatch.com']) {
-    assert(MANIFEST_PROBE_HOSTS.includes(host), `${host} is available for manifest probing`);
+    assert(MANIFEST_PROBE_HOSTS().includes(host), `${host} is available for manifest probing`);
   }
   for (const host of ['everythingmoe.com', 'hianime.re', 'gojoora.com', 'gojoora.net']) {
-    assert(ANIME_HOSTS.includes(host), `${host} is available as an anime extractor host`);
+    assert(ANIME_HOSTS().includes(host), `${host} is available as an anime extractor host`);
   }
 }
 

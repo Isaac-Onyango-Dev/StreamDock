@@ -1,9 +1,0 @@
-﻿feat: add dynamic wallpaper system with Bing integration and color picker
-
-- Implement Bing daily wallpaper fetch with live auto-refresh
-- Add configurable refresh interval selector (1h, 6h, 12h, 24h, 48h)
-- Add live countdown timer (Xh YYmin ZZs) synced to refresh cycle
-- Implement custom background color picker with 10 presets + color wheel
-- Persist wallpaper interval, next refresh timestamp, and bg color to localStorage
-- Restore all background preferences on app launch
-- Update README with v1.0.1 release notes

@@ -9,21 +9,22 @@
 //   - Structured per-download logging
 //   - Zero raw stderr exposed to UI
 
-import { app, BrowserWindow } from 'electron';
+import { BrowserWindow } from 'electron';
 import { ChildProcess, execFile, spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import { existsSync, mkdirSync, rmSync, readdirSync } from 'fs';
-import { basename, isAbsolute, join } from 'path';
+import { basename, dirname, isAbsolute, join } from 'path';
 import log from 'electron-log';
 import { IPC } from './ipc-channels';
 import { buildPluginDirArgs, resolveBinary, resolveYtDlpCommand, type YtDlpCommand } from './binary-resolver';
 import { toUserError, isRateLimited, isAuthRequired, isGeoBlocked } from './error-translator';
 import { extractManifest } from './manifest-extractor';
-import { ANIME_HOSTS, MANIFEST_PROBE_HOSTS, type CaptureMode } from './url-router';
+import { ANIME_HOSTS, MANIFEST_PROBE_HOSTS, REFERENCE_HOSTS, type CaptureMode } from './url-router';
 import { detectFormat, buildFormatArgs } from './format-detector';
 import { NetworkMonitor, classifyNetworkLoss, type StallState } from './network-monitor';
 import { StateStore } from './state-store';
 import { buildOutputTemplate } from './smart-naming';
+import { persistence } from './persistence';
 
 export interface DownloadRequest {
   url: string;
@@ -54,8 +55,16 @@ export interface DownloadRequest {
   thumbnail?: string;
   /** Explicit audio language code from media track probe (e.g. en, ja) */
   selectedAudioLanguage?: string;
+  /** Explicit yt-dlp audio format ID selected by the user. Preferred over language filters. */
+  selectedAudioFormatId?: string;
+  /** Manifest URL that produced the selected audio track, used to reject mixed-CDN combinations. */
+  selectedAudioManifestUrl?: string;
   /** Subtitle language codes to download */
   selectedSubtitleLanguages?: string[];
+  /** Explicit yt-dlp subtitle format IDs, when exposed by the extractor. */
+  selectedSubtitleFormatIds?: string[];
+  /** Manifest URLs that produced selected subtitle tracks, used to reject mixed-CDN combinations. */
+  selectedSubtitleManifestUrls?: string[];
   /** Convert subtitles to this format (original keeps source ext) */
   subtitleConvertFormat?: 'original' | 'srt' | 'vtt';
   /** Download subtitles without video */
@@ -73,7 +82,7 @@ export interface DownloadRecord {
   url: string;
   mode: CaptureMode;
   title: string;
-  status: 'queued' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled' | 'retrying';
+  status: 'queued' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled' | 'retrying' | 'scheduled';
   progress: number;
   speed: string;
   eta: string;
@@ -93,7 +102,8 @@ export interface DownloadRecord {
 }
 
 interface ActiveTask {
-  process: ChildProcess;
+  /** null between task creation and the async extraction step completing spawn(). */
+  process: ChildProcess | null;
   record: DownloadRecord;
   request: DownloadRequest;
   stderr: string;
@@ -119,7 +129,7 @@ function extractHost(url: string): string {
 }
 
 function matchesProbeHost(host: string): boolean {
-  return MANIFEST_PROBE_HOSTS.some((d) => host === d || host.endsWith(`.${d}`));
+  return MANIFEST_PROBE_HOSTS().some((d) => host === d || host.endsWith(`.${d}`));
 }
 
 function isIntermediatePath(filePath: string): boolean {
@@ -205,7 +215,7 @@ export class DownloadEngine {
     return Array.from(this.records.values()).sort(
       (a, b) => {
         // Active first, then by creation time
-        const statusOrder = { running: 0, retrying: 1, queued: 2, paused: 3, failed: 4, completed: 5, cancelled: 6 };
+        const statusOrder = { running: 0, retrying: 1, queued: 2, scheduled: 3, paused: 4, failed: 5, completed: 6, cancelled: 7 };
         const sa = statusOrder[a.status] ?? 9;
         const sb = statusOrder[b.status] ?? 9;
         if (sa !== sb) return sa - sb;
@@ -232,6 +242,17 @@ export class DownloadEngine {
 
   /** Begin a new download (may queue it if concurrent limit is reached). */
   start(request: DownloadRequest): DownloadRecord {
+    // EverythingMoe (and similar) are curated *indexes* of other streaming sites,
+    // not media pages themselves — see REFERENCE_HOSTS in url-router.ts. Refuse to
+    // enqueue rather than let yt-dlp/manifest-probe burn a full extraction attempt
+    // against a page that was never meant to be downloaded from directly.
+    const refHost = extractHost(request.url);
+    if (REFERENCE_HOSTS().some((d) => refHost === d || refHost.endsWith(`.${d}`))) {
+      throw new Error(
+        "This is a reference index of streaming sites, not a direct media page. Open one of its listed sources, then paste that page's URL into StreamDock."
+      );
+    }
+
     if (!existsSync(request.outputDir)) mkdirSync(request.outputDir, { recursive: true });
 
     const id = randomUUID();
@@ -497,16 +518,11 @@ export class DownloadEngine {
   // ─────────────────────────────────────────────── Process Management (GOAL 8)
 
   /**
-   * Kill a process safely, terminating the FULL process tree.
+   * Kill a process safely, terminating the FULL process tree cross-platform.
    *
-   * On Windows, Node's `proc.kill('SIGTERM')` only terminates the yt-dlp
-   * parent. Any sub-processes it spawned (ffmpeg, aria2c) are orphaned and
-   * keep running — this is why Pause/Cancel appeared to work in the UI while
-   * the download continued on disk.
-   *
-   * Fix: on Windows use `taskkill /pid <PID> /T /F` which recursively
-   * terminates every process in the tree. On Mac/Linux SIGTERM → SIGKILL
-   * already propagates correctly.
+   * On Windows: uses `taskkill /pid <PID> /T /F` to recursively kill the tree.
+   * On macOS/Linux: uses `pkill -P <PID>` to kill children first, then SIGTERM/SIGKILL on parent.
+   * Falls back to Node's proc.kill() if native commands fail.
    */
   private killProcess(task: ActiveTask, reason: string): void {
     const { process: proc, record, monitor } = task;
@@ -517,30 +533,66 @@ export class DownloadEngine {
     const pid = proc.pid;
     log.debug(`[engine] Killing process tree for ${record.id} (reason=${reason}, pid=${pid})`);
 
-    if (process.platform === 'win32' && pid !== undefined) {
-      // Atomically kill the yt-dlp parent AND all its children (ffmpeg, aria2c, etc.)
-      execFile('taskkill', ['/pid', String(pid), '/T', '/F'], (err) => {
-        if (err) {
-          // taskkill failed (process may have already exited) — fall back to Node kill
-          log.warn(`[engine] taskkill failed for pid ${pid}: ${err.message}. Falling back to proc.kill().`);
-          try { proc.kill(); } catch { /* already dead */ }
+    const killTree = (): Promise<void> => {
+      return new Promise((resolve) => {
+        if (process.platform === 'win32' && pid !== undefined) {
+          // Windows: taskkill /T /F kills the entire process tree atomically
+          execFile('taskkill', ['/pid', String(pid), '/T', '/F'], (err) => {
+            if (err) {
+              log.warn(`[engine] taskkill failed for pid ${pid}: ${err.message}. Falling back to proc.kill().`);
+              try { proc.kill(); } catch { /* already dead */ }
+            } else {
+              log.debug(`[engine] taskkill /T /F succeeded for pid ${pid}`);
+            }
+            resolve();
+          });
+        } else if (pid !== undefined) {
+          // macOS/Linux: kill children first with pkill -P, then parent
+          const killChildren = () => {
+            return new Promise<void>((resolveChildren) => {
+              execFile('pkill', ['-P', String(pid)], (err) => {
+                if (err && err.code !== 1) { // code 1 = no processes found
+                  log.warn(`[engine] pkill -P failed for pid ${pid}: ${err.message}`);
+                } else if (!err) {
+                  log.debug(`[engine] pkill -P ${pid} succeeded`);
+                }
+                // Give children a moment to die
+                setTimeout(resolveChildren, 500);
+              });
+            });
+          };
+
+          killChildren().then(() => {
+            // Now kill parent with SIGTERM
+            proc.kill('SIGTERM');
+
+            const killTimer = setTimeout(() => {
+              if (!proc.killed && proc.exitCode === null) {
+                log.warn(`[engine] Process for ${record.id} did not exit after SIGTERM, sending SIGKILL`);
+                try { proc.kill('SIGKILL'); } catch { /* already dead */ }
+              }
+              resolve();
+            }, 3_000);
+
+            proc.once('exit', () => {
+              clearTimeout(killTimer);
+              resolve();
+            });
+          });
         } else {
-          log.debug(`[engine] taskkill /T /F succeeded for pid ${pid}`);
+          // No PID available, fallback to Node kill
+          proc.kill('SIGTERM');
+          setTimeout(() => {
+            if (!proc.killed && proc.exitCode === null) {
+              try { proc.kill('SIGKILL'); } catch { /* already dead */ }
+            }
+            resolve();
+          }, 3_000);
         }
       });
-    } else {
-      // Mac / Linux: SIGTERM then SIGKILL after 3 s
-      proc.kill('SIGTERM');
+    };
 
-      const killTimer = setTimeout(() => {
-        if (!proc.killed && proc.exitCode === null) {
-          log.warn(`[engine] Process for ${record.id} did not exit after SIGTERM, sending SIGKILL`);
-          try { proc.kill('SIGKILL'); } catch { /* already dead */ }
-        }
-      }, 3_000);
-
-      proc.once('exit', () => clearTimeout(killTimer));
-    }
+    killTree();
   }
 
   /** Delete partial/temp files for a download. */
@@ -552,8 +604,13 @@ export class DownloadEngine {
         rmSync(record.outputPath, { force: true });
         log.debug(`[engine] Cleaned partial file: ${basename(record.outputPath)}`);
       }
-      // Clean .part files in the same directory
-      const dir = record.outputPath.substring(0, record.outputPath.lastIndexOf('/') || record.outputPath.lastIndexOf('\\'));
+      // Clean .part files in the same directory.
+      // NOTE: previously computed via `lastIndexOf('/') || lastIndexOf('\\')`, which is
+      // broken for Windows-only paths — lastIndexOf('/') returns -1 (truthy) when there's
+      // no forward slash, so the backslash branch never ran and `dir` resolved to ''.
+      // That silently skipped .part/.ytdl cleanup on every Windows cancel. Use path.dirname
+      // instead, which handles both separators correctly.
+      const dir = dirname(record.outputPath);
       if (existsSync(dir)) {
         readdirSync(dir)
           .filter((f) => f.endsWith('.part') || f.endsWith('.ytdl'))
@@ -579,7 +636,7 @@ export class DownloadEngine {
     this.wireMonitor(id, monitor);
 
     const task: ActiveTask = {
-      process: null as any, // Set later after extraction
+      process: null, // Set later, once runExtractionAndSpawn() actually spawns yt-dlp
       record,
       request,
       stderr: '',
@@ -966,10 +1023,18 @@ export class DownloadEngine {
 
         const ffmpeg = resolveBinary('ffmpeg');
         const ytDlpCmd = this.resolveYtDlpCmd(retryRequest.url);
-        
+
+        // Same fix as the primary spawn path (runExtractionAndSpawn): record.title may
+        // still hold the display-only status string 'Extracting stream manifest…' set a
+        // few lines above. Using it directly as the output filename produced files
+        // literally named "Extracting stream manifest….mp4". Prefer the UI-supplied
+        // titleHint, and only fall back to record.title when it isn't a status string.
         const isManifestFallback = retryRequest.mode === 'video';
-        const forcedTitle = isManifestFallback ? record.title : undefined;
-        
+        const retryStatusStrings = new Set(['Extracting stream manifest…', 'Live stream capture', 'Video download']);
+        const forcedTitle = isManifestFallback
+          ? (retryRequest.titleHint || (!retryStatusStrings.has(record.title) ? record.title : undefined))
+          : undefined;
+
         // Pass the original page URL for impersonation host check (not the CDN manifest URL)
         const args = this.buildArgs(retryRequest, ffmpeg, request.url, result.referer, forcedTitle);
 
@@ -1060,7 +1125,7 @@ export class DownloadEngine {
 
   private resolveYtDlpCmd(url: string): YtDlpCommand {
     const host = extractHost(url);
-    const isAnime = ANIME_HOSTS.some((d) => host === d || host.endsWith(`.${d}`));
+    const isAnime = ANIME_HOSTS().some((d) => host === d || host.endsWith(`.${d}`));
     if (isAnime) {
       // Anime sites use .py plugin extractors (anikoto.py, aniwatch.py, etc.).
       // These ONLY work when running yt-dlp as a Python module (python -m yt_dlp),
@@ -1111,6 +1176,9 @@ export class DownloadEngine {
       // yt-dlp writes to a .part file and renames on success by default (atomicity).
       // '--write-thumbnail' is intentionally omitted: passing it without '--embed-thumbnail'
       // causes yt-dlp to leave a loose .webp/.jpg file next to the merged .mp4 (Bug 1 fix).
+      // Naming spec: re-downloads must never silently clobber an existing file at the
+      // resolved output path — skip instead of overwriting when one is already there.
+      '--no-overwrites',
     ];
 
     // NOTE: --cookies-from-browser chrome is intentionally omitted.
@@ -1158,8 +1226,35 @@ export class DownloadEngine {
       }
     }
 
+    this.applyYtDlpOptions(args);
+
     args.push('--', finalUrl);
     return args;
+  }
+
+  private applyYtDlpOptions(args: string[]): void {
+    const settings = persistence.getSettings();
+    const opts = settings.ytdlpOptions;
+    if (!opts) return;
+
+    if (opts.embedSubs && !args.includes('--embed-subs')) {
+      args.push('--embed-subs');
+    }
+    if (opts.embedMetadata && !args.includes('--embed-metadata')) {
+      args.push('--embed-metadata');
+    }
+    if (opts.sponsorBlock) {
+      args.push('--sponsorblock-remove', 'all');
+    }
+    if (opts.customArgs) {
+      // Split by space but ignore spaces inside quotes?
+      // A simple split by space is a basic approach, or we can use a regex if needed.
+      // But we just need to avoid command injection.
+      // Sanitizing [;&|$()]
+      const sanitized = opts.customArgs.replace(/[;&|$()]/g, '');
+      const parts = sanitized.split(/\s+/).filter(Boolean);
+      args.push(...parts);
+    }
   }
 
   private applyLanguageAndSubtitleArgs(args: string[], request: DownloadRequest): void {
