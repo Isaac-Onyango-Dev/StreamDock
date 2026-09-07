@@ -17,7 +17,14 @@ import { basename, dirname, isAbsolute, join } from 'path';
 import log from 'electron-log';
 import { IPC } from './ipc-channels';
 import { buildPluginDirArgs, resolveBinary, resolveYtDlpCommand, type YtDlpCommand } from './binary-resolver';
-import { toUserError, isRateLimited, isAuthRequired, isGeoBlocked } from './error-translator';
+import {
+  toUserError,
+  toErrorDetail,
+  isRateLimited,
+  isAuthRequired,
+  isGeoBlocked,
+  mentionsStaleEngine,
+} from './error-translator';
 import { extractManifest } from './manifest-extractor';
 import { ANIME_HOSTS, MANIFEST_PROBE_HOSTS, REFERENCE_HOSTS, type CaptureMode } from './url-router';
 import { detectFormat, buildFormatArgs } from './format-detector';
@@ -99,6 +106,14 @@ export interface DownloadRecord {
   detectedFormat?: string;
   /** Stall message for UI */
   stallMessage?: string;
+  /**
+   * Redacted engine output for the failure, shown behind a "details" toggle.
+   *
+   * `error` is a friendly one-liner, which on its own made this whole class of
+   * bug undiagnosable from the UI: a stale-engine 403 and a genuine login wall
+   * produced the same sentence. This carries the real HTTP status and stderr.
+   */
+  errorDetail?: string;
 }
 
 interface ActiveTask {
@@ -448,6 +463,7 @@ export class DownloadEngine {
     }
 
     record.error = undefined;
+    record.errorDetail = undefined;
     record.stallMessage = undefined;
     this.spawn(id, record, request);
   }
@@ -459,6 +475,7 @@ export class DownloadEngine {
     if (this.tasks.has(id)) return;
 
     record.error = undefined;
+    record.errorDetail = undefined;
     record.stallMessage = undefined;
     record.progress = 0;
     record.speed = '';
@@ -881,6 +898,7 @@ export class DownloadEngine {
         const userMsg = this.classifyErrorLine(trimmed, task);
         if (userMsg) {
           task.record.error = userMsg;
+          task.record.errorDetail = toErrorDetail(task.stderr || trimmed) ?? undefined;
           this.emitError(task.record);
         }
       }
@@ -889,9 +907,17 @@ export class DownloadEngine {
 
   /** Classify a single yt-dlp error line into a user-facing message. */
   private classifyErrorLine(line: string, task: ActiveTask): string | null {
+    // yt-dlp announces its own staleness in a WARNING above the ERROR line. When
+    // both are present the staleness is the actionable cause: an out-of-date
+    // engine gets 403/429'd by sites that work fine with a current one.
+    if (mentionsStaleEngine(task.stderr)) {
+      log.warn(`[engine] Stale yt-dlp implicated in failure for ${task.record.id}`);
+      return 'The download engine is out of date, which is likely why this failed. Update it in Settings and retry.';
+    }
+
     if (isRateLimited(line)) {
       log.warn(`[engine] Rate limited for ${task.record.id}`);
-      return 'Rate limited. Waiting before retrying…';
+      return 'Rate limited by the site. Waiting before retrying…';
     }
 
     // A 403 on a CDN manifest URL is a session/token problem, not a login wall.
@@ -1108,13 +1134,18 @@ export class DownloadEngine {
     if (record.status === 'cancelled' || record.status === 'paused') return;
 
     const userMsg = toUserError(error);
+    const detail = toErrorDetail(error);
     log.error(`[engine] Download ${id} failed: ${userMsg}`);
+    if (detail) log.error(`[engine] Download ${id} engine output:\n${detail}`);
 
     // Preserve the request for retry
     if (task) this.savedRequests.set(id, task.request);
 
     record.status = 'failed';
     record.error = userMsg;
+    // Keep whichever detail is richer: consume() may already have captured the
+    // stderr for a line-level classification before the process closed.
+    if (detail) record.errorDetail = detail;
     this.emitProgress(record);
     this.emitError(record);
     this.drainQueue();

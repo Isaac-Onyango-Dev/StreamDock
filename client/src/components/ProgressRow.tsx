@@ -115,6 +115,7 @@ export function ProgressRow({
 }: ProgressRowProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [errorDetailOpen, setErrorDetailOpen] = useState(false);
 
   const isRunning = item.status === 'running';
   const isPaused = item.status === 'paused';
@@ -260,9 +261,33 @@ export function ProgressRow({
             )}
 
             {item.error && (
-              <div role="alert" className="mt-2 flex items-start gap-1.5 rounded-md bg-error-subtle px-2 py-1 text-xs text-error">
-                <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-                {item.error}
+              <div role="alert" className="mt-2 rounded-md bg-error-subtle px-2 py-1 text-xs text-error">
+                <div className="flex items-start gap-1.5">
+                  <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                  <span className="min-w-0 flex-1">{item.error}</span>
+                  {item.errorDetail && (
+                    <button
+                      type="button"
+                      onClick={() => setErrorDetailOpen((open) => !open)}
+                      className="shrink-0 underline underline-offset-2 hover:no-underline"
+                      aria-expanded={errorDetailOpen}
+                    >
+                      {errorDetailOpen ? 'Hide details' : 'Show details'}
+                    </button>
+                  )}
+                </div>
+                {/* The friendly message alone made failures undiagnosable: a
+                    stale-engine 403 and a real login wall read identically.
+                    This is the engine's own output, paths and credentials
+                    redacted, so the actual status code is visible. */}
+                {errorDetailOpen && item.errorDetail && (
+                  <pre
+                    className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-black/30 p-2 font-mono text-[11px] leading-relaxed text-text-secondary"
+                    data-selectable
+                  >
+                    {item.errorDetail}
+                  </pre>
+                )}
               </div>
             )}
 

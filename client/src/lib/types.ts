@@ -60,6 +60,8 @@ export interface DownloadRecord {
   detectedFormat?: string;
   /** Stall message shown in UI when connection drops */
   stallMessage?: string;
+  /** Redacted engine output for a failure, shown behind a "details" toggle. */
+  errorDetail?: string;
 }
 
 export interface EngineStatus {

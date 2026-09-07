@@ -4,6 +4,63 @@ All notable changes to StreamDock are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-09-07
+
+### Fixed
+- **Critical**: every download failed immediately, reported in the UI as
+  "Rate limited. Waiting before retrying...". The bundled yt-dlp was
+  2026.03.17 — six months stale — and YouTube rejected it partway through
+  each transfer with `HTTP Error 403`; the current release completed the
+  same download with byte-identical arguments. Two separate defects kept
+  this invisible: `download:binaries` skipped the download whenever a
+  yt-dlp binary already existed, so a once-fetched engine was reused
+  forever, and the startup version check compared against a hardcoded
+  `2024.01.01` floor, so a six-month-old engine passed as "OK" and the
+  update banner never appeared.
+- Staleness is now judged by age, not a pinned date: the engine warns
+  above 30 days, warns strongly above 90, and `download:binaries`
+  refreshes yt-dlp past 30 days instead of keeping whatever is on disk.
+- Error classification matched bare digit substrings, so any output
+  containing "429" (a fragment index, a byte count, a video ID) was
+  reported as rate limiting, and "403" — a real YouTube AV1 itag — as a
+  login wall. Status codes now have to appear as status codes, and the
+  message is derived from the line that actually failed rather than from
+  the first match anywhere in the whole stderr blob, where an incidental
+  warning could win.
+- Background settings appeared to do nothing. Every control was correctly
+  wired and saving; the result was invisible. In solid mode a fully
+  opaque overlay was painted over the chosen colour, and the chrome
+  panels stayed opaque in every mode except `bing` — so solid colours
+  were covered twice over and Random Photo wallpapers were hidden behind
+  opaque chrome immediately after being fetched.
+- The application menu was never reachable. A complete File/Edit/View/Help
+  menu already existed, but the window is frameless, and Windows and Linux
+  do not draw a native menu bar for a frameless window — only the
+  accelerators worked.
+
+### Added
+- Failure details in the UI: a "Show details" toggle on any failed
+  download reveals the engine's own output — real HTTP status and stderr,
+  with paths and credentials redacted. Previously a stale-engine 403 and a
+  genuine login wall produced the same one-line message, with nothing
+  behind it.
+- An out-of-date engine is now named as the likely cause when yt-dlp
+  reports its own staleness alongside a failure, instead of that failure
+  surfacing as a login wall or a rate limit.
+- In-window menu bar in the custom titlebar. It renders the existing
+  native menu's top-level labels and asks the main process to pop up the
+  real submenus, so there is exactly one menu definition.
+- Application auto-update against GitHub Releases via `electron-updater`:
+  a quiet check shortly after launch and **Help -> Check for Updates**,
+  both asking before downloading. `electron-builder`'s `publish` block was
+  `null`, so no `latest.yml` manifest was ever generated — the release
+  workflow had been trying to upload one that did not exist.
+- **Help -> About StreamDock**, and GitHub repository/issue links.
+- README "What's New" is now generated from `CHANGELOG.md` by
+  `npm run sync:readme` and committed by CI alongside the site. It had
+  drifted to v1.0.1 while the app shipped 1.2.0: the earlier version-sync
+  work covered `docs/` only and never included the README.
+
 ## [1.2.0] - 2026-09-07
 
 ### Fixed

@@ -76,6 +76,8 @@ declare global {
       listDownloads: () => Promise<DownloadRecord[]>;
       clearEngineRecords: (scope?: 'all' | 'completed' | 'failed' | 'cancelled') => Promise<boolean>;
       updateEngine: () => Promise<{ success: boolean; message?: string; error?: string }>;
+      getMenuLabels?: () => Promise<string[]>;
+      popupMenu?: (label: string, x: number, y: number) => Promise<boolean>;
       openFile: (filePath: string) => Promise<void>;
       showInFolder: (filePath: string) => Promise<void>;
       // Window controls

@@ -13,7 +13,11 @@ if (process.platform === 'win32') {
 const common = {
   bundle: true,
   platform: 'node' as const,
-  external: ['electron', 'electron-log'],
+  // electron-updater must stay external, like electron-log: it resolves parts of
+  // itself and its deps dynamically at runtime, which esbuild cannot follow into
+  // a single file. electron-builder copies production dependencies into the asar,
+  // so it is there to require at runtime.
+  external: ['electron', 'electron-log', 'electron-updater'],
   sourcemap: false,
 };
 

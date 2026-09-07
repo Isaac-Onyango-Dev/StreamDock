@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import { Download, Minus, Settings, Square, Link2, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { Tab } from '../../lib/types';
+import { MenuBar } from './MenuBar';
 
 interface AppChromeProps {
   currentTab: Tab;
@@ -118,7 +119,7 @@ export function AppChrome({ currentTab, activeCount, onTabChange, children }: Ap
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Titlebar */}
         <header
-          className={`flex h-[var(--titlebar-height)] shrink-0 items-center justify-between border-b border-border bg-chrome-rail ${
+          className={`flex h-[var(--titlebar-height)] shrink-0 items-center gap-3 border-b border-border bg-chrome-rail ${
             isMac ? 'pl-[68px]' : 'pl-3'
           }`}
           style={{ WebkitAppRegion: 'drag' } as CSSProperties}
@@ -139,6 +140,10 @@ export function AppChrome({ currentTab, activeCount, onTabChange, children }: Ap
               Dock
             </span>
           </span>
+
+          <MenuBar />
+
+          <div className="flex-1" />
 
           {!isMac && (
             <div className="flex h-full" style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}>
