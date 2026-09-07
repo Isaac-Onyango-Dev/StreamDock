@@ -892,8 +892,80 @@ viewport (decorative `.blob-*` gradients and the nav), but `body` has
 `overflow-x: hidden` and the page is genuinely not scrollable sideways —
 verified by scripting a scroll. Pre-existing and not user-visible.
 
+### Session 11 — Linux release: platform-aware engines, and a latent empty-binaries bug
+
+**The Linux build was already "passing" in CI and would have shipped a broken
+app.** `scripts/download-binaries.ts` returned early on every non-Windows
+platform with a friendly message and a clean exit, so ci.yml's Build Linux job
+fetched nothing, packaged an AppImage with an empty `resources/binaries/`, and
+reported success. That is the exact shape of the v1.1.0 bug (which shipped to
+users with no engines at all), sitting latent and green.
+
+**Made `download-binaries.ts` platform-aware.** A `PLATFORMS` table keyed on
+`${process.platform}-${process.arch}` picks the yt-dlp asset and BtbN ffmpeg
+archive per platform, extracts, and `chmod 755`s off Windows. Verified the
+upstream names against the GitHub APIs rather than assuming them — this repo has
+already lost a session to a guessed ffmpeg URL:
+
+- `yt-dlp_linux` (40.4MB) — **not** the plain `yt-dlp` asset, which is the small
+  zipimport build that needs a system Python a bundled app cannot assume.
+- `ffmpeg-master-latest-linux64-gpl.tar.xz` on BtbN's **`latest` tag** (128.5MB),
+  same rolling-tag rule as win64.
+- `linux-arm64` is in the table (`yt-dlp_linux_aarch64` + `linuxarm64` archive)
+  for ARM dev machines; only x64 is released.
+
+Ordering detail that would have broken Linux silently: `chmod` must happen
+*before* the `--version` age check, or a freshly written binary reports itself
+unrunnable and gets re-downloaded on every invocation.
+
+**New structural guard: `npm run check:binaries`** (`scripts/check-binaries.ts`),
+wired between the download and the package step in both workflows. It asserts
+each engine exists, is a plausible size, and **actually executes and prints the
+version it should**. Present-and-correctly-sized is not "works": a
+wrong-architecture build, a missing exec bit, or a truncated download all get
+past a file-existence check and fail only when a user tries to download
+something. A packaging step cannot tell "no engines needed" from "engines
+missing"; this can.
+
+**Verified without a Linux box.** WSL Ubuntu exists on this machine but could not
+start (1.6GB free of 7.3GB, and killing Isaac's running app to force it was not
+worth it). So the two riskiest assumptions were verified directly instead:
+`yt-dlp_linux` downloads 200 and is a genuine 64-bit x86-64 ELF (checked the
+magic bytes and e_machine), and the ffmpeg archive really does extract to
+`<top>/bin/ffmpeg` + `bin/ffprobe`, exec-bits set, no `.exe` — streamed with
+Python's `tarfile` because Windows bsdtar could not decompress 128MB of xz
+inside the timeout. Windows remains unregressed (download + check both pass).
+
+**Deliberately did NOT bump the version.** The AppImage has never been run by
+anyone. ci.yml's Build Linux job uploads a `streamdock-linux` artifact on every
+push to main, so Isaac can download that, boot Ubuntu and confirm it actually
+runs and downloads — *then* we bump and publish. Shipping first and testing
+after is the exact failure mode the last three sessions have been unwinding.
+The push does touch package.json (linux build config), so Build & Release fires
+and correctly no-ops: v1.5.0 is already tagged.
+
+**macOS stays unpublished**, and it is not a build problem — CI's macOS runner
+packages a `.dmg` fine. BtbN publishes no macOS ffmpeg, and an unsigned `.dmg` is
+refused by Gatekeeper as "damaged" (signing + notarization needs an Apple
+Developer account, ~$99/yr). ci.yml's macOS job deliberately has no engine
+download or check: it is a compile check only, and `check:binaries` would
+correctly fail there.
+
+**Also**: gave the AppImage a freedesktop `category`, `synopsis` and
+`description` so its generated `.desktop` entry files correctly in a Linux
+application menu, and added the `libgtk`/`patchelf` system-dependency step to
+release.yml's Linux job — ci.yml had it, and the job that builds the artifact
+users actually download must not be the one missing it.
+
 ## Working agreements for future sessions on this repo
 
+- **A green build is not a working artifact.** CI's Build Linux job passed for
+  months while packaging an app with no engines in it, because the download
+  script exited 0 without downloading. Assert on the artifact's contents, not on
+  the step's exit code.
+- **Verify upstream asset names against the API before hardcoding them.** Two
+  sessions have now been spent on URLs that looked right: `releases/latest/`
+  vs the `latest` tag, and the plain `yt-dlp` asset vs `yt-dlp_linux`.
 - **Truncated text in a rendered page is not automatically a CSS bug.** Check
   the generated HTML first: if the text is not in the source, no stylesheet did
   it. Session 10's cuts landed exactly on markdown line breaks, which named the

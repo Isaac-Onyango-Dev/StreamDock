@@ -177,6 +177,9 @@ jobs:
       - name: Download engine binaries (yt-dlp, ffmpeg, ffprobe)
         run: npm run download:binaries
 
+      - name: Verify the engines are present and runnable
+        run: npm run check:binaries
+
       - name: Build Windows app
         # --publish never: release.yml is the only thing that uploads. The
         # publish config in package.json exists so electron-builder emits the
@@ -209,6 +212,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # No engine download here on purpose: BtbN publishes no macOS ffmpeg build,
+      # so there is nothing to fetch and check:binaries would fail. This job is a
+      # packaging/compile check; macOS is not a published target (see release.yml).
       - name: Build macOS app
         # --publish never: release.yml is the only thing that uploads. The
         # publish config in package.json exists so electron-builder emits the
@@ -245,6 +251,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Download engine binaries (yt-dlp, ffmpeg, ffprobe)
+        run: npm run download:binaries
+
+      - name: Verify the engines are present and runnable
+        run: npm run check:binaries
 
       - name: Build Linux app
         # --publish never: release.yml is the only thing that uploads. The
