@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { RefreshCw, CheckCircle2, Image as ImageIcon, MousePointerClick } from 'lucide-react';
 import type { Settings } from '../../lib/types';
 
@@ -106,7 +106,7 @@ export function BackgroundSettings({ settings, onSettingsChange }: BackgroundSet
               onClick={() => void handleModeSelect('bing')}
               className={`flex-1 py-2 rounded-md border text-sm font-medium transition-colors ${
                 mode === 'bing' 
-                  ? 'bg-primary border-primary text-white' 
+                  ? 'bg-accent border-accent text-white'
                   : 'bg-surface-2 border-border-subtle text-text-secondary hover:bg-surface-3'
               }`}
             >
@@ -116,7 +116,7 @@ export function BackgroundSettings({ settings, onSettingsChange }: BackgroundSet
               onClick={() => void handleModeSelect('picsum')}
               className={`flex-1 py-2 rounded-md border text-sm font-medium transition-colors ${
                 mode === 'picsum' 
-                  ? 'bg-primary border-primary text-white' 
+                  ? 'bg-accent border-accent text-white'
                   : 'bg-surface-2 border-border-subtle text-text-secondary hover:bg-surface-3'
               }`}
             >
@@ -125,7 +125,7 @@ export function BackgroundSettings({ settings, onSettingsChange }: BackgroundSet
           </div>
 
           <div className={`w-full h-[200px] rounded-lg overflow-hidden relative bg-surface-1 transition-all duration-200 border border-border-subtle group ${
-            (mode === 'bing' || mode === 'picsum') ? 'ring-2 ring-primary ring-offset-2 ring-offset-bg' : ''
+            (mode === 'bing' || mode === 'picsum') ? 'ring-2 ring-accent ring-offset-2 ring-offset-bg' : ''
           }`}>
             {previewUrl ? (
               <div 
@@ -134,7 +134,13 @@ export function BackgroundSettings({ settings, onSettingsChange }: BackgroundSet
                 role="button"
                 tabIndex={0}
               >
-                <img src={previewUrl} alt="Wallpaper preview" className="w-full h-full object-cover block transition-transform duration-500 group-hover:scale-105" />
+                <img
+                  src={previewUrl}
+                  alt="Wallpaper preview"
+                  draggable={false}
+                  className="w-full h-full object-cover block transition-transform duration-500 group-hover:scale-105"
+                  style={{ WebkitUserDrag: 'none' } as CSSProperties}
+                />
                 <div className="absolute inset-0 bg-black/0 transition-colors duration-300 group-hover:bg-black/30 flex items-center justify-center">
                   <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center gap-2 bg-black/70 text-white px-4 py-2 rounded-full text-sm font-medium backdrop-blur-md">
                     <MousePointerClick className="h-4 w-4" />
@@ -190,7 +196,7 @@ export function BackgroundSettings({ settings, onSettingsChange }: BackgroundSet
         <div>
           <div className="flex justify-between items-center mb-2">
             <span className="text-[11px] font-medium text-text-secondary uppercase tracking-[0.07em]">Solid Color</span>
-            <span className="text-[11px] text-text-tertiary font-mono">{bgColor.toUpperCase()}</span>
+            <span className="text-[11px] text-text-secondary font-mono">{bgColor.toUpperCase()}</span>
           </div>
           
           <div 
@@ -225,7 +231,7 @@ export function BackgroundSettings({ settings, onSettingsChange }: BackgroundSet
             
             <label className={`flex items-center gap-1.5 border rounded-md px-2 py-1 cursor-pointer transition-colors ${
               mode === 'solid' && !PRESET_COLORS.includes(bgColor.toLowerCase())
-                ? 'bg-surface-3 border-primary'
+                ? 'bg-surface-3 border-accent'
                 : 'bg-surface-2 border-border-subtle hover:bg-surface-3'
             }`}>
               <div className="relative h-[22px] w-[22px] shrink-0 rounded-full overflow-hidden border border-border-subtle" style={{ backgroundColor: bgColor }}>
