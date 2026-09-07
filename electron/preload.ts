@@ -13,9 +13,10 @@ type Settings = {
   scheduledStartTime?: string | null;
   hasOnboarded?: boolean;
   densityMode?: 'comfortable' | 'compact';
-  backgroundMode?: 'solid' | 'bing' | 'picsum' | 'gradient';
+  backgroundMode?: 'solid' | 'bing' | 'picsum' | 'gradient' | 'theme';
   backgroundImageUrl?: string;
   solidColorBg?: string;
+  backgroundTheme?: string;
   bingRefreshInterval?: number;
   clipboardWatcher?: boolean;
 };

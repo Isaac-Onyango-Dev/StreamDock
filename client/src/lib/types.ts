@@ -166,7 +166,11 @@ export interface StartRequest {
   downloadPackaging?: DownloadPackagingMode;
 }
 
-export type BackgroundMode = 'solid' | 'bing' | 'picsum' | 'gradient';
+/**
+ * 'gradient' is the install site's own gradient and the app default;
+ * 'theme' selects one of the ambient themes named by `backgroundTheme`.
+ */
+export type BackgroundMode = 'solid' | 'bing' | 'picsum' | 'gradient' | 'theme';
 
 export interface Settings {
   downloadDir: string;
@@ -178,6 +182,8 @@ export interface Settings {
   backgroundMode?: BackgroundMode;
   backgroundImageUrl?: string;
   solidColorBg?: string;
+  /** Ambient theme id, used when backgroundMode is 'theme'. */
+  backgroundTheme?: string;
   bingRefreshInterval?: number;
   clipboardWatcher?: boolean;
   ytdlpOptions?: {

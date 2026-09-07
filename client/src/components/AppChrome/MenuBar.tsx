@@ -11,12 +11,21 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
  * clash with the custom chrome), this renders only the top-level labels and
  * asks the main process to pop up the real submenus at the button's position.
  */
-export function MenuBar() {
+interface MenuBarProps {
+  /**
+   * macOS draws the real menu bar at the top of the screen, so an in-window
+   * copy would be a duplicate rather than the only way in.
+   */
+  enabled?: boolean;
+}
+
+export function MenuBar({ enabled = true }: MenuBarProps) {
   const [labels, setLabels] = useState<string[]>([]);
   const [openLabel, setOpenLabel] = useState<string | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     void window.streamDock?.getMenuLabels?.().then((next) => {
       if (!cancelled && Array.isArray(next)) setLabels(next);
@@ -24,9 +33,9 @@ export function MenuBar() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [enabled]);
 
-  if (labels.length === 0) return null;
+  if (!enabled || labels.length === 0) return null;
 
   const openMenu = (label: string, button: HTMLButtonElement) => {
     const rect = button.getBoundingClientRect();

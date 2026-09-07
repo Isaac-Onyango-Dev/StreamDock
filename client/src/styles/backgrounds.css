@@ -1,0 +1,167 @@
+/*
+ * Ambient background themes.
+ *
+ * Each theme declares three custom properties and nothing else:
+ *   --bg-base   the flat colour painted underneath
+ *   --bg-image  the layered gradients painted on top
+ *   --bg-size   per-layer background-size (omit when every layer is `cover`)
+ *
+ * They are declared once per theme and consumed in two places — the full-window
+ * `.app-background` element and the small preview swatches in Settings — so a
+ * swatch always shows the real theme rather than a hand-maintained
+ * approximation that can drift from it. That is also why every gradient is
+ * positioned in percentages rather than pixels: the same declaration has to
+ * read correctly at 26px and at 1440px.
+ */
+
+/* ── Site Gradient ────────────────────────────────────────────────────────────
+ * The install site's own background, transcribed from its live CSS rather than
+ * eyeballed: base #0A0716, three blurred colour blobs (violet top-left, pink
+ * right, amber bottom at 35% opacity) and a 28px violet dot grid. The site
+ * applies blur(90px) to real elements; soft transparent colour stops reproduce
+ * that without a filter, which would otherwise force a repaint of the layer on
+ * every window resize.
+ */
+[data-bg-mode="gradient"],
+.bg-theme-site-gradient {
+  --bg-base: #0A0716;
+  --bg-image:
+    radial-gradient(rgba(167, 139, 250, 0.08) 1px, transparent 1px),
+    radial-gradient(ellipse 60% 55% at 6% -4%, rgba(139, 92, 246, 0.55), transparent 70%),
+    radial-gradient(ellipse 52% 50% at 104% 16%, rgba(236, 72, 153, 0.5), transparent 70%),
+    radial-gradient(ellipse 50% 48% at 38% 108%, rgba(251, 191, 36, 0.35), transparent 70%);
+  --bg-size: 28px 28px, cover, cover, cover;
+}
+
+/* ── Glassmorphism ───────────────────────────────────────────────────────── */
+[data-bg-theme="glassmorphism"],
+.bg-theme-glassmorphism {
+  --bg-base: #141225;
+  --bg-image:
+    linear-gradient(125deg, rgba(255, 255, 255, 0.07) 0%, transparent 45%),
+    radial-gradient(ellipse 55% 50% at 18% 12%, rgba(167, 199, 255, 0.42), transparent 70%),
+    radial-gradient(ellipse 50% 45% at 82% 22%, rgba(244, 114, 182, 0.34), transparent 70%),
+    radial-gradient(ellipse 60% 50% at 50% 104%, rgba(125, 211, 252, 0.3), transparent 70%);
+}
+
+/* ── Cyborg ──────────────────────────────────────────────────────────────── */
+[data-bg-theme="cyborg"],
+.bg-theme-cyborg {
+  --bg-base: #0A0E13;
+  --bg-image:
+    repeating-linear-gradient(0deg, rgba(34, 211, 238, 0.07) 0 1px, transparent 1px 4px),
+    radial-gradient(ellipse 60% 45% at 50% -8%, rgba(34, 211, 238, 0.28), transparent 72%),
+    radial-gradient(ellipse 55% 50% at 100% 100%, rgba(148, 163, 184, 0.22), transparent 70%);
+  --bg-size: auto, cover, cover;
+}
+
+/* ── Hazard ──────────────────────────────────────────────────────────────── */
+[data-bg-theme="hazard"],
+.bg-theme-hazard {
+  --bg-base: #16110A;
+  --bg-image:
+    repeating-linear-gradient(
+      45deg,
+      rgba(251, 191, 36, 0.14) 0 14px,
+      transparent 14px 28px
+    ),
+    radial-gradient(ellipse 60% 50% at 50% 0%, rgba(251, 146, 60, 0.26), transparent 72%);
+  --bg-size: auto, cover;
+}
+
+/* ── Technology ──────────────────────────────────────────────────────────── */
+[data-bg-theme="technology"],
+.bg-theme-technology {
+  --bg-base: #060B16;
+  --bg-image:
+    repeating-linear-gradient(0deg, rgba(56, 189, 248, 0.09) 0 1px, transparent 1px 32px),
+    repeating-linear-gradient(90deg, rgba(56, 189, 248, 0.09) 0 1px, transparent 1px 32px),
+    radial-gradient(ellipse 62% 55% at 22% 8%, rgba(37, 99, 235, 0.34), transparent 72%),
+    radial-gradient(ellipse 50% 45% at 88% 92%, rgba(6, 182, 212, 0.26), transparent 70%);
+  --bg-size: auto, auto, cover, cover;
+}
+
+/* ── Aurora ──────────────────────────────────────────────────────────────── */
+[data-bg-theme="aurora"],
+.bg-theme-aurora {
+  --bg-base: #04120F;
+  --bg-image:
+    radial-gradient(ellipse 70% 40% at 20% 0%, rgba(52, 211, 153, 0.42), transparent 70%),
+    radial-gradient(ellipse 60% 45% at 70% 14%, rgba(45, 212, 191, 0.34), transparent 70%),
+    radial-gradient(ellipse 65% 50% at 45% 104%, rgba(129, 140, 248, 0.3), transparent 72%);
+}
+
+/* ── Synthwave ───────────────────────────────────────────────────────────── */
+[data-bg-theme="synthwave"],
+.bg-theme-synthwave {
+  --bg-base: #120620;
+  --bg-image:
+    repeating-linear-gradient(0deg, rgba(34, 211, 238, 0.16) 0 1px, transparent 1px 26px),
+    radial-gradient(ellipse 80% 34% at 50% 84%, rgba(236, 72, 153, 0.5), transparent 68%),
+    radial-gradient(ellipse 60% 45% at 50% 4%, rgba(124, 58, 237, 0.42), transparent 72%);
+  --bg-size: auto, cover, cover;
+}
+
+/* ── Nebula ──────────────────────────────────────────────────────────────── */
+[data-bg-theme="nebula"],
+.bg-theme-nebula {
+  --bg-base: #07060F;
+  --bg-image:
+    radial-gradient(rgba(255, 255, 255, 0.16) 1px, transparent 1px),
+    radial-gradient(ellipse 60% 50% at 26% 22%, rgba(147, 51, 234, 0.44), transparent 72%),
+    radial-gradient(ellipse 55% 48% at 78% 68%, rgba(59, 130, 246, 0.32), transparent 72%),
+    radial-gradient(ellipse 50% 40% at 58% 6%, rgba(219, 39, 119, 0.24), transparent 70%);
+  --bg-size: 46px 46px, cover, cover, cover;
+}
+
+/* ── Carbon ──────────────────────────────────────────────────────────────── */
+[data-bg-theme="carbon"],
+.bg-theme-carbon {
+  --bg-base: #0C0C0E;
+  --bg-image:
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.045) 0 2px, transparent 2px 6px),
+    repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.045) 0 2px, transparent 2px 6px),
+    radial-gradient(ellipse 70% 60% at 50% 0%, rgba(148, 163, 184, 0.14), transparent 74%);
+  --bg-size: auto, auto, cover;
+}
+
+/* ── Matrix ──────────────────────────────────────────────────────────────── */
+[data-bg-theme="matrix"],
+.bg-theme-matrix {
+  --bg-base: #02120A;
+  --bg-image:
+    repeating-linear-gradient(90deg, rgba(34, 197, 94, 0.13) 0 1px, transparent 1px 18px),
+    linear-gradient(180deg, rgba(34, 197, 94, 0.22) 0%, transparent 45%),
+    radial-gradient(ellipse 60% 50% at 50% 100%, rgba(22, 163, 74, 0.26), transparent 72%);
+  --bg-size: auto, cover, cover;
+}
+
+/* ── Sunset ──────────────────────────────────────────────────────────────── */
+[data-bg-theme="sunset"],
+.bg-theme-sunset {
+  --bg-base: #180913;
+  --bg-image:
+    radial-gradient(ellipse 90% 42% at 50% 100%, rgba(251, 146, 60, 0.46), transparent 70%),
+    radial-gradient(ellipse 70% 45% at 30% 86%, rgba(236, 72, 153, 0.36), transparent 72%),
+    radial-gradient(ellipse 70% 55% at 60% 0%, rgba(109, 40, 217, 0.4), transparent 72%);
+}
+
+/* ── Midnight ────────────────────────────────────────────────────────────── */
+[data-bg-theme="midnight"],
+.bg-theme-midnight {
+  --bg-base: #05070E;
+  --bg-image:
+    radial-gradient(ellipse 65% 55% at 18% 6%, rgba(30, 64, 175, 0.38), transparent 72%),
+    radial-gradient(ellipse 55% 50% at 86% 88%, rgba(15, 118, 110, 0.26), transparent 72%);
+}
+
+/*
+ * Preview swatch. Reuses whichever theme class is applied alongside it, so the
+ * swatch and the live background can never disagree.
+ */
+.theme-swatch {
+  background-color: var(--bg-base, var(--color-bg));
+  background-image: var(--bg-image, none);
+  background-size: var(--bg-size, cover);
+  background-position: center;
+}

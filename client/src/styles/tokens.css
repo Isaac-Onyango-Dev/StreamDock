@@ -104,11 +104,6 @@
   --bg-image: none;
 }
 
-[data-bg-mode="gradient"] {
-  --bg-image: radial-gradient(ellipse at 50% 0%, hsl(214, 88%, 58% / 0.08), transparent 60%),
-              radial-gradient(ellipse at 0% 100%, hsl(214, 88%, 58% / 0.05), transparent 50%);
-}
-
 [data-bg-mode="bing"],
 [data-bg-mode="picsum"] {
   --bg-image: var(--bg-bing-image, none);
@@ -118,9 +113,11 @@
   position: fixed;
   inset: 0;
   z-index: -1;
-  background-color: var(--bg-solid-color, var(--color-bg));
+  /* --bg-base is declared only by the ambient themes (backgrounds.css), so in
+     solid mode it is absent and the user's chosen colour is used instead. */
+  background-color: var(--bg-base, var(--bg-solid-color, var(--color-bg)));
   background-image: var(--bg-image);
-  background-size: cover;
+  background-size: var(--bg-size, cover);
   background-position: center;
   background-repeat: no-repeat;
   transition: background-image var(--motion-slow) var(--ease-out),
@@ -142,13 +139,16 @@
 }
 
 /*
- * Solid mode has nothing to make legible, so the overlay is pure loss: the
- * gradient above is fully opaque at its first and last stops, which meant the
- * chosen background colour was painted and then immediately covered by
- * near-black. Picking a colour changed the setting, saved it, and showed no
- * visible difference — which read as "the swatches don't work".
+ * Solid mode and the ambient themes have nothing to make legible, so the
+ * overlay above is pure loss for them: it is fully opaque at its first and last
+ * stops, which meant the chosen background was painted and then immediately
+ * covered by near-black. Picking a colour changed the setting, saved it, and
+ * showed no visible difference — which read as "the swatches don't work". The
+ * themes in backgrounds.css are authored at a readable contrast already.
  */
-.app-background[data-bg-mode="solid"]::after {
+.app-background[data-bg-mode="solid"]::after,
+.app-background[data-bg-mode="gradient"]::after,
+.app-background[data-bg-mode="theme"]::after {
   opacity: 0;
 }
 

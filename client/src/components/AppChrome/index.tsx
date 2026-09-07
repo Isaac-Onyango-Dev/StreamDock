@@ -4,6 +4,7 @@ import { Download, Minus, Settings, Square, Link2, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { Tab } from '../../lib/types';
 import { MenuBar } from './MenuBar';
+import { BrandMark } from '../BrandMark';
 
 interface AppChromeProps {
   currentTab: Tab;
@@ -79,8 +80,16 @@ export function AppChrome({ currentTab, activeCount, onTabChange, children }: Ap
         className="flex w-[var(--nav-rail-width)] shrink-0 flex-col items-center border-r border-border bg-chrome-rail py-2"
         aria-label="Main navigation"
       >
-        <div className="mb-3 flex h-7 w-7 items-center justify-center rounded-md bg-accent/15 text-accent">
-          <Download className="h-3.5 w-3.5" aria-hidden />
+        {/*
+          The brand mark, not a nav item. This slot previously rendered the same
+          <Download /> icon the Downloads tab uses a few pixels below it, inside
+          an accent-tinted rounded box that also read as an active-tab
+          highlight — so the app logo and a nav button were indistinguishable.
+          The real mark is its own shape, and the wrapper is now plain so the
+          accent-muted background stays unique to the selected tab.
+        */}
+        <div className="mb-3 flex h-7 w-7 shrink-0 items-center justify-center" title="StreamDock">
+          <BrandMark className="h-6 w-6" idSuffix="rail" />
         </div>
 
         <nav className="flex flex-1 flex-col items-center gap-1">
@@ -141,7 +150,7 @@ export function AppChrome({ currentTab, activeCount, onTabChange, children }: Ap
             </span>
           </span>
 
-          <MenuBar />
+          <MenuBar enabled={!isMac} />
 
           <div className="flex-1" />
 
