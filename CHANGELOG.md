@@ -4,6 +4,40 @@ All notable changes to StreamDock are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] - 2026-09-07
+
+### Added
+- **Advanced Background** panel in Settings, sitting beside Advanced yt-dlp
+  Options as a matched pair and stacking on narrow windows. It is now the
+  single place background is configured: ambient themes, live wallpapers
+  (Bing Daily / Random Photo, preview, refresh interval) and solid colours.
+- Twelve ambient background themes — Site Gradient, Glassmorphism, Cyborg,
+  Hazard, Technology, Aurora, Synthwave, Nebula, Carbon, Matrix, Sunset and
+  Midnight. Each preview swatch shares its CSS rule with the live background,
+  so a preview cannot drift from what it applies.
+- **Site Gradient is the new default background**, transcribed from the install
+  site's live CSS rather than approximated: base `#0A0716`, violet/pink/amber
+  colour blobs in the site's own positions, and its 28px violet dot grid.
+
+### Changed
+- A saved background preference is never overwritten by the new default. The
+  gradient is adopted only for fresh installs, for settings files that predate
+  the option, and for the one case that is provably untouched — the old default
+  mode paired with the old default colour, a combination the colour picker
+  never offered. Any other stored mode or colour is left exactly as it was.
+
+### Fixed
+- The title bar showed "StreamDock" twice: the gradient wordmark, then a plain
+  text duplicate. The duplicate was the native menu's app-name entry, a macOS
+  convention that the custom titlebar was rendering as an ordinary menu label
+  on Windows and Linux. It is now macOS-only; every item in it already existed
+  under File and Help.
+- The sidebar's top icon was the same download arrow as the Downloads tab
+  directly beneath it, in an accent-tinted box that also read as an active-tab
+  highlight — the app logo and a nav button were indistinguishable. It is now
+  the real StreamDock mark from `assets/icon.svg`, and the tinted background is
+  once again unique to the selected tab.
+
 ## [1.3.0] - 2026-09-07
 
 ### Fixed

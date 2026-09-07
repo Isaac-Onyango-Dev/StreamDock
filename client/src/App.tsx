@@ -151,12 +151,16 @@ export default function App() {
     '--bg-solid-color': settings.solidColorBg || undefined,
   } as CSSProperties;
 
-  const bgMode = settings.backgroundMode ?? 'solid';
+  const bgMode = settings.backgroundMode ?? 'gradient';
+  // Only meaningful in 'theme' mode; leaving it off otherwise keeps a stale
+  // stored theme id from styling a background the user has since switched away
+  // from, since the theme rules key on the attribute alone.
+  const bgTheme = bgMode === 'theme' ? settings.backgroundTheme : undefined;
 
   return (
-    <div data-bg-mode={bgMode} className="contents">
+    <div data-bg-mode={bgMode} data-bg-theme={bgTheme} className="contents">
       <OverlayBus />
-      <div className="app-background" data-bg-mode={bgMode} style={bgStyle} />
+      <div className="app-background" data-bg-mode={bgMode} data-bg-theme={bgTheme} style={bgStyle} />
       <AppChrome currentTab={currentTab} activeCount={activeCount} onTabChange={setCurrentTab}>
         <div
           className={`flex h-full min-h-0 flex-col px-4 py-4 ${

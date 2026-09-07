@@ -1,5 +1,6 @@
 @import './styles/tokens.css';
 @import './styles/brand.css';
+@import './styles/backgrounds.css';
 
 @tailwind base;
 @tailwind components;
@@ -153,17 +154,24 @@
   }
 
   /*
-   * Solid mode keeps opaque panels — a flat colour behind fully opaque chrome
-   * is invisible — but tints them toward the chosen colour so selecting a
-   * swatch visibly changes the app instead of only the swatch's own ring.
+   * Solid mode and the ambient themes keep mostly-opaque panels — a background
+   * behind fully opaque chrome is invisible — but tint them toward the chosen
+   * colour or theme so a selection visibly changes the app instead of only the
+   * swatch's own ring.
    */
-  [data-bg-mode="solid"] .bg-chrome-rail {
+  [data-bg-mode="solid"] .bg-chrome-rail,
+  [data-bg-mode="gradient"] .bg-chrome-rail,
+  [data-bg-mode="theme"] .bg-chrome-rail {
     background-color: color-mix(in srgb, var(--color-surface-1) 86%, transparent);
   }
-  [data-bg-mode="solid"] .bg-chrome-header {
+  [data-bg-mode="solid"] .bg-chrome-header,
+  [data-bg-mode="gradient"] .bg-chrome-header,
+  [data-bg-mode="theme"] .bg-chrome-header {
     background-color: color-mix(in srgb, var(--color-surface-0) 80%, transparent);
   }
-  [data-bg-mode="solid"] .bg-chrome-content {
+  [data-bg-mode="solid"] .bg-chrome-content,
+  [data-bg-mode="gradient"] .bg-chrome-content,
+  [data-bg-mode="theme"] .bg-chrome-content {
     background-color: color-mix(in srgb, var(--color-surface-0) 72%, transparent);
   }
 }

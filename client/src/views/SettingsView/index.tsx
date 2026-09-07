@@ -181,8 +181,13 @@ export function SettingsView({
           )}
         </section>
 
-        <BackgroundSettings settings={settings} onSettingsChange={onSettingsChange} />
+        {/*
+          The two "advanced" panels are a matched pair and share the final row:
+          yt-dlp on the left, background in the space that was empty beside it.
+          The grid is `md:grid-cols-2`, so they stack on narrow windows.
+        */}
         <YtDlpSettings settings={settings} onSettingsChange={onSettingsChange} />
+        <BackgroundSettings settings={settings} onSettingsChange={onSettingsChange} />
       </div>
     </div>
   );

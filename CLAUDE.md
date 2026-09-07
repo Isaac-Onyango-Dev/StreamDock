@@ -404,8 +404,73 @@ a download run through the app's own UI rather than the engine directly.
 Auto-update cannot be verified until a release *after* this one exists, since
 v1.2.0 and earlier shipped without `latest.yml`.
 
+### Session 6 — UI polish: title bar, sidebar mark, Advanced Background
+
+One commit, version 1.3.0 -> 1.4.0. Driven by `D:\tasks\task.md` plus three
+screenshots. **Not pushed or released** (1.3.0 from session 5 is also still
+unpushed).
+
+- **Duplicate "StreamDock" in the title bar** was the *native menu's* app-name
+  entry, not a stray `<span>`. `buildAppMenu()` put a `{ label: 'StreamDock' }`
+  top-level menu on every platform (a macOS convention), and session 5's
+  in-window `MenuBar` faithfully rendered it as plain text right next to the
+  gradient wordmark. Now macOS-only; its three items already existed under File
+  and Help, so nothing was lost but a redundant Ctrl+O alias for Ctrl+D.
+  `MenuBar` also takes `enabled` and is off on macOS, where the system menu bar
+  draws the real thing. Verified at runtime via a new startup log line:
+  `[menu] Top-level menus: File, Edit, View, Help`.
+- **Sidebar top icon** was literally `<Download />` — the same component the
+  Downloads tab uses a few pixels below — inside an `bg-accent/15` box that also
+  looked like the active-tab highlight. Replaced with
+  `client/src/components/BrandMark.tsx`, an inline transcription of
+  `assets/icon.svg` (the canonical mark shared with the installer icon and the
+  site nav), and the tinted wrapper removed so accent-muted stays unique to the
+  selected tab.
+- **Advanced Background panel.** `BackgroundSettings` was `md:col-span-2` (full
+  width) and rendered after `YtDlpSettings`, leaving the empty space beside
+  yt-dlp visible in the screenshot. Swapped the order and dropped the span so
+  the two "advanced" cards share the last grid row; restyled the card to match
+  `YtDlpSettings` exactly (heading + description + `border-t` divider). All
+  background controls were *moved* here, not duplicated — there is no second
+  background surface.
+- **Twelve ambient themes** in `client/src/styles/backgrounds.css`, listed for
+  the UI in `client/src/lib/backgroundThemes.ts`. Each theme declares only
+  `--bg-base` / `--bg-image` / `--bg-size`, consumed by both `.app-background`
+  and the `.theme-swatch` previews — **the swatch is the theme, so a preview
+  cannot drift from what it applies.** Every gradient is percentage-positioned
+  so one declaration reads correctly at 26px and at 1440px.
+- **Site gradient is the new default.** Values transcribed from the live site's
+  CSS (`curl`'d and diffed against `docs/index.template.html`, not eyeballed):
+  base `#0A0716`, the three blob positions/colours/opacities, and the 28px
+  `rgba(167,139,250,.08)` dot grid. Modelled as radial-gradients rather than
+  blurred elements so there is no `filter` repaint on resize.
+- **Upgrade safety.** `updateSettings` persists the whole merged object, so
+  changing *any* unrelated setting had already written `backgroundMode: 'solid'`
+  to disk — a stored 'solid' is therefore not evidence the user chose it, and
+  there is no history to recover. The one provably-untouched state is the old
+  default mode paired with the old default colour `#0b1014`, which the picker
+  never offered as a preset, so it cannot realistically have been chosen. Only
+  that pair migrates; anything else is left alone. The migration is applied on
+  *read*, never written back. 11 tests in `electron/persistence.test.ts`.
+
+**Two new `BackgroundMode` values**: `'gradient'` (the site gradient — its own
+mode because it is the default) and `'theme'` (+ `backgroundTheme` naming one of
+the others). `App.tsx` only emits `data-bg-theme` when the mode is `'theme'`, so
+a stale stored theme id can't style a background the user has switched away
+from — verified in the browser.
+
+**Verification**: typecheck, ESLint 0/0, 108 tests, production build. Visually
+verified in Chrome against the dev server with the preload bridge stubbed:
+titlebar (single wordmark + File/Edit/View/Help), sidebar mark, the two advanced
+panels side by side, all 12 theme swatches, and the full click -> persisted
+setting -> computed CSS chain for gradient, theme and solid modes.
+
 ## Working agreements for future sessions on this repo
 
+- **A duplicated-looking UI element is often one element from an unexpected
+  layer.** Session 6's second "StreamDock" was a native menu label, and its
+  duplicate sidebar icon was a nav component reused as a logo — neither was
+  where the markup suggested. Check what else renders into that row first.
 - **Reproduce before diagnosing.** Session 5's "rate limited" report was a
   mislabel of a stale-engine 403, and no amount of reading the retry logic
   would have shown that. Running the engine's exact spawn arguments standalone,

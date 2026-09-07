@@ -499,17 +499,35 @@ function setupTray(): void {
 function buildAppMenu(): void {
   const isMac = process.platform === 'darwin';
 
+  /*
+   * The app-name menu is a macOS convention, and on macOS the system menu bar
+   * renders it as the bold application title. On Windows and Linux there is no
+   * system menu bar for a frameless window, so the custom titlebar renders the
+   * top-level labels itself — and this entry showed up there as a second, plain
+   * "StreamDock" sitting immediately beside the gradient wordmark.
+   *
+   * It is dropped rather than relabelled because every item in it already
+   * exists elsewhere: About in Help, Quit as File > Exit, and Open Download
+   * Folder as File > Choose Download Folder (both send the same IPC message;
+   * only the redundant Ctrl+O alias for Ctrl+D goes away with it).
+   */
+  const appNameMenu: MenuItemConstructorOptions[] = isMac
+    ? [
+        {
+          label: 'StreamDock',
+          submenu: [
+            { label: 'About StreamDock', role: 'about' },
+            { type: 'separator' },
+            { label: 'Open Download Folder', accelerator: 'CmdOrCtrl+O', click: openDownloadFolder },
+            { type: 'separator' },
+            { label: 'Quit StreamDock', accelerator: 'CmdOrCtrl+Q', role: 'quit' },
+          ],
+        },
+      ]
+    : [];
+
   const template: MenuItemConstructorOptions[] = [
-    {
-      label: 'StreamDock',
-      submenu: [
-        { label: 'About StreamDock', role: 'about' },
-        { type: 'separator' },
-        { label: 'Open Download Folder', accelerator: 'CmdOrCtrl+O', click: openDownloadFolder },
-        { type: 'separator' },
-        { label: 'Quit StreamDock', accelerator: 'CmdOrCtrl+Q', role: 'quit' },
-      ],
-    },
+    ...appNameMenu,
     {
       label: 'File',
       submenu: [
@@ -576,6 +594,7 @@ function buildAppMenu(): void {
   // the custom titlebar pop its submenus up in place (see IPC.MENU_POPUP).
   appMenu = menu;
   Menu.setApplicationMenu(menu);
+  log.info(`[menu] Top-level menus: ${appMenuLabels().join(', ')}`);
 
   function openDownloadFolder(): void {
     mainWindow?.webContents.send('menu:open-download-folder');
