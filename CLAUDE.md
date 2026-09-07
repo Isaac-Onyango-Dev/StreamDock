@@ -320,8 +320,96 @@ recording or a description of exactly what happens when clicked.
 hosted runner has no real yt-dlp/ffmpeg/display). Untouched this session,
 unrelated to anything above.
 
+### Session 5 — the "Rate limited" download regression, menu, README sync
+
+Landed as one commit (`1668e86`), version bumped 1.2.0 -> 1.3.0. **Not pushed
+or released** — left for Isaac to review first.
+
+**P0 — downloads completely broken. Root cause found by reproduction, not
+inspection.** The reported symptom ("Rate limited. Waiting before retrying...",
+stuck at 0%) was a mislabel. Running the engine's exact argument set by hand
+against a plain YouTube URL reproduced a real failure: the bundled yt-dlp
+(2026.03.17) got `HTTP Error 403` ~30% into the transfer, while the current
+release (2026.08.19) completed the same download with byte-identical arguments.
+yt-dlp itself was printing "your version is older than 90 days" into stderr the
+whole time. **The technique that settled it: run the exact spawn arguments the
+engine builds, standalone, and diff old binary vs new. Don't reason about
+whether an engine is "current enough" — test it.**
+
+Three contributing defects, all fixed:
+- `scripts/download-binaries.ts` returned early whenever `yt-dlp.exe` existed,
+  so a once-fetched engine was reused forever. CI was unaffected (clean runner
+  each build) which is exactly why it survived — the bug only bit dev machines
+  and anyone who had installed a while ago. Now refreshes past 30 days.
+- `version-checker.ts` had `MIN_VERSION = '2024.01.01'`, a hardcoded floor. A
+  six-month-stale binary compared as "newer than the minimum" and reported OK,
+  so the (already-built, already-wired) update banner never fired. Replaced
+  with age derived from the release date encoded in the version string — warn
+  >30 days, strongly >90. Self-maintaining; no constant to bump.
+- `error-translator.ts` classified with bare substring tests over the *whole*
+  stderr blob. `includes('429')` matches a fragment index or byte count;
+  `includes('403')` matches YouTube's AV1 itag 403; `includes('geo')` matches
+  almost anything. First match anywhere won, regardless of which line it came
+  from. Now: status codes must appear as status codes (`hasHttpStatus`), and
+  classification runs on `pickFatalLine()` — yt-dlp's last `ERROR:` line —
+  instead of the blob, so a warning above it can't hijack the message.
+
+Also added `errorDetail` on `DownloadRecord`, surfaced as a "Show details"
+toggle on failed rows (redacted engine stderr). This is the durable fix: the
+friendly one-liner made a stale-engine 403 and a real login wall
+indistinguishable in the UI.
+
+**P1 — menu + auto-update.** `buildAppMenu()` with a full File/Edit/View/Help
+template **already existed and had for a long time**; the window is
+`frame: false`, and Windows/Linux draw no native menu bar for a frameless
+window, so only the accelerators ever worked. Fixed with
+`client/src/components/AppChrome/MenuBar.tsx`: renders only the top-level
+labels in the custom titlebar and calls `IPC.MENU_POPUP` so the main process
+pops the *real* submenu — one menu definition, not two. Added
+`electron/app-updater.ts` (electron-updater, `autoDownload = false`, launch
+check + Help -> Check for Updates). **`electron-builder`'s `publish` was
+`null`**, so it never generated `latest.yml` — `release.yml` had been trying to
+upload one that didn't exist, with `fail_on_unmatched_files: false` hiding it.
+`electron-updater` is deliberately `external` in esbuild (like `electron-log`)
+because it resolves parts of itself dynamically.
+
+**P2 — README drift.** Diagnosed rather than patched: session 3's version-sync
+covered `docs/` only; the README was never in any automation and had been
+hand-edited since v1.0.1. Extracted the changelog parser to
+`scripts/lib/changelog.ts`, added `scripts/sync-readme.ts` + `npm run
+sync:docs`, and `deploy-site.yml` now commits `README.md` alongside
+`docs/index.html`.
+
+**P3 — background controls.** Not a click bug at all. Every control was wired
+correctly and saving correctly; the *result* was invisible, in two places at
+once: `.app-background::after` painted a fully-opaque-at-both-ends gradient
+over the chosen colour in solid mode, and `.bg-chrome-*` panels stayed fully
+opaque in every mode except `bing` — so solid colours were covered twice, and
+`picsum` wallpapers were hidden behind opaque chrome immediately after being
+fetched. Session 4's `draggable={false}` fix was real but addressed a
+different, smaller thing. **Lesson: "button doesn't work" in this app has twice
+now been a render-layer problem, not a handler problem — check what paints on
+top before touching the handler.**
+
+**Verification**: typecheck (both projects), ESLint 0/0, 97 Vitest tests
+(19 new, built from stderr captured verbatim from the real failure), production
+build, app boots clean (`[startup] yt-dlp version check: 2026.08.19`), and two
+real end-to-end downloads through the engine's exact argument set — YouTube
+(243MB) and archive.org (332MB), both exit 0.
+
+**Still unverified — needs Isaac at the keyboard** (this session has Chrome
+automation only, no desktop automation for the Electron window): the menu bar
+actually popping submenus on click, background controls visibly applying, and
+a download run through the app's own UI rather than the engine directly.
+Auto-update cannot be verified until a release *after* this one exists, since
+v1.2.0 and earlier shipped without `latest.yml`.
+
 ## Working agreements for future sessions on this repo
 
+- **Reproduce before diagnosing.** Session 5's "rate limited" report was a
+  mislabel of a stale-engine 403, and no amount of reading the retry logic
+  would have shown that. Running the engine's exact spawn arguments standalone,
+  and diffing old binary against new, settled it in minutes.
 - **Verify before fixing.** Both sessions found that written task specs
   (a general request, and a detailed `Task.md`) contained claims that didn't
   match the actual code. Read the real file before treating a bug report as
