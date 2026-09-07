@@ -48,10 +48,11 @@ verify:engine` (not yet exercised by any session so far).
 
 ## Where things stand (as of this session)
 
-Two work sessions have happened against this repo so far, both fully verified
-(typecheck clean × 2 projects, ESLint 0/0, Vitest passing, production build
-succeeds) and both delivered live to `D:\PROJECTS\StreamDock` — not just
-sitting in a sandbox.
+Three work sessions have happened against this repo so far. Sessions 1 and 2
+were fully verified (typecheck clean × 2 projects, ESLint 0/0, Vitest passing,
+production build succeeds) but left their work **uncommitted** in the working
+tree — session 3 was the one that actually committed, pushed, tagged, and
+released it. See session 3 below for what's now actually live.
 
 ### Session 1 — general bug-fix and optimization pass
 
@@ -185,6 +186,89 @@ code — flagged honestly rather than faked a fix:**
   npm install issue above is why. The sandbox and the live repo are kept in
   sync file-by-file after each verified change, but a full `npm install`
   hasn't successfully completed on the live machine within either session.
+
+### Session 3 — install site redesign, version sync, and going live
+
+First session to actually push to the real repo (both prior sessions left their
+work uncommitted locally — see the git log dates vs. the session narrative
+above). Two commits landed the backlog: `228aed9` (sessions 1+2's fix pass,
+committed as-is after fixing one regression it introduced — an unused
+`onNotice` prop on `CaptureView` that broke typecheck) and `97429a9` (this
+session's site work), followed by `148ee8f` fixing a reliability bug found
+during live verification.
+
+**Version bumped 1.0.2 → 1.1.0** (minor: dub/sub language labeling and the
+source-status advisory are new functionality, not just fixes) and actually
+tagged/pushed/released — `v1.1.0` is live with real Windows assets attached
+for the first time (the `v1.0.2` release predates `release.yml` by 9 days and
+shipped with zero assets; nobody had noticed).
+
+**Site (`docs/`) fully rebuilt**, not just re-skinned:
+- New brand identity from scratch (nothing to reuse before this): violet/pink/
+  amber gradient (`--violet #8B5CF6`, `--pink #EC4899`, `--amber #FBBF24`) on
+  a near-black base, Space Grotesk display + Inter body. Old site was
+  teal/sky on near-black — this is a deliberate, complete departure, not a
+  tweak.
+- `docs/index.html` is now a **generated file** — `docs/index.template.html`
+  is the hand-edited source, `scripts/build-site.ts` (`npm run build:site`)
+  injects the version and the latest `CHANGELOG.md` entries into it.
+- **Version sync root cause**: nothing injected the version anywhere before;
+  it was hand-edited in `docs/index.html` and drifted. Fixed two ways at
+  once: (1) electron-builder now emits stable per-platform filenames
+  (`StreamDock-Setup-Windows.exe` etc., set via `artifactName` in
+  `package.json`'s `build` block) so download buttons link straight to
+  `releases/latest/download/<name>` — GitHub resolves that to whatever's
+  current with **zero API calls**, so there's nothing to keep in sync for
+  the download link specifically; (2) `.github/workflows/deploy-site.yml`
+  runs `build:site` and commits the regenerated `docs/index.html` back to
+  `main` (Pages already serves `main`/`docs`, so this needed no Pages
+  settings change).
+- **Found and fixed a real reliability bug the hard way**: `deploy-site.yml`
+  originally triggered on `release: published`, but `release.yml` creates
+  its release with the default `GITHUB_TOKEN`, and GitHub Actions blocks
+  `GITHUB_TOKEN`-driven events from triggering other workflows
+  (anti-recursion protection) — so that trigger would have silently never
+  fired on a real tagged release, reintroducing the exact staleness bug this
+  work was meant to close. Switched to `workflow_run` reacting to
+  `Build & Release` completing, which isn't subject to that restriction.
+  Verified by manually dispatching the fixed workflow after pushing it —
+  confirmed green. **Lesson for future workflow-chaining work in this repo**:
+  a workflow triggered by another workflow's `GITHUB_TOKEN`-authored event
+  will not fire — use `workflow_run` instead, and check it actually fired
+  before trusting it.
+- Also caught and fixed mid-build: several platform/feature glyphs (🪟 🐧 📡
+  etc.) were silently falling back to missing-glyph boxes on this Windows
+  machine's emoji font. Found by actually rendering the page in a browser,
+  not by reading the HTML — replaced the whole icon set with hand-authored
+  inline SVGs matching the nav/download glyph style already in use.
+- Added `docs/404.html`, `robots.txt`, `sitemap.xml`, `.nojekyll`, and an
+  SVG OG/Twitter card image (`docs/assets/og-image.svg` — SVG, not PNG;
+  Facebook/LinkedIn preview fidelity for SVG og:image is inconsistent, flagged
+  as a known limitation rather than silently assumed to work everywhere).
+
+**Verification**: live site confirmed showing v1.1.0, direct Windows download
+link confirmed resolving through GitHub's redirect chain to a real ~102MB
+`.exe` (200, `application/octet-stream`). Responsive check done via a fixed-
+width iframe harness (`resize_window` wasn't actually reaching the real
+viewport in this sandboxed environment — `window.innerWidth` stayed pinned to
+the physical display size no matter what was requested) at 390/820/1440px;
+nav collapse, fluid type, and OS-detect platform-pill highlighting all
+confirmed working.
+
+**Known gap, not touched this session**: `ci.yml`'s `Verify Engine` and
+`E2E Tests` jobs failed on the first real run in GitHub Actions (this is the
+first time `ci.yml` ever actually ran there — it was added uncommitted in the
+prior sessions' fix pass). This matches what CLAUDE.md already flagged before
+this session started: `verify:engine` and Playwright e2e need real yt-dlp/
+ffmpeg binaries and a display that the hosted `ubuntu-latest` runner doesn't
+have. Not a regression from this session's changes (nothing touched those
+code paths) — needs a follow-up session to either provision those binaries
+in CI or scope those jobs down to what a hosted runner can actually do.
+
+**SSH access**: this session generated a passphrase-less ed25519 key at
+`C:\Users\ISAAC\.ssh\id_ed25519` (Isaac added the public key to GitHub) so
+pushes could happen non-interactively. Worth knowing if a future session
+finds it already there.
 
 ## Working agreements for future sessions on this repo
 
