@@ -830,6 +830,28 @@ destroy the root-cause narratives that are this repo's most useful artifact.
 skill directories; the closest, `claude-automation-recommender`, covers Claude
 Code's own extensibility and is explicitly read-only.
 
+**Verified live, not just locally.** Isaac authorised the push, and the whole
+chain ran on the real repo: push to main -> `Build & Release` fired on the
+package.json change (no tag involved) -> tag `v1.5.0` created by the release
+step -> release published with a 302MB installer, blockmap and `latest.yml`
+(v1.2.0 had no `latest.yml` at all, so **auto-update works for the first time**)
+-> `Deploy Site` fired on `workflow_run` -> live site reads v1.5.0 and its
+download button resolves through `releases/latest` to the **v1.5.0** installer,
+200 OK. CI's new `Version Guard` job passed alongside the other eight.
+A follow-up push touching only a workflow file triggered CI and *not* a second
+release, confirming the paths filter and the tag-exists guard.
+
+**Drift reconciled by cutting one consolidated v1.5.0**, not by back-filling
+1.3.0/1.4.0: nobody had those versions, `electron-updater` reads `latest.yml`
+from the newest release only, and building them retroactively would have
+published installers missing every fix since — including session 8's P0 download
+repairs. The CHANGELOG keeps both sections, so the history stays honest.
+
+**Known rough edge, already fixed forward**: the first v1.5.0 release attached
+`builder-debug.yml` because the asset glob was `release/*.yml`. It is
+`release/latest*.yml` now; v1.5.0's stray asset was left in place rather than
+mutating a published release.
+
 ## Working agreements for future sessions on this repo
 
 - **"It's not automated" and "the automation never ran" are different bugs.**
