@@ -134,9 +134,12 @@ jobs:
             release/*.exe
             release/*.blockmap
             release/*.dmg
-            release/*.zip
             release/*.AppImage
-            release/*.yml
+            release/latest*.yml
+          # latest*.yml specifically, not *.yml: electron-builder also writes
+          # builder-debug.yml, which is its own diagnostic dump and has no
+          # business being offered to users as a release download. Only the
+          # latest*.yml update manifests are consumed by electron-updater.
           if-no-files-found: warn
           retention-days: 3
 
