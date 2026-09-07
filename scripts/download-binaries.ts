@@ -16,10 +16,60 @@ const BINARIES_DIR = join(import.meta.dirname, '..', 'binaries');
 const YT_DLP_URL = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
 const FFMPEG_ZIP_URL = 'https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip';
 
+/**
+ * Fetch with retry.
+ *
+ * This step pulls ~120MB from two external hosts (GitHub Releases and BtbN's
+ * ffmpeg builds) and had no resilience whatsoever: a single 429 or 5xx aborted
+ * the whole packaged build. That is exactly what happened on CI — the step
+ * failed in 3 seconds, far too fast to be a transfer problem, on a commit whose
+ * diff did not touch this file and whose predecessor had just succeeded.
+ *
+ * A release build is the worst place to be one flaky response away from
+ * failure, so transient statuses and network errors are now retried with
+ * backoff. A 404 is not retried: that means the asset name is wrong, and
+ * hammering it just delays a real error.
+ */
+const MAX_ATTEMPTS = 4;
+
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
 async function download(url: string): Promise<Buffer> {
-  const response = await fetch(url, { redirect: 'follow' });
-  if (!response.ok) throw new Error(`Download failed (${response.status}): ${url}`);
-  return Buffer.from(await response.arrayBuffer());
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(url, { redirect: 'follow' });
+
+      if (response.ok) return Buffer.from(await response.arrayBuffer());
+
+      if (!isRetryableStatus(response.status)) {
+        throw new Error(`Download failed (${response.status} ${response.statusText}): ${url}`);
+      }
+      lastError = new Error(`Download failed (${response.status} ${response.statusText}): ${url}`);
+    } catch (error) {
+      // A non-retryable status is rethrown above as a plain Error; anything
+      // reaching here from fetch itself is a network-level failure worth a retry.
+      if (error instanceof Error && /Download failed \((?:4\d\d)/.test(error.message) && !/\((?:408|429)/.test(error.message)) {
+        throw error;
+      }
+      lastError = error;
+    }
+
+    if (attempt < MAX_ATTEMPTS) {
+      const delayMs = 2_000 * 2 ** (attempt - 1);
+      const reason = lastError instanceof Error ? lastError.message : String(lastError);
+      console.warn(`[binaries] attempt ${attempt}/${MAX_ATTEMPTS} failed (${reason}); retrying in ${delayMs / 1000}s`);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  throw new Error(
+    `Download failed after ${MAX_ATTEMPTS} attempts: ${url}\n` +
+    `Last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
+  );
 }
 
 /**
