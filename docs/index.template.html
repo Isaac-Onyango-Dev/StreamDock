@@ -497,6 +497,10 @@ nav {
 .req-text h5 { font-size: .92rem; font-weight: 700; margin-bottom: 4px; }
 .req-text p { font-size: .82rem; color: var(--muted); line-height: 1.55; }
 .req-text code { color: var(--pink-bright); font-size: .78rem; }
+/* Dims a platform that cannot be downloaded yet. A class, not an inline
+   opacity: the inline one outlived Linux's release and left the shipped
+   platform looking greyed out beside an undimmed macOS that is not shipped. */
+.req-item.is-pending { opacity: .5; }
 
 /* ── Footer ── */
 footer {
@@ -763,14 +767,14 @@ footer {
           <p><code>yt-dlp</code> and <code>ffmpeg</code> ship inside the installer — nothing extra to download or configure.</p>
         </div>
       </div>
-      <div class="req-item">
+      <div class="req-item is-pending">
         <span class="req-emoji">{{ICON_APPLE_MD}}</span>
         <div class="req-text">
           <h5>macOS — Coming Soon</h5>
           <p>macOS 12 Monterey or later (Apple Silicon &amp; Intel). Build not yet packaged.</p>
         </div>
       </div>
-      <div class="req-item" style="opacity:.5;">
+      <div class="req-item">
         <span class="req-emoji">{{ICON_LINUX_MD}}</span>
         <div class="req-text">
           <h5>Linux</h5>

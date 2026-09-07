@@ -254,6 +254,42 @@ function verifySiteRendering(): void {
       `the System Requirements grid still lists "${heading}"`,
     );
   }
+
+  // A platform is dimmed exactly when it cannot be downloaded.
+  //
+  // These two facts lived in different places and drifted: Linux kept an inline
+  // opacity:.5 through its first release, so the platform that had just shipped
+  // looked greyed out beside an undimmed macOS that had not. Tying the styling
+  // to the download button means the next platform to ship cannot be left
+  // looking unavailable.
+  for (const platform of ['windows', 'mac', 'linux']) {
+    const card = html.match(
+      new RegExp(`<div class="([^"]*)"[^>]*data-platform-card="${platform}"`),
+    );
+    assert(card !== null, `the download grid has a card for ${platform}`);
+    const downloadable = !(card?.[1] ?? '').includes('is-disabled');
+
+    // The requirement item for this platform is found by the heading it carries.
+    const label = platform === 'mac' ? 'macOS' : platform === 'windows' ? 'Windows' : 'Linux';
+    const item = html.match(
+      new RegExp(`<div class="req-item([^"]*)">(?:(?!</div>\\s*</div>)[\\s\\S])*?<h5>${label}`),
+    );
+    assert(item !== null, `the requirements grid has an entry for ${label}`);
+    const dimmed = (item?.[1] ?? '').includes('is-pending');
+
+    assert(
+      dimmed !== downloadable,
+      downloadable
+        ? `${label} is downloadable, so its requirements entry is not dimmed`
+        : `${label} is not downloadable, so its requirements entry is dimmed`,
+    );
+  }
+
+  // The inline opacity this replaced must not come back.
+  assert(
+    !/class="req-item"[^>]*style="[^"]*opacity/.test(html),
+    'no requirements entry carries an inline opacity (use .is-pending)',
+  );
 }
 
 /**
