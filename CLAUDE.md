@@ -37,22 +37,32 @@ fast without re-deriving it. Update it as work continues — don't let it go sta
 - Build: esbuild bundles `electron/main.ts`/`preload.ts` → `dist-electron/*.cjs`;
   Vite builds the renderer → `dist/client/`; electron-builder packages.
 - Tests: Vitest (`*.test.ts`/`*.test.tsx`, jsdom/happy-dom) + Playwright e2e
-  (not exercised by either session below — needs real yt-dlp/ffmpeg + a
-  display, likely not runnable in a headless sandbox).
+  (`tests/e2e/`). The e2e specs load the renderer over HTTP and assert on the
+  DOM, so they are browser tests: no Electron, no binaries, no display needed.
+  Session 7 corrected a long-standing claim to the contrary.
 
 Key scripts: `npm run typecheck` (two tsconfig projects — renderer and
 electron, run both), `npm run lint` region is actually just `eslint .`
 (flat config, `eslint.config.js`, zero-warning gate), `npm test` (Vitest),
 `npm run build:app` (production build without packaging), `npm run
-verify:engine` (not yet exercised by any session so far).
+verify:engine` (a pure static/unit check — no binaries, no network),
+`npx playwright test` (e2e).
+
+**Diagnosing a real user-reported failure? Start here:**
+`%APPDATA%/streamdock/streamdock.log` is `electron-log`'s output from Isaac's
+actual runs — full yt-dlp spawn command lines, verbatim stderr, timestamps.
+`logs/main.log` beside it only records version banners.
 
 ## Where things stand (as of this session)
 
-Three work sessions have happened against this repo so far. Sessions 1 and 2
-were fully verified (typecheck clean × 2 projects, ESLint 0/0, Vitest passing,
-production build succeeds) but left their work **uncommitted** in the working
-tree — session 3 was the one that actually committed, pushed, tagged, and
-released it. See session 3 below for what's now actually live.
+Nine work sessions have happened against this repo so far.
+
+**Correcting a claim this file carried for three sessions:** sessions 5 and 6
+were *not* unpushed. Verified in session 9 — `HEAD == origin/main` and
+`origin/main`'s package.json is at 1.4.0, so every commit through session 7 is
+on the remote. What was missing was never the commits: it was the **tags**,
+which stopped at v1.2.0. That distinction is the whole of the release drift, and
+believing "unpushed" hid it.
 
 ### Session 1 — general bug-fix and optimization pass
 
@@ -563,8 +573,296 @@ failure was a stale import and a typo-grade config error. And a job that is
 skipped is not a job that passes — the build jobs were green-by-absence for
 months because their `needs` was red.
 
+### Session 8 — the "login required" mislabel, naming abolished, atomic writes
+
+Version 1.4.0 -> 1.5.0. **Not pushed** (1.3.0 and 1.4.0 are also still unpushed).
+Driven by a six-priority round-4 spec. As in session 2, several of the spec's
+stated root causes did not survive contact with the code — the real causes were
+found by reproduction and are recorded below, because they are more useful than
+the reports were.
+
+**The single most valuable artefact this session: `%APPDATA%/streamdock/streamdock.log`.**
+It is `electron-log`'s real output from Isaac's own runs, with full spawn
+command lines, verbatim yt-dlp stderr, and timestamps. It answered in one grep
+what would otherwise have been guesswork, and it is the first place a future
+session should look. `logs/main.log` beside it only records version banners.
+
+**P0 — "This content requires a login" on downloads that used to work.**
+Two independent bugs, plus a site-side change that is not a StreamDock bug at all.
+
+1. *The mislabel, proven from the log rather than inferred.* At 18:14:55.974 the
+   engine logged `CDN access denied — likely a session/token expiry`; 0.5s later
+   at 18:14:56.441 it logged `failed: This content requires a login`. Two
+   classifiers, and the second one won. `consume()` classified each stderr line
+   with `task.manifestAttempted` in hand; `close()` then called `fail()`, which
+   re-ran a **context-free** `toUserError()` over the same stderr — and `close()`
+   deletes the task from `this.tasks` *before* calling `fail()`, so the context
+   could not be recovered even in principle. There is now one
+   `classifyEngineFailure(error, context)`, and `close()` hands the context in.
+2. *The details panel was erasing the evidence.* `sanitizeRaw`'s
+   `token\s*[=:][^\n]*` ran to end of line, so
+   `master.m3u8?token=…: Unable to download webpage: HTTP Error 403: Forbidden`
+   became `master.m3u8?token=[REDACTED]`. The status, the reason phrase and the
+   whole diagnosis were redacted along with the secret — on exactly the failures
+   where that panel exists to help. Redaction is value-scoped now; header-form
+   `Cookie:` lines are handled separately and still run to end of line.
+3. *The actual download failure is not StreamDock's to fix.* `cdn.imgnex.top`
+   (anikoto's CDN) sits behind Cloudflare bot management. Verified: the CDN root
+   and the manifest return the identical Cloudflare interstitial
+   (`Server: cloudflare`, `CF-RAY`, "Sorry, you have been blocked") **with and
+   without a token**, so the token is never even evaluated; and every one of six
+   `--impersonate` targets (chrome, chrome-136:macos-15, edge-101:windows-10,
+   firefox-135, safari-18.0, chrome-131:android-14) got the same 403. The token
+   is also not expiring: it encodes an expiry ~90s out and the failure happened
+   ~1s after minting. **The old "The link may have expired — try again" message
+   was itself a wrong guess**, which is why the new message does not claim it.
+   The hidden BrowserWindow passes Cloudflare because it is a real browser; it
+   captures no cookies on that path, so there is nothing to hand yt-dlp.
+   Downloading it would mean fetching HLS through the Electron session — a real
+   feature, deliberately out of scope for this round.
+
+**P1 — episode overshoot. Not the batching logic.** The spec attributed it to
+"batching into groups of 100 padding entries out". There was no batching code
+anywhere in the renderer. `episodeRangeProbe()` in `playlist-inspector.ts`
+generated `Array.from({ length: 200 })` synthetic episodes starting at whatever
+episode the user pasted, and hardcoded `itemCount: 999`. It now fetches the
+series page and reads the real count — anikoto states it in plain markup
+(`Episodes: <span> 366</span>`), along with the real series title and `og:image`.
+**Verified live: Bleach now probes as 366 items** (title "Bleach", not the
+URL-slug "Bleach Yaa9n"), against a real count of 366. When a page states no
+count, nothing is extrapolated — only the pasted episode is listed, and the note
+says so. Separately, `parseInfo` now prefers yt-dlp's `playlist_count` over
+`entries.length`, which the probe's own `--playlist-end 500` was capping.
+
+**P2 — smart naming abolished.** `buildOutputTemplate` is now: single video ->
+`<title>.<ext>` with no folder; confirmed playlist -> `<Playlist>/<title>.<ext>`.
+`Episode (N)` and the `Season N` branch are deleted. The "folder created for a
+single video" report was real and lived in the renderer, not the engine:
+`CaptureView` set `folderHint` for *every* episode-range download, so grabbing
+one episode still created a show folder. It is now gated on
+`batchUrls.length > 1`. Note the probe step creates no directories at all — the
+folder has always come from yt-dlp resolving the `-o` template.
+
+**P3 — atomic writes, using yt-dlp's own mechanism.** `-o` is now a *relative*
+template paired with `--paths home:<outputDir>` and
+`--paths temp:<outputDir>/.streamdock-incomplete/<id>`. An absolute `-o`
+overrides both, which is why the template had to become relative. Verified by
+watching the folder during a real download: only the staging directory and the
+already-finished file are visible; after a mid-download cancel the staging
+directory is gone entirely. `[MoveFiles] Moving file "X" to "Y"` is now parsed
+so `outputPath` tracks the final location — every earlier `Destination:` line
+points inside `temp:`, so without it "Show in folder" would target a path that
+no longer exists. Two gotchas worth knowing: `temp:` resolves **relative to
+`home:`** (pass both absolute), and `--embed-subs` *without* `--write-subs`
+deletes the `.vtt` itself after muxing — passing both is precisely what left the
+subtitle files behind.
+
+**P4 — real titles and thumbnails.** Pure data plumbing; `ProgressRow` already
+rendered `item.thumbnail` and `item.title`. Nothing ever passed a thumbnail, and
+`titleHint` was passed only for episode-range, so everything else queued as the
+literal string "Video download". `CaptureView` now forwards the probe's title
+and thumbnail for any spawn covering exactly one item (never for a spawn where
+yt-dlp walks a playlist itself — one hint would name every file identically),
+and the engine seeds `record.title` from it instead of the generic label.
+
+**P5 — the duplicate wordmark was already fixed; the report predates the fix.**
+Isaac's log line `[menu] Top-level menus: File, Edit, View, Help` at 18:10:59
+shows no app-name entry, and commit `d8931ba` (session 6's fix) was authored at
+18:14:48 — i.e. the fix was already in his working tree, uncommitted, when that
+run started. The screenshot is from the 17:00:33 run, before it. Rendered the
+current title bar to confirm: **exactly one "StreamDock"** on the whole page,
+"Stream" in muted grey plus "Dock" in the brand gradient — which is the site's
+own `nav-wordmark` treatment (`Stream<span>Dock</span>`), not a defect. Session
+6 removed a *fifth top-level menu entry* labelled "StreamDock"; File/Edit/View/
+Help were never touched. **No further code change was made here** — a second
+speculative edit is exactly what the spec asked to avoid. Added
+`tests/e2e/titlebar.spec.ts` (it asserts the rendered outcome, so a regression is
+caught wherever a second copy comes from) and a `verify:engine` check that the
+app-name menu stays macOS-gated.
+
+**Also fixed, found while testing rather than reported**: `pickFatalLine` matches
+`/^error:/i` but the cleanup strip was case-sensitive `/^ERROR:/`, so any
+engine-thrown `Error` reached the user with a literal `Error: ` prefix.
+
+**Verification**: typecheck (both projects), ESLint 0/0, 134 Vitest tests
+(21 new, the P0 ones built from stderr copied verbatim out of Isaac's log),
+`verify:engine` 44 checks, production build, Playwright 6/6. Plus live
+end-to-end runs through the real `DownloadEngine`: a YouTube video completing as
+`Me at the zoo.mp4` with no folder and no `.vtt`; a two-item playlist producing
+one folder with real per-item titles; a mid-download cancel leaving nothing
+behind; and the exact CDN 403 now reporting "The video host refused the download
+(403)…" with `HTTP Error 403` visible in the details panel.
+
+**Confirmed at runtime by Isaac's own 1.5.0 run**: the title bar log line
+`[menu] Top-level menus: File, Edit, View, Help` shows no duplicate app-name
+entry, closing out P5.
+
+**Still needs Isaac at the keyboard** (no desktop automation for the Electron
+window here): the queue rows rendering titles/thumbnails visually, and the
+50-per-page episode pager.
+
+**Follow-up in the same session — reported live from a 1.5.0 dev run.** Isaac
+ran the build and reported missing thumbnails plus a clipboard capture that
+"only puts the detected url as a placeholder". Four more defects, all confirmed
+by reproduction:
+
+1. **`start()` never ensured a probe existed.** It called `analyze()` (URL
+   resolution only) and then read `probe` straight out of the React render
+   closure. `probe` is `null` until `inspect()` has completed *and* re-rendered,
+   so pressing Download without pressing Analyze first queued with no metadata
+   at all — no title, no thumbnail, no playlist detection. Fixed by resolving an
+   `activeProbe` (reusing the current one only when it matches the current URL,
+   otherwise awaiting `inspect()`) and using that value throughout, never the
+   closure. **This class of bug is worth watching for in this file generally:**
+   several handlers read state that a sibling `setState` was supposed to have
+   populated moments earlier.
+2. **The metadata probe died on YouTube.** `probeViaYtDlp` ran `--dump-json`
+   through a shell string with the default 1MB stdout buffer, so an ordinary
+   video overflowed it (the `ERR_CHILD_PROCESS_STDIO_MAXBUFFER` visible in the
+   log). Raising the buffer fixed plain videos but *not* a radio mix, because
+   without `--no-playlist` yt-dlp emits one JSON object per entry and a mix is
+   effectively endless — no buffer size fixes that. Both were needed; it now
+   also uses `execFile` with an argument array instead of a shell string.
+3. **Playlist items never had thumbnails.** `--flat-playlist` entries carry a
+   `thumbnails[]` array and no scalar `thumbnail`, and `toItem` read only the
+   scalar. Every playlist row fell back to the placeholder icon in the preview
+   list and the queue. `pickThumbnail()` now takes the largest array entry, and
+   a playlist with no poster of its own borrows its first item's.
+4. **The clipboard watcher could not fill a controlled React input.** `App.tsx`
+   did `input.value = url` plus a synthetic `input` event. That assignment also
+   updates React's internal value tracker, so React sees no change, never calls
+   `onChange`, and re-renders the field back to its state value — an empty box
+   showing its placeholder, exactly as reported. Now delivered as a prop
+   (`incomingUrl`, carrying a `seq` so re-copying the same URL still counts as a
+   new delivery) and applied through the same `handleInputUrl` path as typing.
+
+Also split `displayTitle` (queue row) from `titleHint` (filename): a playlist
+should show its own name in the UI without that name being forced onto every
+file inside it.
+
+**Verification technique worth repeating**: the clipboard regression test was
+validated by *reverting the fix and confirming the test fails* — the first
+version of it passed against the broken code, because the value only resets on
+the next React render. It now forces that render by focusing the field. A
+regression test that has never failed against the bug it describes is not yet a
+regression test.
+
+
+### Session 9 — release automation: the tag was the missing link
+
+No code changes to the app. `package.json` stays at 1.5.0; **nothing pushed or
+released** — the pipeline is built and verified locally, and publishing is
+Isaac's call.
+
+**Diagnosis, all verified against the real repo rather than assumed:**
+
+| Link in the chain | State |
+| --- | --- |
+| `package.json` as version source of truth | works |
+| `deploy-site.yml` syncing site + README | works — the live site was correctly at v1.4.0 |
+| `release.yml` building and publishing | **works** — v1.1.0 and v1.2.0 both have real assets and its exact `name:` template |
+| Pushing the tag that triggers it | **never happened since v1.2.0** |
+
+So no workflow was broken. `release.yml` triggered only on `push: tags: ['v*']`,
+and bumping the version and pushing the tag were two separate manual acts; only
+the first was habitually performed. Local tags stop at v1.2.0, and so does the
+remote.
+
+**The user-visible harm was worse than a wrong number.** The site reads
+`package.json` and advertised v1.4.0, while its download button points at
+`releases/latest/download/StreamDock-Setup-Windows.exe` — which resolved to the
+**v1.2.0** installer. The site was offering a version that did not exist and
+handing over an old binary.
+
+**Fix — the tag is now an output of the pipeline, not its precondition.**
+`release.yml` triggers on a `package.json` change on main, resolves the version,
+skips if `v<version>` already exists (idempotent, so the site-sync commit cannot
+cause a loop), builds, and lets `softprops/action-gh-release` create the tag at
+that commit. Nothing depends on a tag push triggering a workflow — which matters,
+because a tag pushed with `GITHUB_TOKEN` *cannot* trigger one (the same
+anti-recursion rule session 3 hit with `on: release: published`).
+
+**Two coupling bugs found while wiring it, both would have recreated the drift:**
+
+1. `deploy-site.yml` triggered on `push: paths: package.json`, so a version bump
+   updated the site *immediately* while the release was still building — the
+   site would advertise a version whose installer did not exist yet, for the
+   length of a build. Removed that path; it now waits for the release workflow to
+   finish, so the site can never claim a version the download button cannot serve.
+2. `deploy-site.yml` passed `RELEASE_TAG: ${{ github.event.workflow_run.head_branch }}`.
+   That was a tag name only while the release was tag-triggered; on a
+   push-triggered run it is `main`, and `resolveVersion()` would have stripped
+   the `v` and rendered the site as **"vmain"**. Dropped the override, and
+   hardened `resolveVersion()` to ignore a non-semver `RELEASE_TAG`.
+
+**Scoped the release back to Windows only, deliberately.** The rewrite initially
+built all three platforms; `scripts/download-binaries.ts` fetches `yt-dlp.exe`
+and BtbN's **win64** ffmpeg unconditionally, so a macOS/Linux release would have
+packaged Windows executables inside a `.dmg`/`.AppImage` — installable, and
+unable to download anything. ci.yml still builds those platforms as a compile
+check. Making `download-binaries.ts` platform-aware is the one change needed
+before adding them to the release matrix.
+
+**Agreed plan for the next round (Isaac, session 9):** prove the Windows-only
+release works end to end first, then do **Linux next** — not macOS. The work
+starts in-repo (teach `download-binaries.ts` to fetch the Linux yt-dlp binary
+and a linux64 ffmpeg build, add `ubuntu-latest` to the release matrix), and
+Isaac will dual-boot Ubuntu to verify the resulting AppImage actually runs and
+downloads. macOS stays unpublished until someone can test a real `.dmg` on
+hardware — shipping an untested installer is precisely the failure mode this
+repo keeps hitting.
+
+**Guardrail**: `scripts/check-version-sync.ts` (`npm run check:version`), wired
+into ci.yml as `version-guard` and added to every build job's `needs`. It fails
+when the version is not semver, has no `CHANGELOG.md` section, or has moved
+*below* the newest tag (which would offer existing users a downgrade via
+electron-updater). It deliberately does **not** require a tag to already exist —
+that would fail every version-bump commit before its own release could run.
+Verified by breaking each rule in turn and watching it fail.
+
+**Versioning approach: `npm version` + full downstream automation, not
+semantic-release.** Stated in CONTRIBUTING.md with the reasoning: the drift was
+never about choosing the number — that part was done correctly three times — and
+semantic-release regenerates CHANGELOG.md from commit subjects, which would
+destroy the root-cause narratives that are this repo's most useful artifact.
+
+**No skill existed for this.** Checked the project, user and plugin-marketplace
+skill directories; the closest, `claude-automation-recommender`, covers Claude
+Code's own extensibility and is explicitly read-only.
+
 ## Working agreements for future sessions on this repo
 
+- **"It's not automated" and "the automation never ran" are different bugs.**
+  Session 9's release drift looked like a missing pipeline; the pipeline existed
+  and worked. What was missing was the manual step that triggered it. Check
+  whether the machinery ran before rebuilding it.
+- **A trigger that depends on a human step is not automation.** If a pipeline
+  starts from something a person must remember to do, it will drift. Make the
+  artifact (the tag) an output of the pipeline, not its precondition.
+- **Read `%APPDATA%/streamdock/streamdock.log` before theorising.** It carries
+  real spawn command lines and verbatim yt-dlp stderr from Isaac's own runs.
+  Session 8 found the exact overwrite behind a mislabelled error by grepping two
+  adjacent lines of it.
+- **A user-supplied root cause is a lead, not a finding.** Round 4 named
+  "batching into groups of 100" as the cause of episode overshoot; no batching
+  code existed. The real cause was a 200-entry generator and a hardcoded 999.
+  The report was still right that something was wrong — verify the symptom, and
+  treat the explanation as a hypothesis.
+- **Check timestamps before re-fixing a "still broken" report.** Session 8's P5
+  was a bug that had been fixed four minutes after the run being reported.
+  Comparing `git log` dates against the app's own startup log settled it in one
+  command, and avoided a second wrong guess at the same code.
+- **When two code paths answer the same question, the last one wins.** The
+  mislabelled error had a correct classifier and a context-free one; only the
+  context-free answer ever reached the UI. Prefer one function that takes
+  context over two functions that happen to agree today.
+- **A regression test that has never failed against the bug is not a test yet.**
+  Revert the fix, watch it go red, restore. Session 8's first clipboard test
+  passed against the broken code because the symptom only appears on the next
+  React render.
+- **Never write to a controlled React input's DOM node.** Setting `.value` and
+  firing a synthetic event also updates React's value tracker, so the change is
+  invisible to React and is undone by the next render. Pass the value as state.
 - **Never inherit a failure diagnosis you haven't reproduced.** This file
   asserted for four sessions that the two red CI jobs needed binaries and a
   display. Neither did. One local run of `npm run verify:engine` in session 7

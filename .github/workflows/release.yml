@@ -1,17 +1,108 @@
 name: Build & Release
 
+# Why this triggers on a version change rather than on a tag
+# ----------------------------------------------------------
+# It used to be `on: push: tags: ['v*']` only. That workflow was never broken —
+# v1.1.0 and v1.2.0 were both built and published by it. What was broken was the
+# step *before* it: bumping package.json and pushing the tag were two separate
+# manual acts, and only the first was habitually performed. So package.json
+# reached 1.5.0 while the newest release stayed at v1.2.0, the site (which reads
+# package.json) advertised a version that had never been published, and its
+# download button — pointing at `releases/latest` — served the 1.2.0 installer.
+#
+# The version in package.json is the single source of truth, so a change to it
+# on main IS the release signal. The tag becomes an output of the pipeline
+# instead of its manual precondition, which is what makes the drift structurally
+# impossible rather than merely discouraged.
+#
+# Note the tag is created by the release step itself, not pushed by a prior job.
+# A tag pushed with GITHUB_TOKEN cannot trigger another workflow (GitHub's
+# anti-recursion rule — the same trap that made `on: release: published` silently
+# never fire in deploy-site.yml), so nothing here depends on a tag push
+# triggering anything.
+
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+    paths:
+      - 'package.json'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (blank = whatever package.json says)'
+        required: false
+        type: string
 
 permissions:
   contents: write
 
 jobs:
-  build-windows:
-    name: Build Windows
-    runs-on: windows-latest
+  check:
+    name: Decide whether to release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.decide.outputs.version }}
+      tag: ${{ steps.decide.outputs.tag }}
+      should_release: ${{ steps.decide.outputs.should_release }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Resolve version and check for an existing release
+        id: decide
+        shell: bash
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="$(node -p "require('./package.json').version")"
+          fi
+          VERSION="${VERSION#v}"
+          TAG="v${VERSION}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG"         >> "$GITHUB_OUTPUT"
+
+          # Re-running on an already-released version must be a no-op, not a
+          # duplicate release: deploy-site.yml pushes a sync commit that touches
+          # package.json, which would otherwise re-trigger this workflow forever.
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$TAG already exists — nothing to release."
+          else
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$TAG is new — building and publishing it."
+          fi
+
+  # Windows only, deliberately.
+  #
+  # `scripts/download-binaries.ts` fetches `yt-dlp.exe` and BtbN's win64 ffmpeg
+  # build unconditionally, on every platform. Running the release on macOS or
+  # Linux would therefore package Windows executables inside a .dmg/.AppImage:
+  # it would install, and then fail every download, because the engine it ships
+  # cannot run. Publishing that is worse than publishing nothing.
+  #
+  # ci.yml still builds macOS and Linux on every push to main, so the packaging
+  # path for those platforms stays exercised and cannot silently rot — they are
+  # just not published until the binaries script learns to fetch per-platform
+  # engines. That is the one change needed to add them to this matrix.
+  build:
+    name: Build ${{ matrix.label }}
+    needs: check
+    if: needs.check.outputs.should_release == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows
+            artifact: streamdock-windows
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -28,21 +119,67 @@ jobs:
       - name: Download engine binaries (yt-dlp, ffmpeg, ffprobe)
         run: npm run download:binaries
 
-      - name: Build Windows app
+      - name: Build app
         # --publish never so electron-builder only *generates* the artifacts and
-        # the latest.yml update manifest; the upload below is the single
-        # publishing path. Without this, a tag build satisfies electron-builder's
-        # default onTagOrDraft policy and it would try to create its own release.
+        # the latest.yml update manifest; the publish job below is the single
+        # upload path. Without this, electron-builder's default onTagOrDraft
+        # policy would have it create a competing release of its own.
         run: npm run build -- --publish never
 
-      - name: Create GitHub Release & Upload Assets
-        uses: softprops/action-gh-release@v2
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
         with:
-          name: "StreamDock ${{ github.ref_name }}"
-          generate_release_notes: true
-          files: |
+          name: ${{ matrix.artifact }}
+          path: |
             release/*.exe
             release/*.blockmap
-            release/*.7z
-            release/latest.yml
+            release/*.dmg
+            release/*.zip
+            release/*.AppImage
+            release/*.yml
+          if-no-files-found: warn
+          retention-days: 3
+
+  publish:
+    name: Publish release ${{ needs.check.outputs.tag }}
+    needs: [check, build]
+    if: needs.check.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Collect built assets
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-artifacts
+          merge-multiple: true
+
+      - name: List what will be attached
+        run: ls -lh dist-artifacts || echo "(no artifacts produced)"
+
+      - name: Build release notes
+        # The hand-written CHANGELOG section explains *why* each change happened;
+        # generate_release_notes below appends GitHub's commit/PR list under it.
+        run: npx tsx scripts/release-notes.ts "${{ needs.check.outputs.version }}" > RELEASE_NOTES.md
+
+      - name: Create GitHub Release and attach assets
+        uses: softprops/action-gh-release@v2
+        with:
+          # The tag does not exist yet; the action creates it at this commit.
+          tag_name: ${{ needs.check.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: StreamDock ${{ needs.check.outputs.tag }}
+          body_path: RELEASE_NOTES.md
+          generate_release_notes: true
+          files: dist-artifacts/*
           fail_on_unmatched_files: false
