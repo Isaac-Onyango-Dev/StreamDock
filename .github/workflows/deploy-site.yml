@@ -20,6 +20,8 @@ on:
       - 'docs/sitemap.xml'
       - 'CHANGELOG.md'
       - 'scripts/build-site.ts'
+      - 'scripts/generate-tokens.ts'
+      - 'design/tokens.json'
       - 'package.json'
   workflow_dispatch:
 
