@@ -18,33 +18,40 @@ function inlineMarkdown(text: string): string {
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
 }
 
+/**
+ * Renders one release from the shared parser's `sections`, never from the raw
+ * `body` lines.
+ *
+ * This used to re-parse `entry.body` with its own `/^-\s+(.*)$/` bullet match,
+ * which took the first physical line of each bullet and silently dropped the
+ * indented continuation lines beneath it. Changelog bullets in this repo are
+ * hard-wrapped prose, so nearly every one of them was published to the site cut
+ * off mid-sentence ("…reported as a login wall. Both are").
+ *
+ * `parseChangelog` already joins those continuations, and sync-readme.ts was
+ * already using that — the site had a second, worse copy of the same logic that
+ * drifted from it. There is now one parser and one consumer of it.
+ *
+ * Rendering sections rather than a flat list also fixes a second symptom of the
+ * same cause: only the *first* `###` heading was kept, so a release with both
+ * "Fixed" and "Changed" showed every bullet under "Fixed".
+ */
 function renderEntry(entry: ChangelogEntry): string {
-  const items: string[] = [];
-  let title = '';
-
-  for (const line of entry.body) {
-    const bullet = line.match(/^-\s+(.*)$/);
-    if (bullet) {
-      items.push(bullet[1]);
-      continue;
-    }
-    const heading = line.match(/^###\s+(.*)$/);
-    if (heading && !title) {
-      title = heading[1].trim();
-    }
-  }
-
-  const listHtml = items.length
-    ? `<ul>${items.map((item) => `<li>${inlineMarkdown(item)}</li>`).join('')}</ul>`
-    : '';
+  const sectionsHtml = entry.sections
+    .filter((section) => section.items.length > 0)
+    .map((section) => {
+      const heading = section.title ? `<h3>${escapeHtml(section.title)}</h3>` : '';
+      const list = `<ul>${section.items.map((item) => `<li>${inlineMarkdown(item)}</li>`).join('')}</ul>`;
+      return `${heading}${list}`;
+    })
+    .join('\n      ');
 
   return `    <div class="release">
       <div class="release-head">
         <span class="version-tag">v${escapeHtml(entry.version)}</span>
         <span class="release-date">${escapeHtml(entry.date)}</span>
       </div>
-      ${title ? `<h3>${escapeHtml(title)}</h3>` : ''}
-      ${listHtml}
+      ${sectionsHtml}
     </div>`;
 }
 

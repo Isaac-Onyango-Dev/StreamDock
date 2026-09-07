@@ -14,6 +14,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { buildOutputTemplate, sanitizeName } from '../electron/smart-naming';
+import { parseChangelog } from './lib/changelog';
 
 const root = join(import.meta.dirname, '..');
 let assertions = 0;
@@ -141,8 +142,71 @@ function verifyRouteCoverage(): void {
   }
 }
 
+/**
+ * The published site must show every changelog bullet in full.
+ *
+ * build-site.ts used to re-parse the changelog's raw body lines with its own
+ * `/^-\s+(.*)$/` match, which kept the first physical line of each bullet and
+ * dropped the indented continuations under it. Since this repo hard-wraps
+ * changelog prose, nearly every bullet shipped to the site cut off mid-sentence
+ * ("...reported as a login wall. Both are"). The shared parser had always joined
+ * those lines correctly; the site simply had a second, worse copy of the logic.
+ *
+ * This asserts the end state rather than the implementation, so it catches a
+ * regression whatever reintroduces one.
+ */
+function verifyChangelogRendering(): void {
+  const html = readProjectFile('docs/index.html');
+  const section = html.match(/<section id="changelog"[\s\S]*?<\/section>/)?.[0];
+  assert(Boolean(section), 'docs/index.html contains a #changelog section');
+  if (!section) return;
+
+  const rendered = [...section.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((m) =>
+    m[1]
+      .replace(/<[^>]+>/g, '')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/\s+/g, ' ')
+      .trim(),
+  );
+  assert(rendered.length > 0, 'the rendered changelog has at least one bullet');
+
+  const normalize = (text: string) => text.replace(/[`*]/g, '').replace(/\s+/g, ' ').trim();
+  const entries = parseChangelog(readProjectFile('CHANGELOG.md')).slice(0, 3);
+  const expected = entries.flatMap((entry) => entry.sections.flatMap((s) => s.items)).map(normalize);
+  const got = rendered.map(normalize);
+
+  const truncated = expected.filter(
+    (item) => !got.includes(item) && got.some((line) => line.length < item.length && item.startsWith(line)),
+  );
+  assert(
+    truncated.length === 0,
+    `no changelog bullet is truncated on the site${truncated.length ? ` (first: "${truncated[0].slice(0, 60)}…")` : ''}`,
+  );
+
+  const missing = expected.filter((item) => !got.includes(item));
+  assert(
+    missing.length === 0,
+    `every changelog bullet from the newest entries is rendered${missing.length ? ` (missing ${missing.length})` : ''}`,
+  );
+
+  // Section grouping: an entry with both "Fixed" and "Changed" must render both,
+  // not collapse every bullet under whichever heading came first.
+  const multiSection = entries.find((entry) => entry.sections.filter((s) => s.title).length > 1);
+  if (multiSection) {
+    for (const s of multiSection.sections.filter((x) => x.title)) {
+      assert(
+        section.includes(`<h3>${s.title}</h3>`),
+        `v${multiSection.version}'s "${s.title}" section heading is rendered`,
+      );
+    }
+  }
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
+verifyChangelogRendering();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);
