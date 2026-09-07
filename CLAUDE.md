@@ -533,6 +533,30 @@ rasterizes `assets/icon.svg` — the canonical mark — to a 1024x1024 PNG via
 Playwright and refuses to write anything under 512, so this cannot silently
 recur. Manual, not part of `npm run build`: a normal build needs no browser.
 
+**Then Windows broke — a genuine upstream change, caught live.** After macOS
+went green, `Build Windows` started failing at "Download engine binaries" in
+3-4 seconds on commits whose diffs never touched that script, while an earlier
+run of the same code had passed. Cause: `scripts/download-binaries.ts` fetched
+ffmpeg from `releases/latest/download/ffmpeg-master-latest-win64-gpl.zip`.
+`releases/latest/` resolves to whatever GitHub currently calls the newest
+release, and **BtbN publishes dated autobuilds** (`autobuild-2026-09-07-15-39`,
+published 15:40 UTC that day) whose assets use versioned names like
+`ffmpeg-N-126455-gecc7eb519e-win64-gpl.zip`. The instant that autobuild
+published, the stable `ffmpeg-master-latest-*` name 404'd. The run at 15:17
+succeeded; every run after 15:40 failed.
+
+Fixed by pinning to BtbN's **`latest` tag** —
+`releases/download/latest/ffmpeg-master-latest-win64-gpl.zip` — the rolling
+release they maintain precisely to carry the stable filenames.
+`releases/latest/` and the `latest` tag are different things; do not conflate
+them. **This was release-blocking, not just CI noise**: `release.yml` runs the
+same step, so tagging in that window would have produced a failed release.
+
+Downloads also gained retry with backoff (4 attempts, 2s/4s/8s) since a single
+429/5xx previously aborted a whole packaged build. A 404 deliberately does *not*
+retry — and that fast-fail is what made this diagnosable, since a 4-second
+failure obviously was not a network problem.
+
 **Lesson**: a red CI job that everyone has agreed is "environmental" is worth
 running locally once. Three sessions inherited that assumption; the actual
 failure was a stale import and a typo-grade config error. And a job that is
