@@ -4,6 +4,87 @@ All notable changes to StreamDock are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] - 2026-09-07
+
+### Fixed
+- **Downloads failing with "This content requires a login" when no login exists.**
+  Two independent bugs, both now fixed. The classification bug: the engine
+  classified a failure twice — once per stderr line while the download ran,
+  with the knowledge that the URL was a resolved CDN manifest, and again at
+  process exit with that context discarded. The second pass always ran last, so
+  its context-free reading of a 403 replaced the accurate message. Both paths
+  now go through one classifier that takes the context with it. The reporting
+  bug: secret redaction ran to end of line, so
+  `master.m3u8?token=…: Unable to download webpage: HTTP Error 403: Forbidden`
+  reached the "Show details" panel as `master.m3u8?token=[REDACTED]` — the
+  status, the reason and the whole diagnosis erased along with the token.
+  Redaction is now scoped to the secret's value.
+- A Cloudflare-style bot block is no longer reported as a login wall. Both are
+  served as 403 and the login rule was checked first, so users were sent to
+  create an account for a wall no account opens.
+- Subtitle files (`.vtt`, `.en-orig.vtt`) are no longer left beside the finished
+  video when subtitles were meant to be embedded. The engine passed
+  `--write-subs` alongside `--embed-subs`; `--write-subs` means "keep the file",
+  so yt-dlp embedded the track and kept it. Sidecar files are now written only
+  when sidecars were actually asked for.
+- The default subtitle language is `en` rather than `en.*`, which also matched
+  YouTube's machine-translated tracks and turned one subtitle fetch into a burst
+  of them — enough to earn a 429 that aborted the entire video download.
+- An engine-thrown error no longer reaches the user with a leaked `Error: `
+  prefix ("Error: Could not find a playable stream on this page.").
+- Episode counts no longer overshoot. Probing a series generated a fixed 200
+  synthetic episodes starting from whatever episode was pasted and reported
+  `itemCount: 999` regardless, so a 366-episode show listed 999 — most of them
+  URLs that resolve to nothing. The count now comes from the source page, and
+  when a page states no count nothing is extrapolated.
+- Playlists longer than the probe's 500-item scan window report their real
+  length instead of exactly 500.
+- A single episode no longer lands inside a show folder. The folder name was
+  sent for every episode-range download including one-item ones.
+- Queue rows show the real title and thumbnail again for videos started without
+  pressing Analyze first. `start()` read the probe out of the React render
+  closure, which is `null` until a probe has completed and re-rendered, so going
+  straight to Download queued with no metadata at all — no title, no thumbnail,
+  and no playlist detection either. It now ensures a probe and uses the value it
+  gets back.
+- The metadata probe no longer dies on YouTube. `--dump-json` was run through a
+  shell string with the default 1MB stdout buffer and no `--no-playlist`, so a
+  plain video overflowed the buffer (`ERR_CHILD_PROCESS_STDIO_MAXBUFFER`) and any
+  URL carrying `list=` made yt-dlp emit one JSON object per entry — endlessly,
+  for a radio mix. It now runs via `execFile` with an argument array, a large
+  buffer, and `--no-playlist`, because this probe describes one media item.
+- Playlist items get thumbnails. `--flat-playlist` entries carry a `thumbnails[]`
+  array and no scalar `thumbnail`, and only the scalar was ever read — so every
+  playlist row fell back to the placeholder icon, in the preview list and the
+  queue alike. A playlist with no poster of its own now borrows its first item's.
+- A URL captured from the clipboard stays in the capture field. The watcher
+  delivered it by assigning `input.value` and firing a synthetic `input` event,
+  but the field is a controlled React input: that assignment also updates React's
+  internal value tracker, so React saw no change, never ran its handler, and
+  re-rendered the field back to empty — leaving the placeholder showing and the
+  URL to be pasted by hand. It is passed as state now.
+
+### Changed
+- The queue-row label is separated from the filename hint (`displayTitle` vs
+  `titleHint`). A playlist can now show its own name in the queue without that
+  name being forced onto every file inside it.
+
+- **Smart naming is abolished.** A single video is saved as `<title>.<ext>` with
+  no folder; a confirmed playlist gets one folder named after the playlist,
+  holding items under their real titles. The `Episode (N)` scheme and the
+  `Season N` sub-folder are removed outright, not switched off — they renamed
+  files away from titles the extractor already knew, leaving a finished download
+  identifiable only by its position in a batch.
+- **Downloads are written atomically.** Everything in progress — `.part` files,
+  per-format fragments, the pre-mux stream, subtitles awaiting embedding — is
+  staged in a hidden directory and only the finished file is moved into the
+  download folder. Nothing half-written is ever visible to be opened, scanned by
+  antivirus, or left behind by a cancel.
+- The download queue shows the real title and thumbnail the probe already
+  resolved, instead of a generic "Video download" label behind a camera icon.
+- Long episode lists are paged 50 at a time. Paging is presentation only and
+  never changes how many episodes are considered to exist.
+
 ## [1.4.0] - 2026-09-07
 
 ### Added

@@ -1,18 +1,39 @@
 // Role: pure-function output template builder for yt-dlp -o arguments.
 //
-// Naming spec (StreamDock PRD):
-//   - Single movie/video:            file_name.format                       (no folder)
-//   - Multi-episode, no seasons:     <Show>/Episode (1).format, Episode (2).format, ...
-//   - Multi-episode, with seasons:   <Show>/Season 1/Episode (1).format, ...
+// Naming rules:
+//   - Single video:  <title>.<ext>                       (never wrapped in a folder)
+//   - Playlist:      <Playlist or show>/<title>.<ext>     (folder only once confirmed)
+//   - Live stream:   timestamped name, no folder          (a live capture has no title yet)
+//
+// The previous version imposed a numbering scheme on top of this — "Episode (1)",
+// "Episode (2)", nested under an optional "Season N" folder — and derived the
+// counter from yt-dlp's playlist_index. It is gone, deliberately and entirely
+// rather than left switched off: it renamed files away from the titles the
+// extractor already knew, so a finished download was identifiable only by its
+// position in a batch, and the season branch could only ever resolve for the
+// handful of extractors that report season_number at all.
 
 export interface NamingRequest {
   mode: 'video' | 'stream';
+  /**
+   * True only when the probe actually reported a playlist. Never inferred from
+   * "the URL looks like it might have more than one thing behind it" — this is
+   * what decides whether a folder gets created at all.
+   */
   isPlaylist?: boolean;
+  /** A yt-dlp --playlist-items selection, which implies a real playlist. */
   playlistItems?: string;
+  /**
+   * Folder name for a confirmed multi-item batch (playlist or series title).
+   *
+   * The caller must only set this once it knows more than one item is actually
+   * being queued. It used to be sent for every episode-range download including
+   * a single episode, which is how a lone video ended up inside a show folder.
+   */
   folderHint?: string;
-  /** Per-item title hint supplied by the UI (e.g. "One Piece - Episode 1 - Romance Dawn").
-   *  Takes precedence over forcedTitle when present. */
+  /** Per-item title resolved by the UI from probe metadata. */
   titleHint?: string;
+  /** Engine-derived fallback title (manifest downloads yt-dlp can't name itself). */
   forcedTitle?: string;
 }
 
@@ -47,56 +68,44 @@ export function sanitizeName(value: string): string {
 }
 
 /**
- * Builds a yt-dlp `-o` output template string for the given naming request.
+ * True when the caller has confirmed this download covers more than one item.
  *
- * Decision tree:
- *   Branch 1 — Stream: timestamp-based name, no subfolder
- *   Branch 2 — Multi-item (playlist OR episode-range, i.e. isPlaylist/playlistItems/
- *              folderHint): "<Show>/[Season N/]Episode (playlist_index).ext" — season
- *              nesting is entirely conditional on the extractor actually reporting
- *              season_number, so a plain playlist with no season metadata correctly
- *              lands one level shallower ("no seasons" case in the spec).
- *              playlist_index (not episode_number) is deliberately used as the
- *              episode counter: it's guaranteed present and strictly unique/sequential
- *              per download batch, which is exactly what the spec's own examples show
- *              (Episode (1), Episode (2), ...) and sidesteps duplicate-episode-number
- *              metadata bugs some extractors have.
- *   Branch 3 — Single video/audio, no series context: plain title, no subfolder.
+ * Exported so the engine can answer "should a folder exist for this?" with the
+ * same rule that builds the path, rather than a second copy that can drift.
+ */
+export function isConfirmedMultiItem(request: NamingRequest): boolean {
+  return request.mode === 'video' && (
+    request.isPlaylist === true ||
+    Boolean(request.playlistItems?.trim()) ||
+    Boolean(request.folderHint?.trim())
+  );
+}
+
+/**
+ * Builds a yt-dlp `-o` output template (relative to the download folder).
+ *
+ * The result is intentionally relative: the engine passes the destination as
+ * `--paths home:`, so yt-dlp resolves the final location itself and can stage
+ * everything in a separate temp directory until the file is actually finished.
  */
 export function buildOutputTemplate(request: NamingRequest): string {
-  const { mode, isPlaylist, playlistItems, folderHint, titleHint, forcedTitle } = request;
-  // titleHint (per-item from UI) wins over forcedTitle (engine-derived fallback)
-  const resolvedTitle = titleHint ?? forcedTitle;
-  const titleStr = resolvedTitle ? sanitizeName(resolvedTitle) : '%(title).150B';
+  const { mode, folderHint, titleHint, forcedTitle } = request;
 
-  // Branch 1: live stream — always flat, never wrapped in a folder.
+  // A live capture has no title to name itself after at the moment it starts.
   if (mode === 'stream') {
     return 'StreamDock Stream %(upload_date>%Y-%m-%d)s %(epoch>%H-%M-%S)s.%(ext)s';
   }
 
-  const isMultiItem = isPlaylist === true || Boolean(playlistItems?.trim()) || Boolean(folderHint?.trim());
+  // titleHint (resolved by the UI from probe metadata) wins over forcedTitle
+  // (the engine's fallback for manifest URLs yt-dlp cannot attach metadata to).
+  // With neither, yt-dlp fills in the real title it extracted.
+  const resolved = titleHint ?? forcedTitle;
+  const fileName = `${resolved ? sanitizeName(resolved) : '%(title).150B'}.%(ext)s`;
 
-  // Branch 2: multi-episode content (playlist or episode-range).
-  if (isMultiItem) {
-    const folder = folderHint?.trim()
-      ? sanitizeName(folderHint)
-      : (resolvedTitle ? sanitizeName(resolvedTitle) : '%(playlist_title).150B');
+  if (!isConfirmedMultiItem(request)) return fileName;
 
-    // resolvedTitle means the caller already resolved a concrete per-item title
-    // (UI titleHint, or the engine's manifest-retry forcedTitle for a raw CDN/
-    // manifest URL yt-dlp can't attach metadata to) — use it directly instead of
-    // the generic "Episode (N)" counter, and skip season nesting since a raw
-    // manifest URL carries no season metadata for yt-dlp to resolve.
-    if (resolvedTitle) {
-      return `${folder}/${titleStr}.%(ext)s`;
-    }
-
-    // Season folder only appears when season_number actually resolves; not
-    // zero-padded, per spec's own example ("Season 1", not "Season 01").
-    const seasonPrefix = '%(season_number&Season %d/|)s';
-    return `${folder}/${seasonPrefix}Episode (%(playlist_index)d).%(ext)s`;
-  }
-
-  // Branch 3: single video, no series context — flat file, no folder wrapping.
-  return `${titleStr}.%(ext)s`;
+  const folder = folderHint?.trim()
+    ? sanitizeName(folderHint)
+    : '%(playlist_title).150B';
+  return `${folder}/${fileName}`;
 }

@@ -2,18 +2,39 @@
 // Users must NEVER see: stack traces, file paths, raw yt-dlp stderr, or internal details.
 import log from 'electron-log';
 
-/** Redact file-system paths and anything that looks like a credential from raw text. */
+/**
+ * Redact file-system paths and anything that looks like a credential from raw text.
+ *
+ * Secret redaction is deliberately *value-scoped* rather than to end-of-line.
+ * The previous `token\s*[=:][^\n]*` swallowed the rest of the line, so a real
+ * failure —
+ *
+ *   ERROR: [generic] master.m3u8?token=eyJhb…: Unable to download webpage: HTTP Error 403: Forbidden
+ *
+ * — reached the UI's "Show details" panel as nothing but
+ * `ERROR: [generic] master.m3u8?token=[REDACTED]`. The HTTP status, the reason
+ * phrase and the whole diagnostic were erased along with the secret, which is
+ * exactly the information a user needs to tell a bot-block from a login wall.
+ * A query-string secret ends at the first delimiter, so that is where the
+ * redaction ends too. Header-form `Cookie:` lines are the one case that really
+ * does run to end-of-line, and are handled separately.
+ */
 export function sanitizeRaw(raw: string): string {
   return raw
     // Windows absolute paths: C:\Users\...
     .replace(/[A-Za-z]:\\[^\s"']+/g, '[path]')
     // Unix absolute paths: /home/... /usr/... /tmp/...
     .replace(/\/(?:home|usr|tmp|var|opt|etc|root|mnt|media)[^\s"']*/g, '[path]')
-    // Cookies / tokens / passwords
-    .replace(/cookie[s]?\s*[=:][^\n]*/gi, 'cookie=[REDACTED]')
-    .replace(/password\s*[=:][^\n]*/gi, 'password=[REDACTED]')
-    .replace(/token\s*[=:][^\n]*/gi, 'token=[REDACTED]')
-    .replace(/authorization\s*[=:][^\n]*/gi, 'authorization=[REDACTED]')
+    // Header form — the value genuinely is the rest of the line.
+    .replace(/^(\s*(?:set-)?cookie)\s*:.*$/gim, '$1: [REDACTED]')
+    // Query-string / inline form — redact the value only, up to its delimiter,
+    // so surrounding diagnostic text survives.
+    .replace(
+      // The value class excludes ':' so the punctuation separating the URL from
+      // yt-dlp's message survives ("…token=[REDACTED]: Unable to download…").
+      /\b(cookies?|tokens?|access_token|refresh_token|password|passwd|pwd|api_?key|secret|signature|sig|auth|authorization)\s*[=:]\s*[^\s&"';,:)<>|]+/gi,
+      '$1=[REDACTED]',
+    )
     // Stack trace lines
     .replace(/\s+at\s+\S+\s+\(\S+\)/g, '')
     .replace(/\s+at\s+\S+/g, '');
@@ -76,6 +97,12 @@ export function toUserError(error: unknown, fallback = 'Something went wrong. Re
   if (isRateLimited(subject)) {
     return 'Rate limited by the site. Waiting before retrying…';
   }
+  // Checked before the auth rule on purpose. A bot-management block is served
+  // as 403, so whichever rule runs first claims it — and "you need to log in"
+  // sends the user off to create an account for a wall that no account opens.
+  if (isBotChallenged(subject)) {
+    return 'The site blocked the download with an automated-traffic check. It may only allow playback in a browser.';
+  }
   if (isAuthRequired(subject)) {
     // A 403 alongside yt-dlp's own staleness warning is almost never a login
     // wall, it is the site rejecting an outdated engine. Say the useful thing.
@@ -99,10 +126,7 @@ export function toUserError(error: unknown, fallback = 'Something went wrong. Re
     return 'This content may not be available in your region.';
   }
 
-  // ── Anti-bot / DRM / Cloudflare ──────────────────────────────────────────────
-  if (lower.includes('cloudflare') || lower.includes('anti-bot') || lower.includes('captcha')) {
-    return 'This site is protected. Please open it in your browser first, then retry.';
-  }
+  // ── DRM ──────────────────────────────────────────────────────────────────────
   if (lower.includes('drm') || lower.includes('widevine') || lower.includes('encrypted media')) {
     return 'This content is DRM-protected and cannot be downloaded.';
   }
@@ -161,7 +185,11 @@ export function toUserError(error: unknown, fallback = 'Something went wrong. Re
   const errorLine = fatalLine;
   if (errorLine) {
     const cleaned = errorLine
-      .replace(/^ERROR:\s*(?:\[[^\]]+\]\s*)?/, '')
+      // Case-insensitive to match pickFatalLine, which is. When the engine
+      // throws its own Error the fatal line is a JS stack header ("Error: …"),
+      // and a case-sensitive strip left that prefix in the sentence shown to
+      // the user: "Error: Could not find a playable stream on this page."
+      .replace(/^error:\s*(?:\[[^\]]+\]\s*)?/i, '')
       .replace(/[A-Za-z]:\\[^\s"']+/g, '')
       .replace(/\/[^\s"']{5,}/g, '')
       .trim();
@@ -247,6 +275,29 @@ export function isGeoBlocked(text: string): boolean {
 }
 
 /**
+ * Detect a bot-management / anti-automation block (Cloudflare and friends).
+ *
+ * These are served as a plain 403, so without this the auth rule claims them
+ * and the user is told to log in to a site that has no login. Matching is on
+ * named evidence, never a bare 'cloudflare' substring — CDN hostnames and
+ * script URLs mention Cloudflare constantly on pages that are working fine.
+ */
+export function isBotChallenged(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    lower.includes('cloudflare anti-bot') ||
+    lower.includes('anti-bot challenge') ||
+    lower.includes('sorry, you have been blocked') ||
+    lower.includes('just a moment...') ||
+    lower.includes('attention required! | cloudflare') ||
+    lower.includes('enable javascript and cookies to continue') ||
+    /\bcaptcha\b/.test(lower) ||
+    /\bcf[-_]ray\b/.test(lower) ||
+    /\berror code:?\s*10\d{2}\b/.test(lower)
+  );
+}
+
+/**
  * Detect yt-dlp telling us it is itself out of date.
  *
  * yt-dlp prints this to stderr as a WARNING, above the real ERROR line. A
@@ -273,6 +324,62 @@ export function pickFatalLine(raw: string): string | null {
   const errors = lines.filter((l) => /^error:/i.test(l));
   if (errors.length > 0) return errors[errors.length - 1];
   return null;
+}
+
+/** What the engine knows about a failure beyond the text of the error itself. */
+export interface FailureContext {
+  /** True once a manifest URL has been resolved — the URL yt-dlp was given is
+   *  a CDN media endpoint, not a page a human could ever log in to. */
+  manifestAttempted?: boolean;
+  /** The URL yt-dlp was actually given. */
+  url?: string;
+}
+
+/** Media-CDN hosts whose 403s are never a login wall. */
+const CDN_HINT = /cdn[.-]|mewstream|nekostream|megaplay\.buzz|cinewave|gogocdn|imgnex|anipixcdn|\.m3u8|\.mpd/i;
+
+/**
+ * The single classification path for a download failure.
+ *
+ * Both the streaming per-line classifier and the terminal failure handler go
+ * through here. They used to classify independently: the per-line one knew the
+ * download was running against a resolved CDN manifest and said so, then the
+ * terminal one re-ran a context-free `toUserError` over the same stderr and
+ * overwrote it. Since the terminal one always runs last, its answer is the one
+ * the user saw — a CDN bot-block reported verbatim as
+ * "This content requires a login. Please log in on the site first."
+ *
+ * Context is what separates those two readings of an identical 403, so it has
+ * to be applied wherever the classification happens, not in only one of them.
+ */
+export function classifyEngineFailure(error: unknown, context: FailureContext = {}): string {
+  const raw = error instanceof Error ? `${error.message}\n${error.stack ?? ''}` : String(error ?? '');
+  const subject = pickFatalLine(raw) ?? raw;
+
+  // yt-dlp announcing its own staleness outranks the status it then got: an
+  // out-of-date engine is routinely 403'd by sites a current one handles.
+  if (mentionsStaleEngine(raw)) {
+    return 'The download engine is out of date, which is likely why this failed. Update it in Settings and retry.';
+  }
+  if (isRateLimited(subject)) {
+    return 'Rate limited by the site. Waiting before retrying…';
+  }
+  if (isBotChallenged(subject)) {
+    return 'The site blocked the download with an automated-traffic check. It may only allow playback in a browser.';
+  }
+
+  const isCdnContext = Boolean(context.manifestAttempted)
+    || CDN_HINT.test(subject)
+    || (context.url ? CDN_HINT.test(context.url) : false);
+
+  if (isCdnContext && isAuthRequired(subject)) {
+    // Deliberately does not claim the link "expired". These tokens carry their
+    // own expiry and the observed failures happened seconds after minting, so
+    // expiry is a guess — and a wrong guess sends the user to retry forever.
+    return 'The video host refused the download (403). Its media server appears to allow browser playback only.';
+  }
+
+  return toUserError(error);
 }
 
 /**

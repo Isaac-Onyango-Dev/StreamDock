@@ -22,6 +22,15 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [versionWarning, setVersionWarning] = useState<string | null>(null);
   const [updatingEngine, setUpdatingEngine] = useState(false);
+  /**
+   * A URL pushed into the capture field from outside it (clipboard watcher,
+   * Edit > Paste). Carries a sequence number so copying the *same* URL twice
+   * still counts as a new delivery — plain string state would compare equal
+   * and the second paste would do nothing.
+   */
+  const [incomingUrl, setIncomingUrl] = useState<{ url: string; seq: number } | null>(null);
+  const deliverUrl = (url: string) =>
+    setIncomingUrl((prev) => ({ url, seq: (prev?.seq ?? 0) + 1 }));
 
   const items = useDownloadRecords();
   const activeCount = useActiveCount();
@@ -64,22 +73,14 @@ export default function App() {
           if (!text) return;
           const firstUrl = text.split(/[\s\r\n]+/).find((t) => t.startsWith('http'));
           if (!firstUrl) return;
-          const urlInput = document.querySelector<HTMLInputElement>('input[name="capture-url"]');
-          if (urlInput) {
-            urlInput.value = firstUrl;
-            urlInput.dispatchEvent(new Event('input', { bubbles: true }));
-          }
+          deliverUrl(firstUrl);
         } catch {
           // silent
         }
       }),
       window.streamDock?.onClipboardUrl(({ url }) => {
         setCurrentTab('capture');
-        const urlInput = document.querySelector<HTMLInputElement>('input[name="capture-url"]');
-        if (urlInput) {
-          urlInput.value = url;
-          urlInput.dispatchEvent(new Event('input', { bubbles: true }));
-        }
+        deliverUrl(url);
         downloadStore.addToast(`URL captured from clipboard: ${url}`, 'success');
       }),
     ].filter(Boolean) as Array<() => void>;
@@ -183,6 +184,7 @@ export default function App() {
                 mode={mode}
                 setMode={setMode}
                 outputDir={settings.downloadDir}
+                incomingUrl={incomingUrl}
                 onError={setError}
                 onStarted={(info) => {
                   setError(null);
