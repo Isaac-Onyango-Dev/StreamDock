@@ -123,7 +123,22 @@ export function AppChrome({ currentTab, activeCount, onTabChange, children }: Ap
           }`}
           style={{ WebkitAppRegion: 'drag' } as CSSProperties}
         >
-          <span className="text-xs font-medium text-text-secondary">StreamDock</span>
+          <span
+            className="text-xs font-semibold text-text-secondary"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            Stream
+            <span
+              style={{
+                background: 'var(--brand-grad)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+              }}
+            >
+              Dock
+            </span>
+          </span>
 
           {!isMac && (
             <div className="flex h-full" style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}>

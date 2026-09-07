@@ -89,14 +89,36 @@ function buildChangelogHtml(maxEntries = 3): string {
   return entries.map(renderEntry).join('\n');
 }
 
+interface BrandTokens {
+  colors: {
+    violet: string;
+    violetBright: string;
+    pink: string;
+    pinkBright: string;
+    amber: string;
+    amberBright: string;
+  };
+}
+
+function readBrandTokens(): BrandTokens {
+  return JSON.parse(readProjectFile('design/tokens.json')) as BrandTokens;
+}
+
 function main(): void {
   const version = resolveVersion();
   const changelogHtml = buildChangelogHtml();
+  const { colors } = readBrandTokens();
 
   const template = readFileSync(join(docsDir, 'index.template.html'), 'utf-8');
   const rendered = template
     .split('{{VERSION}}').join(version)
-    .split('{{CHANGELOG_HTML}}').join(changelogHtml);
+    .split('{{CHANGELOG_HTML}}').join(changelogHtml)
+    .split('{{BRAND_VIOLET}}').join(colors.violet)
+    .split('{{BRAND_VIOLET_BRIGHT}}').join(colors.violetBright)
+    .split('{{BRAND_PINK}}').join(colors.pink)
+    .split('{{BRAND_PINK_BRIGHT}}').join(colors.pinkBright)
+    .split('{{BRAND_AMBER}}').join(colors.amber)
+    .split('{{BRAND_AMBER_BRIGHT}}').join(colors.amberBright);
 
   writeFileSync(join(docsDir, 'index.html'), rendered, 'utf-8');
   console.log(`Built docs/index.html for v${version} (${changelogHtml ? 'changelog injected' : 'no changelog entries found'})`);
