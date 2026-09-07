@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0A0716"/>
+      <stop offset="1" stop-color="#170F2B"/>
+    </linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8B5CF6"/>
+      <stop offset=".55" stop-color="#EC4899"/>
+      <stop offset="1" stop-color="#FBBF24"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <circle cx="120" cy="80" r="260" fill="#8B5CF6" opacity="0.18"/>
+  <circle cx="1100" cy="560" r="260" fill="#EC4899" opacity="0.15"/>
+  <rect x="90" y="180" width="150" height="150" rx="36" fill="url(#brand)"/>
+  <path d="M148 232 L206 265 L148 298 Z" fill="#0A0716"/>
+  <circle cx="222" cy="196" r="10" fill="#fff"/>
+  <text x="270" y="285" font-family="'Space Grotesk', Arial, sans-serif" font-size="72" font-weight="800" fill="#F7F3FF">Stream<tspan fill="#EC4899">Dock</tspan></text>
+  <text x="90" y="400" font-family="Arial, sans-serif" font-size="34" fill="#AC9FD4">Grab any stream, instantly.</text>
+  <text x="90" y="450" font-family="Arial, sans-serif" font-size="26" fill="#7D6EA3">Download videos &amp; capture live streams — powered by yt-dlp + ffmpeg</text>
+</svg>

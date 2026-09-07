@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://isaac-onyango-dev.github.io/StreamDock/sitemap.xml
