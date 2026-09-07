@@ -55,6 +55,42 @@ function renderEntry(entry: ChangelogEntry): string {
     </div>`;
 }
 
+/**
+ * Inlines a platform icon from `docs/assets/icons/` into the page.
+ *
+ * The icons are the real Font Awesome Free brand marks, kept in the repo as
+ * `.svg` files so there is no dependency on a CDN or an icon kit. They are
+ * inlined rather than referenced with `<img src>` because both places they
+ * appear inherit their colour: the hero pills change colour on hover and when
+ * the visitor's OS is detected, and the download cards tint theirs violet. An
+ * `<img>` cannot inherit `currentColor`, so referencing the files externally
+ * would have cost the theming.
+ *
+ * Inlining from the file at build time keeps one source of truth: swapping an
+ * icon means replacing the .svg, not hand-editing path data in the template.
+ */
+function buildIconSvg(name: string, size: number): string {
+  const raw = readProjectFile(join('docs', 'assets', 'icons', `${name}.svg`));
+
+  const viewBox = raw.match(/viewBox="([^"]+)"/)?.[1];
+  if (!viewBox) throw new Error(`Icon ${name}.svg has no viewBox`);
+
+  // Everything between the opening <svg> and its close, minus the license
+  // comment — attribution is carried once in the page head instead of repeated
+  // on every one of the six icon instances.
+  const inner = raw
+    .replace(/^[\s\S]*?<svg[^>]*>/, '')
+    .replace(/<\/svg>[\s\S]*$/, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .trim();
+  if (!inner.includes('<path')) throw new Error(`Icon ${name}.svg has no path data`);
+
+  return (
+    `<svg viewBox="${viewBox}" width="${size}" height="${size}" ` +
+    `fill="currentColor" aria-hidden="true" focusable="false">${inner}</svg>`
+  );
+}
+
 function buildChangelogHtml(maxEntries = 3): string {
   const markdown = readProjectFile('CHANGELOG.md');
   const entries = parseChangelog(markdown).slice(0, maxEntries);
@@ -90,7 +126,17 @@ function main(): void {
     .split('{{BRAND_PINK}}').join(colors.pink)
     .split('{{BRAND_PINK_BRIGHT}}').join(colors.pinkBright)
     .split('{{BRAND_AMBER}}').join(colors.amber)
-    .split('{{BRAND_AMBER_BRIGHT}}').join(colors.amberBright);
+    .split('{{BRAND_AMBER_BRIGHT}}').join(colors.amberBright)
+    // Three sizes: 14px hero pills, 24px requirements grid, 26px download cards.
+    .split('{{ICON_WINDOWS_SM}}').join(buildIconSvg('windows', 14))
+    .split('{{ICON_APPLE_SM}}').join(buildIconSvg('apple', 14))
+    .split('{{ICON_LINUX_SM}}').join(buildIconSvg('linux', 14))
+    .split('{{ICON_WINDOWS_MD}}').join(buildIconSvg('windows', 24))
+    .split('{{ICON_APPLE_MD}}').join(buildIconSvg('apple', 24))
+    .split('{{ICON_LINUX_MD}}').join(buildIconSvg('linux', 24))
+    .split('{{ICON_WINDOWS_LG}}').join(buildIconSvg('windows', 26))
+    .split('{{ICON_APPLE_LG}}').join(buildIconSvg('apple', 26))
+    .split('{{ICON_LINUX_LG}}').join(buildIconSvg('linux', 26));
 
   writeFileSync(join(docsDir, 'index.html'), rendered, 'utf-8');
   console.log(`Built docs/index.html for v${version} (${changelogHtml ? 'changelog injected' : 'no changelog entries found'})`);
