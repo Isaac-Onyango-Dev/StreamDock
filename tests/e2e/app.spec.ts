@@ -24,8 +24,10 @@ test.describe('StreamDock App', () => {
 
     // Click Settings tab
     await page.click('[aria-label="Settings"]');
-    // Settings page heading is "Save location"
-    await expect(page.locator('text=Save location')).toBeVisible();
+    // Target the card heading by role: a bare `text=Save location` also matched
+    // the Settings page description ("Save location, engine binaries, and
+    // preferences."), which is a strict-mode violation, not a missing element.
+    await expect(page.getByRole('heading', { name: 'Save location' })).toBeVisible();
 
     // Click back to Capture
     await page.click('[aria-label="Capture"]');
@@ -40,8 +42,9 @@ test.describe('StreamDock App', () => {
 
   test('Settings view shows engine status', async ({ page }) => {
     await page.click('[aria-label="Settings"]');
-    // Section heading is "Engines" and button text is "Update yt-dlp"
-    await expect(page.locator('text=Engines')).toBeVisible();
+    // Also role-based: `text=Engines` substring-matches the status badge
+    // ("Engines ready") as well as this heading whenever engines are detected.
+    await expect(page.getByRole('heading', { name: 'Engines' })).toBeVisible();
     await expect(page.locator('button:has-text("Update yt-dlp")')).toBeVisible();
   });
 });
