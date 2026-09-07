@@ -82,6 +82,7 @@ export interface AudioTrack {
   id: string;
   language: string;
   label: string;
+  formatId?: string;
   name?: string;
   isDefault: boolean;
   isOriginal: boolean;
@@ -90,16 +91,19 @@ export interface AudioTrack {
   bitrate?: number;
   groupId?: string;
   uri?: string;
+  manifestUrl?: string;
 }
 
 export interface SubtitleTrack {
   id: string;
   language: string;
   label: string;
+  formatId?: string;
   format: SubtitleFormat;
   isDefault: boolean;
   groupId?: string;
   uri?: string;
+  manifestUrl?: string;
 }
 
 export interface MediaTrackProbe {
@@ -121,6 +125,8 @@ export interface StreamOption {
   manifestType: 'm3u8' | 'mpd' | 'mp4';
   referer?: string;
   isDefault: boolean;
+  /** DUB/SUB/HUB classification, always populated ('Unknown' when undetectable). */
+  language: string;
 }
 
 export interface StreamOptionsProbeResult {
@@ -148,13 +154,17 @@ export interface StartRequest {
   scheduledAt?: string;
   thumbnail?: string;
   selectedAudioLanguage?: string;
+  selectedAudioFormatId?: string;
+  selectedAudioManifestUrl?: string;
   selectedSubtitleLanguages?: string[];
+  selectedSubtitleFormatIds?: string[];
+  selectedSubtitleManifestUrls?: string[];
   subtitleConvertFormat?: 'original' | 'srt' | 'vtt';
   subsOnly?: boolean;
   downloadPackaging?: DownloadPackagingMode;
 }
 
-export type BackgroundMode = 'solid' | 'bing' | 'gradient';
+export type BackgroundMode = 'solid' | 'bing' | 'picsum' | 'gradient';
 
 export interface Settings {
   downloadDir: string;
@@ -168,6 +178,12 @@ export interface Settings {
   solidColorBg?: string;
   bingRefreshInterval?: number;
   clipboardWatcher?: boolean;
+  ytdlpOptions?: {
+    embedSubs?: boolean;
+    embedMetadata?: boolean;
+    sponsorBlock?: boolean;
+    customArgs?: string;
+  };
 }
 
 export type QueueStats = {

@@ -12,6 +12,7 @@ interface MediaLanguagePanelProps {
   packagingMode: DownloadPackagingMode;
   onAudioSelect: (id: string | null) => void;
   onSubtitleToggle: (id: string) => void;
+  onSubtitleClear: () => void;
   onSubtitleModeChange: (mode: 'none' | 'embed' | 'sidecar') => void;
   onSubtitleConvertChange: (format: 'original' | 'srt' | 'vtt') => void;
   onSubsOnlyChange: (value: boolean) => void;
@@ -31,11 +32,12 @@ export function MediaLanguagePanel({
   packagingMode,
   onAudioSelect,
   onSubtitleToggle,
+  onSubtitleClear,
   onSubtitleModeChange,
   onSubtitleConvertChange,
   onSubsOnlyChange,
 }: MediaLanguagePanelProps) {
-  const hasAudio = probe.audioTracks.length > 0;
+  const hasAudio = probe.audioTracks.length > 1;
   const hasSubs = probe.subtitleTracks.length > 0;
 
   if (!hasAudio && !hasSubs) return null;
@@ -54,16 +56,6 @@ export function MediaLanguagePanel({
             Audio tracks
           </div>
           <div className="space-y-1">
-            <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-surface-3">
-              <input
-                type="radio"
-                name="audio-track"
-                checked={selectedAudioId === null}
-                onChange={() => onAudioSelect(null)}
-                className="accent-accent"
-              />
-              <span className="text-text-secondary">Default / auto</span>
-            </label>
             {probe.audioTracks.map((track) => (
               <label
                 key={track.id}
@@ -96,6 +88,15 @@ export function MediaLanguagePanel({
             Subtitle tracks
           </div>
           <div className="space-y-1">
+            <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-surface-3">
+              <input
+                type="checkbox"
+                checked={selectedSubtitleIds.size === 0}
+                onChange={onSubtitleClear}
+                className="accent-accent"
+              />
+              <span className="min-w-0 flex-1 truncate text-text-secondary">None</span>
+            </label>
             {probe.subtitleTracks.map((track) => (
               <label
                 key={track.id}

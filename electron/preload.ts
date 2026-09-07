@@ -4,6 +4,8 @@ import { IPC } from './ipc-channels';
 import type { DownloadRecord } from './download-engine';
 import type { CaptureMode, UrlAnalysis } from './url-router';
 
+type PluginInfo = { name: string; path: string };
+
 type Settings = {
   downloadDir: string;
   useCookies?: boolean;
@@ -11,7 +13,7 @@ type Settings = {
   scheduledStartTime?: string | null;
   hasOnboarded?: boolean;
   densityMode?: 'comfortable' | 'compact';
-  backgroundMode?: 'solid' | 'bing' | 'gradient';
+  backgroundMode?: 'solid' | 'bing' | 'picsum' | 'gradient';
   backgroundImageUrl?: string;
   solidColorBg?: string;
   bingRefreshInterval?: number;
@@ -35,7 +37,11 @@ type StartRequest = {
   scheduledAt?: string;
   thumbnail?: string;
   selectedAudioLanguage?: string;
+  selectedAudioFormatId?: string;
+  selectedAudioManifestUrl?: string;
   selectedSubtitleLanguages?: string[];
+  selectedSubtitleFormatIds?: string[];
+  selectedSubtitleManifestUrls?: string[];
   subtitleConvertFormat?: 'original' | 'srt' | 'vtt';
   subsOnly?: boolean;
   downloadPackaging?: 'video-only' | 'video-audio' | 'video-subs' | 'video-audio-subs' | 'video-multi-subs' | 'subs-only';
@@ -81,6 +87,9 @@ const api = {
   getSettings: () => ipcRenderer.invoke(IPC.SETTINGS_GET) as Promise<Settings>,
   updateSettings: (updates: Partial<Settings>) =>
     ipcRenderer.invoke(IPC.SETTINGS_UPDATE, updates) as Promise<Settings>,
+  pluginsList: () => ipcRenderer.invoke(IPC.PLUGINS_LIST) as Promise<PluginInfo[]>,
+  /** Best-effort advisory only — see source-status.ts. Never throws; resolves 'unknown' on failure. */
+  checkSourceStatus: (host: string) => ipcRenderer.invoke(IPC.SOURCE_STATUS_CHECK, host) as Promise<'active' | 'retired' | 'unknown'>,
 
   // Dialog
   selectDownloadFolder: () =>
@@ -135,8 +144,9 @@ const api = {
     ipcRenderer.invoke(IPC.ENGINE_UPDATE) as Promise<{ success: boolean; message?: string; error?: string }>,
 
   // Background
-  getBingDailyImage: () => ipcRenderer.invoke(IPC.BACKGROUND_GET_BING_IMAGE) as Promise<string | null>,
-  getBingRefreshInfo: () => ipcRenderer.invoke(IPC.BACKGROUND_GET_BING_INFO) as Promise<{ lastRefresh: number }>,
+  rotateNow: () => ipcRenderer.invoke(IPC.WALLPAPER_ROTATE_NOW) as Promise<string | null>,
+  onWallpaperUpdated: (callback: (url: string) => void): Unsubscribe =>
+    on<string>(IPC.EVENT_WALLPAPER_UPDATED, callback),
 
   // Event subscriptions
   onDownloadProgress: (callback: (record: DownloadRecord) => void): Unsubscribe =>

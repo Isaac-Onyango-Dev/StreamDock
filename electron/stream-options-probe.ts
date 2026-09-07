@@ -6,6 +6,8 @@ import log from 'electron-log';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
+import { getProbeStrategy } from './url-router';
+import { probeViaYtDlp } from './manifest-extractor';
 
 export interface StreamOption {
   label: string;
@@ -13,6 +15,11 @@ export interface StreamOption {
   manifestType: 'm3u8' | 'mpd' | 'mp4';
   referer?: string;
   isDefault: boolean;
+  /** DUB/SUB/HUB classification, independent of `label` (which may be a server
+   *  or CDN name like "MegaCloud" rather than a language). Always populated —
+   *  'Unknown' when neither the DOM text nor the manifest URL exposes a
+   *  machine-readable language signal, so the UI never has to leave this blank. */
+  language: string;
 }
 
 export interface StreamOptionsProbeResult {
@@ -61,11 +68,6 @@ if (window.chrome) {
 const EXTRACTION_TIMEOUT_MS = 60_000;
 const POST_LOAD_WAIT_MS = 3000;
 
-function mediaTypeFromUrl(url: string): 'm3u8' | 'mpd' | 'mp4' | null {
-  const match = url.match(/\.(m3u8|mpd|mp4)(?:\?|$)/i);
-  return match ? match[1].toLowerCase() as 'm3u8' | 'mpd' | 'mp4' : null;
-}
-
 function normalizeLanguageLabel(raw: string): string {
   const lower = raw.toLowerCase();
   if (lower.includes('dub') && lower.includes('en')) return 'English Dub';
@@ -84,6 +86,26 @@ function normalizeLanguageLabel(raw: string): string {
   if (lower.includes('hd') || lower.includes('1080') || lower.includes('720')) return raw.trim();
   
   return raw.trim() || 'Unknown';
+}
+
+/**
+ * Independent DUB/SUB/HUB language classification, tried against each
+ * candidate source string in order (DOM text first, URL/format-id as
+ * fallback) until one yields a signal. Always returns a concrete, non-empty
+ * value — 'Unknown' is an explicit, deliberate label, never an omission.
+ */
+function classifyLanguage(...sources: Array<string | undefined | null>): string {
+  for (const raw of sources) {
+    if (!raw) continue;
+    const lower = raw.toLowerCase();
+    if (lower.includes('dub') && lower.includes('en')) return 'English Dub';
+    if (lower.includes('sub') && lower.includes('en')) return 'English Sub';
+    if (lower.includes('raw') || lower.includes('jp') || lower.includes('japanese')) return 'Japanese Raw';
+    if (lower.includes('dub')) return 'Dub';
+    if (lower.includes('sub')) return 'Sub';
+    if (lower.includes('hub')) return 'Hub';
+  }
+  return 'Unknown';
 }
 
 function inferLabelFromManifestUrl(manifestUrl: string, index: number): string {
@@ -160,6 +182,27 @@ async function discoverLanguageOptions(win: BrowserWindow): Promise<Array<{ quer
 export async function probeStreamOptions(pageUrl: string): Promise<StreamOptionsProbeResult> {
   log.info(`[stream-options-probe] Starting probe for ${pageUrl}`);
 
+  if (getProbeStrategy(pageUrl) === 'ytdlp') {
+    try {
+      log.info(`[stream-options-probe] Routing to yt-dlp probe: ${pageUrl}`);
+      const manifest = await probeViaYtDlp(pageUrl);
+      const options: StreamOption[] = manifest.formats
+        .filter(f => f.url.includes('m3u8') || f.url.includes('mpd'))
+        .map((f, i) => ({
+          label: f.formatId || `Stream ${i + 1}`,
+          manifestUrl: f.url,
+          manifestType: f.url.includes('mpd') ? 'mpd' : 'm3u8',
+          referer: pageUrl,
+          isDefault: i === 0,
+          language: classifyLanguage(f.formatId, f.url),
+        }));
+      return { success: options.length > 0, url: pageUrl, options, defaultOption: options[0] };
+    } catch (e) {
+      log.warn(`[stream-options-probe] yt-dlp probe failed: ${e}`);
+      return { success: false, url: pageUrl, options: [], error: String(e) };
+    }
+  }
+
   const partitionName = `stream-options-${Date.now()}`;
   const probeSession = session.fromPartition(partitionName, { cache: true });
 
@@ -182,6 +225,12 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
     },
   });
 
+  // Priority 1: Mute audio immediately (before loadURL)
+  win.webContents.setAudioMuted(true);
+
+  // Priority 2: Prevent ad popups
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
   return new Promise((resolve) => {
     let settled = false;
     const capturedManifests = new Map<string, { url: string; type: 'm3u8' | 'mpd' | 'mp4'; timestamp: number }>();
@@ -189,8 +238,8 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
     const finish = (result: StreamOptionsProbeResult) => {
       if (settled) return;
       settled = true;
-      try { if (preloadPath) rmSync(preloadPath, { force: true }); } catch { }
-      try { win.destroy(); } catch { }
+      try { if (preloadPath) rmSync(preloadPath, { force: true }); } catch { /* temp file cleanup is best-effort */ }
+      try { win.destroy(); } catch { /* window may already be gone */ }
       probeSession.clearStorageData().catch(() => { });
       resolve(result);
     };
@@ -204,6 +253,7 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
         manifestType: m.type,
         referer: pageUrl,
         isDefault: idx === 0,
+        language: classifyLanguage(m.url),
       }));
       finish({
         success: options.length > 0,
@@ -293,6 +343,7 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
           manifestType: m.type,
           referer: pageUrl,
           isDefault: idx === 0,
+          language: classifyLanguage(m.url),
         }));
         finish({
           success: options.length > 0,
@@ -321,6 +372,7 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
           manifestType: first.type,
           referer: pageUrl,
           isDefault: true,
+          language: classifyLanguage(defaultLabel, first.url),
         });
         processedLabels.add(normalizedLabel);
       }
@@ -375,6 +427,7 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
               manifestType: newest.type,
               referer: pageUrl,
               isDefault: false,
+              language: classifyLanguage(option.text, newest.url),
             });
             processedLabels.add(finalLabel);
             log.info(`[stream-options-probe] Found stream for "${finalLabel}": ${newest.url}`);

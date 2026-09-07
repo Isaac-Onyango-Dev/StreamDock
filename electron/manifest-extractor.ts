@@ -6,6 +6,55 @@ import log from 'electron-log';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
+import { promisify } from 'util';
+import { exec } from 'child_process';
+import { resolveYtDlpCommand } from './binary-resolver';
+import { getProbeStrategy } from './url-router';
+
+const execAsync = promisify(exec);
+
+export interface StreamManifest {
+  title: string;
+  thumbnail?: string;
+  duration?: number;
+  formats: Array<{
+    formatId: string;
+    ext: string;
+    resolution?: string;
+    filesize?: number;
+    url: string;
+  }>;
+}
+
+export async function probeViaYtDlp(url: string): Promise<StreamManifest> {
+  const ytDlpCmd = resolveYtDlpCommand();
+  const result = await execAsync(
+    `"${ytDlpCmd.command}" --dump-json --no-download --no-warnings "${url}"`,
+    { windowsHide: true }
+  );
+  const data = JSON.parse(result.stdout);
+  return {
+    title: data.title,
+    thumbnail: data.thumbnail,
+    duration: data.duration,
+    formats: (data.formats || []).map((f: YtDlpRawFormat) => ({
+      formatId: f.format_id,
+      ext: f.ext,
+      resolution: f.resolution,
+      filesize: f.filesize,
+      url: f.url,
+    })),
+  };
+}
+
+/** Shape of one entry in yt-dlp's `--dump-json` "formats" array (only the fields we use). */
+interface YtDlpRawFormat {
+  format_id: string;
+  ext: string;
+  resolution?: string;
+  filesize?: number;
+  url: string;
+}
 
 export interface ManifestResult {
   originalUrl: string;
@@ -51,12 +100,6 @@ function isPlayableUrl(url: string): boolean {
   return Boolean(mediaTypeFromUrl(url)) || KNOWN_CDNS.some((cdn) => url.includes(cdn));
 }
 
-
-/**
- * Known relative manifest URL patterns per host. Keyed by host, the values
- * are path templates applied to the origin of the page URL.
- */
-const KNOWN_MANIFEST_PATHS: Record<string, string> = {};
 
 /**
  * Timeout in milliseconds for manifest discovery. If no manifest is found
@@ -236,25 +279,6 @@ function fetchAndFindManifest(pageUrl: string, apiUrl: string): Promise<string |
 }
 
 /**
- * For known hosts with a predictable manifest JSON URL (e.g. anikoto.cz),
- * try to fetch it directly without loading a BrowserWindow.
- */
-function tryKnownManifestPath(pageUrl: string): Promise<string | null> {
-  try {
-    const parsed = new URL(pageUrl);
-    const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
-    const knownPath = KNOWN_MANIFEST_PATHS[host];
-    if (!knownPath) return Promise.resolve(null);
-
-    const manifestUrl = `${parsed.origin}${knownPath}`;
-    log.info(`[manifest-extractor] Trying known manifest path: ${manifestUrl}`);
-    return fetchAndFindManifest(pageUrl, manifestUrl);
-  } catch {
-    return Promise.resolve(null);
-  }
-}
-
-/**
  * Make a plain HTTP GET request using Electron's net module (bypasses
  * BrowserWindow and reCAPTCHA entirely). Returns the response body text
  * or `null` on failure.
@@ -295,15 +319,6 @@ function fetchUrlRaw(url: string, extraHeaders: Record<string, string>): Promise
       request.end();
     } catch { resolve({ body: null, setCookies: [] }); }
   });
-}
-
-/**
- * Convenience wrapper — returns only the body (backward-compatible with all
- * callers that don't need cookie data).
- */
-async function fetchUrlText(url: string, extraHeaders: Record<string, string>): Promise<string | null> {
-  const { body } = await fetchUrlRaw(url, extraHeaders);
-  return body;
 }
 
 /**
@@ -360,8 +375,8 @@ function extractEpisodeNumber(url: string): number | null {
  * anikoto.cz uses. This avoids the BrowserWindow (and reCAPTCHA) entirely.
  */
 async function tryAnikotoApi(pageUrl: string): Promise<ApiProbeResult | null> {
-  // --- Step 1: Fetch the page HTML ---
-  const pageHtml = await fetchUrlText(pageUrl, { Referer: 'https://anikoto.cz/' });
+  // --- Step 1: Fetch the page HTML AND capture cookies ---
+  const { body: pageHtml, setCookies: pageCookies } = await fetchUrlRaw(pageUrl, { Referer: 'https://anikoto.cz/' });
   if (!pageHtml) {
     log.warn('[manifest-extractor] anikoto: failed to fetch page');
     return null;
@@ -393,8 +408,8 @@ async function tryAnikotoApi(pageUrl: string): Promise<ApiProbeResult | null> {
   const epListUrl = epListMatch[1]!.replace(/&amp;/g, '&');
   log.info(`[manifest-extractor] anikoto: using episode list URL: ${epListUrl}`);
 
-  // --- Step 2: Fetch the episode list ---
-  const epListHtml = await fetchUrlText(epListUrl, { Referer: pageUrl });
+  // --- Step 2: Fetch the episode list AND capture cookies ---
+  const { body: epListHtml, setCookies: epListCookies } = await fetchUrlRaw(epListUrl, { Referer: pageUrl });
   if (!epListHtml) return null;
 
   // --- Step 3: Find the active episode ---
@@ -411,9 +426,11 @@ async function tryAnikotoApi(pageUrl: string): Promise<ApiProbeResult | null> {
       const epSlug = attrs.match(/data-slug=["']([^"']+)["']/i)?.[1];
       const timestamp = attrs.match(/data-timestamp=["']([^"']+)["']/i)?.[1];
 
+      // Combine cookies from all steps
+      const allCookies = [...pageCookies, ...epListCookies];
       if (malId && epSlug) {
         log.info(`[manifest-extractor] anikoto: found mal=${malId}, slug=${epSlug}, ts=${timestamp || '0'}`);
-        return fetchMapperApi(pageUrl, malId, epSlug, timestamp || '0');
+        return fetchMapperApi(pageUrl, malId, epSlug, timestamp || '0', allCookies);
       }
     }
   }
@@ -430,69 +447,86 @@ async function fetchMapperApi(
   malId: string,
   epSlug: string,
   timestamp: string,
+  incomingCookies: string[] = [],
 ): Promise<ApiProbeResult | null> {
   const mapperUrl = `https://mapper.nekostream.site/api/mal/${malId}/${epSlug}/${timestamp}`;
-  const json = await fetchUrlText(mapperUrl, {
+  const { body: json, setCookies: mapperCookies } = await fetchUrlRaw(mapperUrl, {
     Referer: pageUrl,
     Accept: 'application/json, text/plain, */*',
   });
   if (!json) return null;
 
-  try {
-    const data = JSON.parse(json);
-    // Recursive search for anything that looks like a playable URL
-    let foundUrl: string | null = null;
+  // Combine incoming cookies with mapper API cookies
+  const allCookies = [...incomingCookies, ...mapperCookies];
 
-    const findMedia = (obj: any) => {
-      if (!obj || foundUrl) return;
-      if (typeof obj === 'string') {
-        if (/m3u8|mpd|mp4/i.test(obj) && obj.startsWith('http')) {
-          foundUrl = obj;
-        }
-        return;
-      }
-      if (Array.isArray(obj)) {
-        obj.forEach(findMedia);
-        return;
-      }
-      if (typeof obj === 'object') {
-        // Prioritize known keys
-        for (const key of ['url', 'file', 'src', 'data', 'link']) {
-          if (obj[key] && typeof obj[key] === 'string' && obj[key].startsWith('http')) {
-            if (/m3u8|mpd|mp4/i.test(obj[key])) {
-              foundUrl = obj[key];
-              return;
+ try {
+     const data = JSON.parse(json);
+     // Recursive search for anything that looks like a playable URL
+     let foundUrl: string | null = null;
+
+     const findMedia = (obj: unknown): void => {
+       if (!obj || foundUrl) return;
+       if (typeof obj === 'string') {
+         if (/m3u8|mpd|mp4/i.test(obj) && obj.startsWith('http')) {
+           foundUrl = obj;
+         }
+         return;
+       }
+       if (Array.isArray(obj)) {
+         obj.forEach(findMedia);
+         return;
+       }
+       if (typeof obj === 'object') {
+         const record = obj as Record<string, unknown>;
+         // Prioritize known keys
+         for (const key of ['url', 'file', 'src', 'data', 'link']) {
+           const val = record[key];
+           if (typeof val === 'string' && val.startsWith('http') && /m3u8|mpd|mp4/i.test(val)) {
+             foundUrl = val;
+             return;
+           }
+         }
+         Object.values(record).forEach(findMedia);
+       }
+     };
+
+     findMedia(data);
+
+     if (foundUrl) {
+       log.info(`[manifest-extractor] anikoto: found media URL via API: ${foundUrl}`);
+// If it's an embed page, resolve it
+        if (!MANIFEST_PATTERN.test(foundUrl) && !KNOWN_CDNS.some(c => foundUrl!.includes(c))) {
+          const resolved = await tryResolveEmbedUrl(foundUrl, 'https://anikoto.cz/', allCookies);
+          if (resolved) {
+            try {
+              const embedOrigin = new URL(foundUrl).origin + '/';
+              return { url: resolved.url, referer: embedOrigin, cookiesFile: resolved.cookiesFile };
+            } catch {
+              return { url: resolved.url, referer: foundUrl, cookiesFile: resolved.cookiesFile };
             }
           }
+          return null;
         }
-        Object.values(obj).forEach(findMedia);
-      }
-    };
-
-    findMedia(data);
-
-    if (foundUrl) {
-      log.info(`[manifest-extractor] anikoto: found media URL via API: ${foundUrl}`);
-      // If it's an embed page, resolve it
-      if (!MANIFEST_PATTERN.test(foundUrl) && !KNOWN_CDNS.some(c => foundUrl!.includes(c))) {
-        const resolved = await tryResolveEmbedUrl(foundUrl, 'https://anikoto.cz/');
-        if (resolved) {
+        // For direct manifest URLs, pass the accumulated cookies
+        if (allCookies.length > 0) {
           try {
-            const embedOrigin = new URL(foundUrl).origin + '/';
-            return { url: resolved.url, referer: embedOrigin, cookiesFile: resolved.cookiesFile };
-          } catch {
-            return { url: resolved.url, referer: foundUrl, cookiesFile: resolved.cookiesFile };
+            const cookieDir = join(app.getPath('userData'), 'manifest-probe');
+            if (!existsSync(cookieDir)) mkdirSync(cookieDir, { recursive: true });
+            const cookiePath = join(cookieDir, `cookies-${Date.now()}.txt`);
+            writeFileSync(cookiePath, parseSetCookieToNetscape(allCookies, pageUrl), 'utf-8');
+            log.info(`[manifest-extractor] Wrote ${allCookies.length} combined cookie(s) → ${cookiePath}`);
+            return { url: foundUrl, referer: 'https://anikoto.cz/', cookiesFile: cookiePath };
+          } catch (err) {
+            log.warn('[manifest-extractor] Could not write cookies file:', err);
           }
         }
-        return null;
-      }
-      return { url: foundUrl, referer: 'https://anikoto.cz/' };
-    }
+        return { url: foundUrl, referer: 'https://anikoto.cz/' };
+     }
 
-    return null;
-  } catch (e) {
-    return null;
-  }
+     return null;
+   } catch {
+     return null;
+   }
 }
 
 /**
@@ -503,6 +537,7 @@ async function fetchMapperApi(
 async function tryResolveEmbedUrl(
   embedUrl: string,
   referer: string,
+  incomingCookies: string[] = [],
 ): Promise<{ url: string; cookiesFile?: string } | null> {
   // Rate-limit sequential embed-page CDN requests (secondary safeguard alongside
   // the serialized extraction mutex in the engine).
@@ -511,6 +546,9 @@ async function tryResolveEmbedUrl(
   // Use fetchUrlRaw so we can capture Set-Cookie headers from the embed CDN.
   const { body: html, setCookies } = await fetchUrlRaw(embedUrl, { Referer: referer });
   if (!html) return null;
+
+  // Combine incoming cookies with embed page cookies
+  const allCookies = [...incomingCookies, ...setCookies];
 
   let manifestUrl: string | null = null;
 
@@ -544,17 +582,17 @@ async function tryResolveEmbedUrl(
     return null;
   }
 
-  // Export any session cookies the CDN set on this response so yt-dlp can
+  // Export combined cookies (from anikoto + embed CDN) so yt-dlp can
   // present them when it fetches the manifest segments.
   let cookiesFile: string | undefined;
-  if (setCookies.length > 0) {
+  if (allCookies.length > 0) {
     try {
       const cookieDir = join(app.getPath('userData'), 'manifest-probe');
       if (!existsSync(cookieDir)) mkdirSync(cookieDir, { recursive: true });
       const cookiePath = join(cookieDir, `cookies-${Date.now()}.txt`);
-      writeFileSync(cookiePath, parseSetCookieToNetscape(setCookies, embedUrl), 'utf-8');
+      writeFileSync(cookiePath, parseSetCookieToNetscape(allCookies, embedUrl), 'utf-8');
       cookiesFile = cookiePath;
-      log.info(`[manifest-extractor] Wrote ${setCookies.length} embed cookie(s) → ${cookiePath}`);
+      log.info(`[manifest-extractor] Wrote ${allCookies.length} combined cookie(s) → ${cookiePath}`);
     } catch (err) {
       log.warn('[manifest-extractor] Could not write cookies file:', err);
     }
@@ -586,10 +624,26 @@ async function tryApiProbe(pageUrl: string): Promise<ApiProbeResult | null> {
  * Returns `null` if no manifest is discovered before the timeout.
  */
 export async function extractManifest(pageUrl: string): Promise<ManifestResult | null> {
+  if (getProbeStrategy(pageUrl) === 'ytdlp') {
+    try {
+      log.info(`[manifest-extractor] Routing to yt-dlp probe: ${pageUrl}`);
+      const manifest = await probeViaYtDlp(pageUrl);
+      const hlsFormat = manifest.formats.find(f => f.ext === 'mp4' && f.url.includes('m3u8'))
+                     || manifest.formats.find(f => f.url.includes('m3u8') || f.url.includes('mpd'));
+      if (hlsFormat) {
+        const type = hlsFormat.url.includes('mpd') ? 'mpd' : 'm3u8';
+        return { originalUrl: pageUrl, manifestUrl: hlsFormat.url, type, referer: pageUrl };
+      }
+      return null;
+    } catch (e) {
+      log.warn(`[manifest-extractor] yt-dlp probe failed: ${e}`);
+      return null;
+    }
+  }
+
   // --- Fast-path: try direct API probe first (avoids BrowserWindow) ---
   const apiResult = await tryApiProbe(pageUrl);
   if (apiResult) {
-    const m = apiResult.url.match(MANIFEST_PATTERN);
     const type = mediaTypeFromUrl(apiResult.url) || 'm3u8';
     log.info(`[manifest-extractor] Returning URL from direct API probe: ${apiResult.url}`);
     return { originalUrl: pageUrl, manifestUrl: apiResult.url, type, referer: apiResult.referer, cookiesFile: apiResult.cookiesFile };
@@ -620,6 +674,12 @@ export async function extractManifest(pageUrl: string): Promise<ManifestResult |
     },
   });
 
+  // Priority 1: Mute audio immediately (before loadURL)
+  win.webContents.setAudioMuted(true);
+
+  // Priority 2: Prevent ad popups
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
   return probeOnce(win, probeSession, pageUrl, preloadPath);
 }
 
@@ -638,7 +698,7 @@ async function probeOnce(
       if (settled) return;
       settled = true;
       if (reloadTimer) clearTimeout(reloadTimer);
-      try { if (preloadPath) rmSync(preloadPath, { force: true }); } catch { }
+      try { if (preloadPath) rmSync(preloadPath, { force: true }); } catch { /* temp file cleanup is best-effort */ }
       cleanup();
       resolve(result);
     };
@@ -761,8 +821,8 @@ async function probeOnce(
         if (!apiFetchAttempted && SEGMENT_PATTERN.test(details.url) && !details.url.includes('.ts') && !details.url.includes('.m4s')) {
           log.info(`[manifest-extractor] Possible manifest via pattern: ${details.url}`);
         }
-      } catch (e) {
-        // swallow
+      } catch {
+        // swallow: this handler must never throw and block navigation
       }
       callback({});
     });
@@ -775,7 +835,7 @@ async function probeOnce(
         if (!headers['User-Agent'] && !headers['user-agent']) headers['User-Agent'] = SPOOF_UA;
         callback({ requestHeaders: headers });
         return;
-      } catch (e) {
+      } catch {
         callback({});
         return;
       }
@@ -809,13 +869,13 @@ async function probeOnce(
                   const embedOrigin = new URL(details.url).origin + '/';
                   finish({ originalUrl: pageUrl, manifestUrl, type, referer: embedOrigin });
                 }
-              } catch (e) {
+              } catch {
                 // ignore parse errors
               } finally {
                 filter.end();
               }
             });
-          } catch (e) {
+          } catch {
             // filterResponseData not supported or failed — fall back to background fetch
             if (!apiFetchAttempted && API_DOMAINS.some((d) => details.url.includes(d))) {
               apiFetchAttempted = true;
@@ -829,7 +889,7 @@ async function probeOnce(
             }
           }
         }
-      } catch (e) {
+      } catch {
         // ignore
       }
       callback({});

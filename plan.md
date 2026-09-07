@@ -1,5 +1,5 @@
 # StreamDock — Implementation Plan
-> Desktop-only successor to Internet Download Manager. Uses AB Download Manager's dark desktop design language without copying its assets.
+> Desktop-only successor to Internet Download Manager. Uses AB Download Manager's dark desktop design language without copying its assets and bing daily wallpaper.
 
 ---
 
@@ -13,9 +13,13 @@ Paste a media URL → analyze → download to file.
 
 ### Live Stream Capture
 Paste a live or manifest URL → capture to disk.
-**Supported platforms:** Anikoto / AnikotoTV, AnimePahe, FMovies, SuperNova, hianime.to / hianime.re, gojoora, everythingmoe.com
+**Supported platforms:** Anikoto / AnikotoTV, AnimePahe, FMovies, SuperNova, hianime.to / hianime.re, gojoora, 
+
 
 ---
+
+### Site to reasarch currently available streaming, video and download sites
+everythingmoe.com
 
 ## Smart Naming
 
@@ -40,6 +44,7 @@ All downloads are organized with structured naming conventions.
     ...
 ```
 - If no season info exists, episodes go directly inside the series folder.
+- If its a Single movie/video, then no need for any folders
 
 ---
 

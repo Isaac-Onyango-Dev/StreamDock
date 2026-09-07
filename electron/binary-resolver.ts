@@ -1,7 +1,7 @@
 // Role: cross-platform binary path resolution and availability checks.
 import { execSync } from 'child_process';
 import { app } from 'electron';
-import { chmodSync, copyFileSync, existsSync, mkdirSync } from 'fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'fs';
 import { delimiter, dirname, join } from 'path';
 
 export interface BinaryStatus {
@@ -17,8 +17,6 @@ export interface YtDlpCommand {
 }
 
 export function resolvePluginDirs(userDirs: string[] = []): string[] {
-  const { readdirSync, statSync } = require('fs') as typeof import('fs');
-
   const roots: string[] = [...userDirs];
   const dataPlugins = join(app.getPath('userData'), 'plugins');
   if (existsSync(dataPlugins)) roots.push(dataPlugins);
@@ -59,7 +57,7 @@ export function buildPluginDirArgs(userDirs: string[] = []): string[] {
   return resolvePluginDirs(userDirs).flatMap((dir) => ['--plugin-dirs', dir]);
 }
 
-function executableNames(base: 'yt-dlp' | 'ffmpeg'): string[] {
+export function executableNames(base: 'yt-dlp' | 'ffmpeg'): string[] {
   if (process.platform === 'win32') return [`${base}.exe`, base];
   return [base];
 }

@@ -109,7 +109,8 @@
               radial-gradient(ellipse at 0% 100%, hsl(214, 88%, 58% / 0.05), transparent 50%);
 }
 
-[data-bg-mode="bing"] {
+[data-bg-mode="bing"],
+[data-bg-mode="picsum"] {
   --bg-image: var(--bg-bing-image, none);
 }
 
@@ -140,8 +141,9 @@
   transition: opacity var(--motion-slow) var(--ease-out);
 }
 
-/* For wallpaper/bing mode: use a lighter overlay so the image is visible */
-.app-background[data-bg-mode="bing"]::after {
+/* For wallpaper image modes: use a lighter overlay so the image is visible */
+.app-background[data-bg-mode="bing"]::after,
+.app-background[data-bg-mode="picsum"]::after {
   background: linear-gradient(180deg,
     hsl(220, 14%, 6% / 0.55) 0%,
     hsl(220, 14%, 6% / 0.35) 40%,

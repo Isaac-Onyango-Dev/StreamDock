@@ -19,7 +19,13 @@
     "typecheck:electron": "tsc --noEmit -p tsconfig.electron.json",
     "verify:engine": "tsx scripts/verify-engine.ts",
     "download:binaries": "tsx scripts/download-binaries.ts",
-    "download:plugins": "tsx scripts/download-plugins.ts"
+    "download:plugins": "tsx scripts/download-plugins.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
@@ -48,7 +54,18 @@
     "tsx": "^4.21.0",
     "typescript": "^5.8.3",
     "vite": "^6.3.5",
-    "wait-on": "^8.0.3"
+    "wait-on": "^8.0.3",
+    "vitest": "^2.1.1",
+    "@vitest/coverage-v8": "^2.1.1",
+    "@vitest/ui": "^2.1.1",
+    "@playwright/test": "^1.47.2",
+    "jsdom": "^25.0.1",
+    "happy-dom": "^15.7.4",
+    "eslint": "^9.10.0",
+    "@eslint/js": "^9.10.0",
+    "typescript-eslint": "^8.7.0",
+    "eslint-plugin-react": "^7.37.1",
+    "eslint-plugin-react-hooks": "^5.0.0"
   },
   "build": {
     "appId": "com.streamdock.app",

@@ -190,11 +190,8 @@ function extractQualityOptions(info: YtDlpInfo): QualityOption[] | undefined {
 }
 
 function fallbackProbe(url: string, reason: string): PlaylistProbe {
-  const episodePattern = detectEpisodePattern(url);
-  if (episodePattern) return episodeRangeProbe(url, episodePattern);
-
   const host = hostFromUrl(url);
-  if (matchesHost(host, REFERENCE_HOSTS)) {
+  if (matchesHost(host, REFERENCE_HOSTS())) {
     return {
       url,
       host,
@@ -206,6 +203,9 @@ function fallbackProbe(url: string, reason: string): PlaylistProbe {
       notes: ['EverythingMoe is an index of sites, not a direct media page.'],
     };
   }
+
+  const episodePattern = detectEpisodePattern(url);
+  if (episodePattern) return episodeRangeProbe(url, episodePattern);
 
   if (host === 'open.spotify.com' || host === 'spotify.com') {
     return {
@@ -223,7 +223,7 @@ function fallbackProbe(url: string, reason: string): PlaylistProbe {
     };
   }
 
-  const manifestLikely = matchesHost(host, MANIFEST_PROBE_HOSTS);
+  const manifestLikely = matchesHost(host, MANIFEST_PROBE_HOSTS());
   return {
     url,
     host,
@@ -310,7 +310,7 @@ function spawnProbe(
   });
 }
 
-function tryParse(url: string, stdout: string, stderr: string): PlaylistProbe | null {
+function tryParse(url: string, stdout: string, _stderr: string): PlaylistProbe | null {
   if (!stdout.trim()) return null;
   try {
     return parseInfo(url, stdout);
@@ -322,7 +322,7 @@ function tryParse(url: string, stdout: string, stderr: string): PlaylistProbe | 
 function isAnimeUrl(url: string): boolean {
   try {
     const host = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
-    return ANIME_HOSTS.some((d) => host === d || host.endsWith(`.${d}`));
+    return ANIME_HOSTS().some((d) => host === d || host.endsWith(`.${d}`));
   } catch {
     return false;
   }
@@ -330,7 +330,7 @@ function isAnimeUrl(url: string): boolean {
 
 function isPluginExtractorUrl(url: string): boolean {
   try {
-    return matchesHost(hostFromUrl(url), PLUGIN_EXTRACTOR_HOSTS);
+    return matchesHost(hostFromUrl(url), PLUGIN_EXTRACTOR_HOSTS());
   } catch {
     return false;
   }
@@ -339,13 +339,24 @@ function isPluginExtractorUrl(url: string): boolean {
 function shouldSkipYtDlpProbe(url: string): boolean {
   try {
     const host = hostFromUrl(url);
-    return matchesHost(host, MANIFEST_PROBE_HOSTS) && !isPluginExtractorUrl(url);
+    return matchesHost(host, MANIFEST_PROBE_HOSTS()) && !isPluginExtractorUrl(url);
   } catch {
     return false;
   }
 }
 
 export async function inspectUrl(url: string): Promise<PlaylistProbe> {
+  // Reference-index hosts (EverythingMoe and similar) must short-circuit here,
+  // unconditionally and before any other check — previously this only worked
+  // by coincidence (they also happened to match MANIFEST_PROBE_HOSTS below), and
+  // fallbackProbe()'s own episode-pattern detection ran *before* its reference-host
+  // check, so an episode-shaped EverythingMoe URL (e.g. .../anime/one-piece/episode-5)
+  // slipped past the reference message entirely and was treated as real content.
+  const refHost = hostFromUrl(url);
+  if (matchesHost(refHost, REFERENCE_HOSTS())) {
+    return fallbackProbe(url, 'This page is a reference index, not a direct media source.');
+  }
+
   if (shouldSkipYtDlpProbe(url)) {
     return fallbackProbe(url, 'This page will be probed in a hidden browser when the download starts.');
   }

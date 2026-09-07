@@ -8,6 +8,7 @@ export interface AudioTrackInfo {
   id: string;
   language: string;
   label: string;
+  formatId?: string;
   name?: string;
   isDefault: boolean;
   isOriginal: boolean;
@@ -16,16 +17,19 @@ export interface AudioTrackInfo {
   bitrate?: number;
   groupId?: string;
   uri?: string;
+  manifestUrl?: string;
 }
 
 export interface SubtitleTrackInfo {
   id: string;
   language: string;
   label: string;
+  formatId?: string;
   format: SubtitleFormat;
   isDefault: boolean;
   groupId?: string;
   uri?: string;
+  manifestUrl?: string;
 }
 
 export interface QualityVariant {
@@ -135,6 +139,7 @@ export function parseHlsManifest(text: string, manifestUrl: string): ParsedManif
         isDub: isDubLanguageHint(name),
         groupId,
         uri,
+        manifestUrl,
       });
     }
 
@@ -150,6 +155,7 @@ export function parseHlsManifest(text: string, manifestUrl: string): ParsedManif
         isDefault,
         groupId,
         uri,
+        manifestUrl,
       });
     }
   }
@@ -172,6 +178,7 @@ export function parseHlsManifest(text: string, manifestUrl: string): ParsedManif
         isDefault: audioTracks.length === 0,
         isOriginal: isOriginalLanguageHint(language),
         isDub: false,
+        manifestUrl,
       });
     }
   }
@@ -251,6 +258,7 @@ export function parseDashManifest(text: string, manifestUrl: string): ParsedMani
         bitrate,
         groupId: xmlAttr(openTag, 'id'),
         uri,
+        manifestUrl,
       });
     }
 
@@ -266,6 +274,7 @@ export function parseDashManifest(text: string, manifestUrl: string): ParsedMani
         isDefault: (xmlAttr(openTag, 'default') || '').toLowerCase() === 'true',
         groupId: xmlAttr(openTag, 'id'),
         uri,
+        manifestUrl,
       });
     }
   }
