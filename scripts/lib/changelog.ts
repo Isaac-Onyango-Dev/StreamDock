@@ -16,11 +16,15 @@ export function readProjectFile(path: string): string {
  * The version being published.
  *
  * `RELEASE_TAG` wins when set so a release build renders the tag it is
- * actually publishing, rather than whatever package.json happened to hold.
+ * actually publishing, rather than whatever package.json happened to hold —
+ * but only when it actually looks like a version. It is fed from CI context
+ * that is not always a tag (a workflow_run's `head_branch` is the branch name
+ * on a push-triggered run), and an unchecked override rendered the site's
+ * version badge as "vmain".
  */
 export function resolveVersion(): string {
-  const fromTag = process.env.RELEASE_TAG;
-  if (fromTag) return fromTag.replace(/^v/i, '');
+  const fromTag = process.env.RELEASE_TAG?.trim().replace(/^v/i, '');
+  if (fromTag && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(fromTag)) return fromTag;
   const pkg = JSON.parse(readProjectFile('package.json')) as { version: string };
   return pkg.version;
 }

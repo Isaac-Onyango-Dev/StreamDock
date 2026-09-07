@@ -75,6 +75,28 @@ jobs:
           files: ./coverage/lcov.info
           fail_ci_if_error: false
 
+  version-guard:
+    name: Version Guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Tags are needed to compare the version against what is released.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check version is valid, documented and not moving backwards
+        run: npm run check:version
+
   verify-engine:
     name: Verify Engine
     runs-on: ubuntu-latest
@@ -137,7 +159,7 @@ jobs:
   build-windows:
     name: Build Windows
     runs-on: windows-latest
-    needs: [typecheck, lint, test, verify-engine]
+    needs: [typecheck, lint, test, verify-engine, version-guard]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -172,7 +194,7 @@ jobs:
   build-macos:
     name: Build macOS
     runs-on: macos-latest
-    needs: [typecheck, lint, test, verify-engine]
+    needs: [typecheck, lint, test, verify-engine, version-guard]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -204,7 +226,7 @@ jobs:
   build-linux:
     name: Build Linux
     runs-on: ubuntu-latest
-    needs: [typecheck, lint, test, verify-engine]
+    needs: [typecheck, lint, test, verify-engine, version-guard]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code

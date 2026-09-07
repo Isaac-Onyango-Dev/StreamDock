@@ -1,11 +1,19 @@
 name: Deploy Site
 
-# release.yml's automated release is created with the default GITHUB_TOKEN,
-# and GitHub Actions does not let GITHUB_TOKEN-driven events trigger other
-# workflows (anti-recursion protection) — so `on: release: published` alone
-# would silently never fire here. workflow_run instead reacts to the
-# upstream workflow *run* completing, which isn't subject to that
-# restriction, and is the pattern GitHub recommends for this exact case.
+# The site renders the version from package.json, and its download button points
+# at `releases/latest/download/...`. Those two must not be allowed to disagree,
+# which is why this no longer runs on a package.json push.
+#
+# It used to. That meant a version bump updated the site immediately while the
+# release was still building — so for the length of a build the site advertised
+# a version whose installer did not exist yet, and `releases/latest` served the
+# previous one. Reacting to the release workflow *finishing* instead means the
+# site only ever claims a version that is actually downloadable.
+#
+# workflow_run rather than `on: release: published`: the release is created with
+# the default GITHUB_TOKEN, and GitHub does not let GITHUB_TOKEN-driven events
+# trigger other workflows (anti-recursion protection), so `release: published`
+# would silently never fire. workflow_run is not subject to that restriction.
 on:
   workflow_run:
     workflows: ['Build & Release']
@@ -24,7 +32,6 @@ on:
       - 'scripts/lib/changelog.ts'
       - 'scripts/generate-tokens.ts'
       - 'design/tokens.json'
-      - 'package.json'
   workflow_dispatch:
 
 permissions:
@@ -51,8 +58,10 @@ jobs:
         run: npm ci
 
       - name: Build site and sync README
-        env:
-          RELEASE_TAG: ${{ github.event.workflow_run.head_branch || github.event.release.tag_name || '' }}
+        # No RELEASE_TAG override: package.json is the source of truth, and the
+        # release workflow is now triggered by a push to main rather than by a
+        # tag, so workflow_run.head_branch is "main" — passing it here rendered
+        # the site as "vmain".
         run: npm run sync:docs
 
       - name: Commit and push if changed
