@@ -4,6 +4,31 @@ All notable changes to StreamDock are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-09-07
+
+### Fixed
+- **Critical**: packaged builds shipped with an empty `resources/binaries/`
+  folder — engines showed "Not Loaded" and "Update Engines" failed for
+  every user without yt-dlp/ffmpeg already on their system PATH. The
+  binary-download step never actually downloaded anything and no CI
+  workflow called it; this affected the just-shipped v1.1.0 release.
+  `download:binaries` now really fetches and bundles yt-dlp, ffmpeg, and
+  ffprobe, and runs automatically before every packaged build.
+- Wallpaper preview's "Set as Background" button wasn't clickable —
+  Chromium's native image-drag gesture was intercepting the click before
+  it reached the handler.
+- Several `bg-primary`/`border-primary`/`ring-primary`/`text-text-tertiary`
+  classes in the wallpaper settings referenced color tokens that don't
+  exist in this project's Tailwind config, silently rendering no color.
+
+### Added
+- App UI now shares the install site's brand (violet/pink/amber, Space
+  Grotesk display type) via a single `design/tokens.json` source instead
+  of two hand-maintained palettes — window/tray/installer icons, the
+  titlebar wordmark, and every accent-colored control across the app.
+- Live download counter on the install site (GitHub Releases-based, no
+  backend) plus a README badge.
+
 ## [1.1.0] - 2026-09-07
 
 ### Added
