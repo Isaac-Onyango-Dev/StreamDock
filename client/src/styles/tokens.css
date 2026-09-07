@@ -141,6 +141,17 @@
   transition: opacity var(--motion-slow) var(--ease-out);
 }
 
+/*
+ * Solid mode has nothing to make legible, so the overlay is pure loss: the
+ * gradient above is fully opaque at its first and last stops, which meant the
+ * chosen background colour was painted and then immediately covered by
+ * near-black. Picking a colour changed the setting, saved it, and showed no
+ * visible difference — which read as "the swatches don't work".
+ */
+.app-background[data-bg-mode="solid"]::after {
+  opacity: 0;
+}
+
 /* For wallpaper image modes: use a lighter overlay so the image is visible */
 .app-background[data-bg-mode="bing"]::after,
 .app-background[data-bg-mode="picsum"]::after {

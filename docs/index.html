@@ -4,13 +4,13 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>StreamDock — Grab Any Stream, Instantly</title>
-<meta name="description" content="StreamDock v1.2.0 — download videos and capture live streams from thousands of sites with one bold, fast desktop app. Powered by yt-dlp and ffmpeg." />
+<meta name="description" content="StreamDock v1.3.0 — download videos and capture live streams from thousands of sites with one bold, fast desktop app. Powered by yt-dlp and ffmpeg." />
 <link rel="canonical" href="https://isaac-onyango-dev.github.io/StreamDock/" />
 
 <meta property="og:type" content="website" />
 <meta property="og:url" content="https://isaac-onyango-dev.github.io/StreamDock/" />
 <meta property="og:title" content="StreamDock — Grab Any Stream, Instantly" />
-<meta property="og:description" content="Download videos and capture live streams from thousands of sites with one bold, fast desktop app. v1.2.0 out now." />
+<meta property="og:description" content="Download videos and capture live streams from thousands of sites with one bold, fast desktop app. v1.3.0 out now." />
 <meta property="og:image" content="https://isaac-onyango-dev.github.io/StreamDock/assets/og-image.svg" />
 <meta property="og:image:type" content="image/svg+xml" />
 <meta property="og:image:width" content="1200" />
@@ -558,7 +558,7 @@ footer {
     <a class="nav-logo" href="#top">
       <img class="nav-mark" src="assets/mark.svg" alt="" width="34" height="34" />
       <span class="nav-wordmark">Stream<span>Dock</span></span>
-      <span class="nav-badge">v1.2.0</span>
+      <span class="nav-badge">v1.3.0</span>
     </a>
     <ul class="nav-links">
       <li><a class="text-link" href="#features">Features</a></li>
@@ -573,7 +573,7 @@ footer {
 
   <!-- HERO -->
   <section class="hero" id="top">
-    <span class="hero-eyebrow"><span class="dot"></span>v1.2.0 — Now Available</span>
+    <span class="hero-eyebrow"><span class="dot"></span>v1.3.0 — Now Available</span>
 
     <img class="hero-mark" src="assets/mark.svg" alt="StreamDock logo" width="104" height="104" />
 
@@ -590,7 +590,7 @@ footer {
       <a href="#" class="btn-primary" id="hero-download-btn">
         <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         <span id="hero-download-label">Download StreamDock</span>
-        <small id="hero-download-sub">v1.2.0</small>
+        <small id="hero-download-sub">v1.3.0</small>
       </a>
       <div class="platform-picker" id="platform-picker">
         <a class="platform-pill" data-os="windows" href="#download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><rect x="3" y="4" width="8" height="8" rx="1"/><rect x="13" y="4" width="8" height="8" rx="1"/><rect x="3" y="14" width="8" height="6" rx="1"/><rect x="13" y="14" width="8" height="6" rx="1"/></svg> Windows</a>
@@ -627,7 +627,7 @@ footer {
         <div class="card-meta">
           <span class="tag tag-violet">NSIS Installer</span>
           <span class="tag tag-pink">.exe</span>
-          <span class="tag tag-muted">v1.2.0</span>
+          <span class="tag tag-muted">v1.3.0</span>
         </div>
         <a class="btn-dl btn-dl-primary" id="windows-download-btn"
            href="https://github.com/Isaac-Onyango-Dev/StreamDock/releases/latest/download/StreamDock-Setup-Windows.exe"
@@ -733,6 +733,14 @@ footer {
     <h2 class="section-title">What's New</h2>
         <div class="release">
       <div class="release-head">
+        <span class="version-tag">v1.3.0</span>
+        <span class="release-date">2026-09-07</span>
+      </div>
+      <h3>Fixed</h3>
+      <ul><li><strong>Critical</strong>: every download failed immediately, reported in the UI as</li><li>Staleness is now judged by age, not a pinned date: the engine warns</li><li>Error classification matched bare digit substrings, so any output</li><li>Background settings appeared to do nothing. Every control was correctly</li><li>The application menu was never reachable. A complete File/Edit/View/Help</li><li>Failure details in the UI: a "Show details" toggle on any failed</li><li>An out-of-date engine is now named as the likely cause when yt-dlp</li><li>In-window menu bar in the custom titlebar. It renders the existing</li><li>Application auto-update against GitHub Releases via <code>electron-updater</code>:</li><li><strong>Help -&gt; About StreamDock</strong>, and GitHub repository/issue links.</li><li>README "What's New" is now generated from <code>CHANGELOG.md</code> by</li></ul>
+    </div>
+    <div class="release">
+      <div class="release-head">
         <span class="version-tag">v1.2.0</span>
         <span class="release-date">2026-09-07</span>
       </div>
@@ -746,14 +754,6 @@ footer {
       </div>
       <h3>Added</h3>
       <ul><li>Language labeling for dub/sub/server stream options — every stream choice</li><li>Advisory source-status check: a dismissible, non-blocking toast flags</li><li>The full test suite was silently collecting <strong>zero tests</strong> — a Vitest setup</li><li>Fragmented MP4 streams (<code>fragment.mp4</code>) were misclassified as plain MP4,</li><li>YouTube Live's specific handling was unreachable, shadowed by a generic</li><li><code>sanitizeName()</code> collapsed illegal characters one-by-one instead of per</li><li>Windows <code>.part</code> file cleanup was broken (a falsy-index bug meant the</li><li>Manifest-retry downloads could end up named literally</li><li>Unbounded wallpaper cache growth — old daily wallpapers were never cleaned</li><li>Reference-only sites were listed correctly as reference-only in the URL</li><li>Output naming now matches the exact required spec (<code>Episode (1).format</code>,</li><li>App boot sequence could silently fail to ever show a window: wallpaper</li><li>Assorted: a TypeScript compile error and a masked config-load fallback bug</li></ul>
-    </div>
-    <div class="release">
-      <div class="release-head">
-        <span class="version-tag">v1.0.2</span>
-        <span class="release-date">2026-06-14</span>
-      </div>
-      <h3>Fixed</h3>
-      <ul><li>Settings toggle alignment — the thumb now slides end-to-end correctly.</li><li>GitHub Pages updated to reflect the current version and feature set.</li></ul>
     </div>
   </section>
 
@@ -797,7 +797,7 @@ footer {
   <footer>
     <div class="footer-brand">
       <img src="assets/mark.svg" alt="" width="26" height="26" />
-      <span>Stream<em>Dock</em> <span class="ver">· v1.2.0</span></span>
+      <span>Stream<em>Dock</em> <span class="ver">· v1.3.0</span></span>
     </div>
     <div class="footer-links">
       <a href="https://github.com/Isaac-Onyango-Dev/StreamDock" target="_blank" rel="noopener">GitHub</a>

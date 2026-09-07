@@ -133,14 +133,38 @@
   .bg-chrome-header  { background-color: var(--color-surface-0); }
   .bg-chrome-content { background-color: var(--color-surface-0); }
 
-  [data-bg-mode="bing"] .bg-chrome-rail {
+  /*
+   * Both wallpaper modes need this, not just Bing. "picsum" (Random Photo) was
+   * missing from these selectors, so its chrome stayed fully opaque and covered
+   * the wallpaper it had just fetched — the photo loaded and was then hidden,
+   * which is why "Random Photo" looked like it did nothing.
+   */
+  [data-bg-mode="bing"] .bg-chrome-rail,
+  [data-bg-mode="picsum"] .bg-chrome-rail {
     background-color: color-mix(in srgb, var(--color-surface-1) 78%, transparent);
   }
-  [data-bg-mode="bing"] .bg-chrome-header {
+  [data-bg-mode="bing"] .bg-chrome-header,
+  [data-bg-mode="picsum"] .bg-chrome-header {
     background-color: color-mix(in srgb, var(--color-surface-0) 68%, transparent);
   }
-  [data-bg-mode="bing"] .bg-chrome-content {
+  [data-bg-mode="bing"] .bg-chrome-content,
+  [data-bg-mode="picsum"] .bg-chrome-content {
     background-color: color-mix(in srgb, var(--color-surface-0) 55%, transparent);
+  }
+
+  /*
+   * Solid mode keeps opaque panels — a flat colour behind fully opaque chrome
+   * is invisible — but tints them toward the chosen colour so selecting a
+   * swatch visibly changes the app instead of only the swatch's own ring.
+   */
+  [data-bg-mode="solid"] .bg-chrome-rail {
+    background-color: color-mix(in srgb, var(--color-surface-1) 86%, transparent);
+  }
+  [data-bg-mode="solid"] .bg-chrome-header {
+    background-color: color-mix(in srgb, var(--color-surface-0) 80%, transparent);
+  }
+  [data-bg-mode="solid"] .bg-chrome-content {
+    background-color: color-mix(in srgb, var(--color-surface-0) 72%, transparent);
   }
 }
 

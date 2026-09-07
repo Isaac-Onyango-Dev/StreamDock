@@ -20,6 +20,8 @@ on:
       - 'docs/sitemap.xml'
       - 'CHANGELOG.md'
       - 'scripts/build-site.ts'
+      - 'scripts/sync-readme.ts'
+      - 'scripts/lib/changelog.ts'
       - 'scripts/generate-tokens.ts'
       - 'design/tokens.json'
       - 'package.json'
@@ -48,19 +50,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build site
+      - name: Build site and sync README
         env:
           RELEASE_TAG: ${{ github.event.workflow_run.head_branch || github.event.release.tag_name || '' }}
-        run: npm run build:site
+        run: npm run sync:docs
 
       - name: Commit and push if changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- docs/index.html; then
-            echo "No site changes to deploy."
+          if git diff --quiet -- docs/index.html README.md; then
+            echo "Site and README already in sync."
           else
-            git add docs/index.html
-            git commit -m "chore: sync site to $(node -p "require('./package.json').version") [skip ci]"
+            git add docs/index.html README.md
+            git commit -m "chore: sync site and README to $(node -p "require('./package.json').version") [skip ci]"
             git push origin HEAD:main
           fi

@@ -22,15 +22,53 @@ async function download(url: string): Promise<Buffer> {
   return Buffer.from(await response.arrayBuffer());
 }
 
+/**
+ * yt-dlp ships roughly monthly and sites break extractors continuously, so a
+ * "present" binary is not automatically a usable one.
+ *
+ * This used to return early whenever yt-dlp.exe existed. On CI that was
+ * harmless (the runner starts clean and always fetched the latest), but on a
+ * developer machine it meant the binary downloaded once was reused forever:
+ * this repo shipped a 2026.03.17 yt-dlp that 403'd on every YouTube download
+ * while the current release worked with the exact same arguments. Refresh
+ * anything older than the staleness threshold instead.
+ */
+const MAX_ENGINE_AGE_DAYS = 30;
+
+function ytDlpAgeDays(exePath: string): number | null {
+  try {
+    const raw = execFileSync(exePath, ['--version'], { encoding: 'utf-8', windowsHide: true });
+    const match = raw.trim().match(/^(\d{4})\.(\d{2})\.(\d{2})/);
+    if (!match) return null;
+    const released = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    return Math.floor((Date.now() - released) / 86_400_000);
+  } catch {
+    // Unrunnable binary (corrupt, wrong arch, blocked by AV) — treat as needing
+    // a fresh copy rather than silently keeping something that cannot execute.
+    return null;
+  }
+}
+
 async function ensureYtDlp(): Promise<void> {
   const target = join(BINARIES_DIR, 'yt-dlp.exe');
+
   if (existsSync(target)) {
-    console.log('[binaries] yt-dlp.exe already present, skipping download');
-    return;
+    const ageDays = ytDlpAgeDays(target);
+    if (ageDays !== null && ageDays < MAX_ENGINE_AGE_DAYS) {
+      console.log(`[binaries] yt-dlp.exe is ${ageDays} days old, keeping it`);
+      return;
+    }
+    console.log(
+      ageDays === null
+        ? '[binaries] yt-dlp.exe present but not runnable, replacing it'
+        : `[binaries] yt-dlp.exe is ${ageDays} days old, refreshing`,
+    );
   }
+
   console.log('[binaries] Downloading yt-dlp.exe...');
   writeFileSync(target, await download(YT_DLP_URL));
-  console.log('[binaries] yt-dlp.exe ready');
+  const newAge = ytDlpAgeDays(target);
+  console.log(`[binaries] yt-dlp.exe ready${newAge === null ? '' : ` (${newAge} days old)`}`);
 }
 
 async function ensureFfmpeg(): Promise<void> {

@@ -13,6 +13,7 @@ import { probeMediaTracks } from './media-track-probe';
 import { probeStreamOptions } from './stream-options-probe';
 import { getBinaryStatus, resolveUpdatableYtDlpCommand, resolveYtDlpCommand, resolvePluginDirs } from './binary-resolver';
 import { toUserError } from './error-translator';
+import { checkForUpdatesInteractive, checkForUpdatesOnLaunch } from './app-updater';
 import { checkYtDlpVersion } from './version-checker';
 import { installCrashReporter } from './crash-reporter';
 
@@ -83,6 +84,29 @@ installCrashReporter();
 import { persistence, type AppSettings } from './persistence';
 
 let mainWindow: BrowserWindow | null = null;
+let appMenu: Menu | null = null;
+
+/** Top-level menu labels, in order, for the in-window menu bar to render. */
+function appMenuLabels(): string[] {
+  if (!appMenu) return [];
+  return appMenu.items.map((item) => item.label).filter(Boolean);
+}
+
+function showAboutDialog(): void {
+  void dialog.showMessageBox(mainWindow ?? undefined!, {
+    type: 'info',
+    title: 'About StreamDock',
+    message: `StreamDock ${app.getVersion()}`,
+    detail: [
+      'Video downloading and live-stream capture, built on yt-dlp.',
+      '',
+      `Electron ${process.versions.electron}`,
+      `Chromium ${process.versions.chrome}`,
+      `Node ${process.versions.node}`,
+    ].join('\n'),
+    buttons: ['OK'],
+  });
+}
 let tray: Tray | null = null;
 let engine: DownloadEngine;
 
@@ -324,15 +348,63 @@ function setupIpc(): void {
     try {
       const cmd = resolveUpdatableYtDlpCommand();
       const { execFile } = await import('child_process');
-      return new Promise((resolve) => {
-        execFile(cmd.command, [...cmd.args, '-U'], { windowsHide: true }, (error, stdout) => {
-          if (error) resolve({ success: false, error: toUserError(error) });
-          else resolve({ success: true, message: stdout || `Updated ${cmd.type === 'python' ? 'python yt-dlp module' : cmd.command}` });
-        });
+
+      // `yt-dlp -U` can take a while on a slow link and self-replaces its own
+      // executable; the default execFile timeout would leave a half-swapped
+      // binary behind, so allow real time for it.
+      const updated = await new Promise<{ ok: boolean; output: string }>((resolve) => {
+        execFile(
+          cmd.command,
+          [...cmd.args, '-U'],
+          { windowsHide: true, timeout: 180_000, encoding: 'utf-8' },
+          (error, stdout, stderr) => {
+            const output = `${stdout ?? ''}${stderr ?? ''}`.trim();
+            resolve({ ok: !error, output: output || (error ? String(error) : '') });
+          },
+        );
       });
+
+      if (!updated.ok) {
+        log.error('[engine-update] yt-dlp -U failed:', updated.output);
+        return { success: false, error: toUserError(updated.output) };
+      }
+
+      // Report the version we actually ended up on rather than echoing yt-dlp's
+      // update chatter. If the update was a no-op because the binary cannot
+      // replace itself, this is what reveals it.
+      const check = await checkYtDlpVersion(cmd.command, cmd.args);
+      log.info(`[engine-update] yt-dlp now reports ${check.version ?? 'unknown'}`);
+
+      if (check.version && check.isOutdated) {
+        return {
+          success: false,
+          error:
+            `The engine is still on ${check.version} after updating. ` +
+            'Try running the update again, or reinstall StreamDock.',
+        };
+      }
+
+      mainWindow?.webContents.send(IPC.APP_ENGINE_VERSION_WARNING, null);
+      return {
+        success: true,
+        message: check.version ? `Download engine updated to ${check.version}.` : 'Download engine updated.',
+      };
     } catch (e) {
       return { success: false, error: toUserError(e) };
     }
+  });
+
+  // ── Application menu (frameless window) ────────────────────────────────────
+  ipcMain.handle(IPC.MENU_LABELS, () => appMenuLabels());
+
+  ipcMain.handle(IPC.MENU_POPUP, (_event, label: string, x: number, y: number) => {
+    if (!appMenu || !mainWindow) return false;
+    const item = appMenu.items.find((entry) => entry.label === label);
+    if (!item?.submenu) return false;
+    // Round: Electron rejects fractional coordinates, and getBoundingClientRect
+    // routinely returns them on a scaled display.
+    item.submenu.popup({ window: mainWindow, x: Math.round(x), y: Math.round(y) });
+    return true;
   });
 
   // ── Onboarding ─────────────────────────────────────────────────────────────
@@ -483,14 +555,26 @@ function buildAppMenu(): void {
     {
       label: 'Help',
       submenu: [
+        { label: 'About StreamDock', click: showAboutDialog },
+        { label: 'Check for Updates\u2026', click: () => void checkForUpdatesInteractive(mainWindow) },
+        { type: 'separator' },
         { label: 'Open Logs Folder', click: () => shell.openPath(app.getPath('userData')) },
         { type: 'separator' },
+        { label: 'StreamDock on GitHub', click: () => shell.openExternal('https://github.com/Isaac-Onyango-Dev/StreamDock') },
         { label: 'Report Issue', click: () => shell.openExternal('https://github.com/Isaac-Onyango-Dev/StreamDock/issues') },
       ],
     },
   ];
 
   const menu = Menu.buildFromTemplate(template);
+
+  // The window is frameless (`frame: false`), and on Windows/Linux that means
+  // the native application menu bar is never drawn — which is why the app
+  // appeared to have no File/Edit/Help menu at all even though this whole
+  // template already existed. The accelerators below still worked; nothing was
+  // discoverable. Keep the native menu as the single source of truth and let
+  // the custom titlebar pop its submenus up in place (see IPC.MENU_POPUP).
+  appMenu = menu;
   Menu.setApplicationMenu(menu);
 
   function openDownloadFolder(): void {
@@ -563,6 +647,10 @@ app.whenReady().then(async () => {
   // happens below. The wallpaper feature is cosmetic and must never be able to
   // prevent the window from ever appearing.
   createWindow();
+
+  // Update check runs after the window exists so its dialog has a parent, and
+  // is fire-and-forget: a GitHub outage must never delay or block startup.
+  checkForUpdatesOnLaunch(mainWindow);
 
   // Wallpaper cache dir + custom protocol handler. Deliberately isolated in its
   // own try/catch and run AFTER createWindow(): previously this block ran FIRST,

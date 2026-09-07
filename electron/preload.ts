@@ -143,6 +143,12 @@ const api = {
   updateEngine: () =>
     ipcRenderer.invoke(IPC.ENGINE_UPDATE) as Promise<{ success: boolean; message?: string; error?: string }>,
 
+  // Application menu (the window is frameless, so the custom titlebar renders
+  // the menu bar itself and asks the main process to pop the real submenus).
+  getMenuLabels: () => ipcRenderer.invoke(IPC.MENU_LABELS) as Promise<string[]>,
+  popupMenu: (label: string, x: number, y: number) =>
+    ipcRenderer.invoke(IPC.MENU_POPUP, label, x, y) as Promise<boolean>,
+
   // Background
   rotateNow: () => ipcRenderer.invoke(IPC.WALLPAPER_ROTATE_NOW) as Promise<string | null>,
   onWallpaperUpdated: (callback: (url: string) => void): Unsubscribe =>

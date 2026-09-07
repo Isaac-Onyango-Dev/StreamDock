@@ -1,43 +1,8 @@
 import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { parseChangelog, readProjectFile, repoRoot, resolveVersion, type ChangelogEntry } from './lib/changelog';
 
-const root = join(import.meta.dirname, '..');
-const docsDir = join(root, 'docs');
-
-function readProjectFile(path: string): string {
-  return readFileSync(join(root, path), 'utf-8');
-}
-
-function resolveVersion(): string {
-  const fromTag = process.env.RELEASE_TAG;
-  if (fromTag) return fromTag.replace(/^v/i, '');
-  const pkg = JSON.parse(readProjectFile('package.json')) as { version: string };
-  return pkg.version;
-}
-
-interface ChangelogEntry {
-  version: string;
-  date: string;
-  body: string[]; // raw lines between the heading and the next heading
-}
-
-function parseChangelog(markdown: string): ChangelogEntry[] {
-  const lines = markdown.split(/\r?\n/);
-  const entries: ChangelogEntry[] = [];
-  let current: ChangelogEntry | null = null;
-
-  for (const line of lines) {
-    const heading = line.match(/^##\s+\[([^\]]+)\]\s*-\s*(.+)$/);
-    if (heading) {
-      if (current) entries.push(current);
-      current = { version: heading[1], date: heading[2].trim(), body: [] };
-      continue;
-    }
-    if (current) current.body.push(line);
-  }
-  if (current) entries.push(current);
-  return entries;
-}
+const docsDir = join(repoRoot, 'docs');
 
 function escapeHtml(text: string): string {
   return text

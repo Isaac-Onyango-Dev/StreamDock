@@ -1,15 +1,15 @@
 {
   "name": "streamdock",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Desktop video downloader and live stream capture app",
   "type": "module",
   "main": "dist-electron/main.cjs",
   "author": "Isaac Onyango",
   "license": "MIT",
   "scripts": {
-    "dev:main": "esbuild electron/main.ts --bundle --platform=node --format=cjs --outfile=dist-electron/main.cjs --external:electron --external:electron-log",
+    "dev:main": "esbuild electron/main.ts --bundle --platform=node --format=cjs --outfile=dist-electron/main.cjs --external:electron --external:electron-log --external:electron-updater",
     "dev:preload": "esbuild electron/preload.ts --bundle --platform=node --format=cjs --outfile=dist-electron/preload.cjs --external:electron",
-    "dev:main:watch": "esbuild electron/main.ts --bundle --platform=node --format=cjs --outfile=dist-electron/main.cjs --external:electron --external:electron-log --watch",
+    "dev:main:watch": "esbuild electron/main.ts --bundle --platform=node --format=cjs --outfile=dist-electron/main.cjs --external:electron --external:electron-log --external:electron-updater --watch",
     "dev:preload:watch": "esbuild electron/preload.ts --bundle --platform=node --format=cjs --outfile=dist-electron/preload.cjs --external:electron --watch",
     "dev": "concurrently \"vite --host 127.0.0.1\" \"npm run dev:main && npm run dev:preload && wait-on http://127.0.0.1:5173 && cross-env NODE_ENV=development electron .\" \"npm run dev:main:watch\" \"npm run dev:preload:watch\"",
     "tokens:build": "tsx scripts/generate-tokens.ts",
@@ -20,6 +20,8 @@
     "typecheck:electron": "tsc --noEmit -p tsconfig.electron.json",
     "verify:engine": "tsx scripts/verify-engine.ts",
     "build:site": "tsx scripts/generate-tokens.ts && tsx scripts/build-site.ts",
+    "sync:readme": "tsx scripts/sync-readme.ts",
+    "sync:docs": "npm run build:site && npm run sync:readme",
     "download:binaries": "tsx scripts/download-binaries.ts",
     "download:plugins": "tsx scripts/download-plugins.ts",
     "test": "vitest run",
@@ -33,6 +35,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "electron-log": "^5.4.3",
+    "electron-updater": "^6.8.9",
     "lucide-react": "^0.511.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -40,34 +43,34 @@
     "tailwind-merge": "^3.3.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.7.0",
+    "@eslint/js": "^9.10.0",
+    "@playwright/test": "^1.47.2",
     "@types/node": "^22.15.21",
     "@types/react": "^18.3.21",
     "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.7.0",
+    "@vitest/coverage-v8": "^2.1.1",
+    "@vitest/ui": "^2.1.1",
     "autoprefixer": "^10.4.21",
     "concurrently": "^9.2.1",
     "cross-env": "^7.0.3",
     "electron": "^41.0.2",
     "electron-builder": "^26.8.1",
     "esbuild": "^0.25.0",
+    "eslint": "^9.10.0",
+    "eslint-plugin-react": "^7.37.1",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "happy-dom": "^15.7.4",
+    "jsdom": "^25.0.1",
     "postcss": "^8.5.4",
     "source-map": "^0.7.4",
     "tailwindcss": "3.4.19",
     "tsx": "^4.21.0",
     "typescript": "^5.8.3",
-    "vite": "^6.3.5",
-    "wait-on": "^8.0.3",
-    "vitest": "^2.1.1",
-    "@vitest/coverage-v8": "^2.1.1",
-    "@vitest/ui": "^2.1.1",
-    "@playwright/test": "^1.47.2",
-    "jsdom": "^25.0.1",
-    "happy-dom": "^15.7.4",
-    "eslint": "^9.10.0",
-    "@eslint/js": "^9.10.0",
     "typescript-eslint": "^8.7.0",
-    "eslint-plugin-react": "^7.37.1",
-    "eslint-plugin-react-hooks": "^5.0.0"
+    "vite": "^6.3.5",
+    "vitest": "^2.1.1",
+    "wait-on": "^8.0.3"
   },
   "build": {
     "appId": "com.streamdock.app",
@@ -130,7 +133,13 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     },
-    "publish": null
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Isaac-Onyango-Dev",
+        "repo": "StreamDock"
+      }
+    ]
   },
   "repository": {
     "type": "git",

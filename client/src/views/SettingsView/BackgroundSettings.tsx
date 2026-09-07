@@ -196,7 +196,17 @@ export function BackgroundSettings({ settings, onSettingsChange }: BackgroundSet
         <div>
           <div className="flex justify-between items-center mb-2">
             <span className="text-[11px] font-medium text-text-secondary uppercase tracking-[0.07em]">Solid Color</span>
-            <span className="text-[11px] text-text-secondary font-mono">{bgColor.toUpperCase()}</span>
+            <span className="flex items-center gap-2">
+              {/* Applying a colour used to produce no visible change anywhere
+                  (see the chrome/overlay fixes in index.css), so there was no
+                  way to tell a click had registered. */}
+              {savedTick && mode === 'solid' && (
+                <span className="text-[11px] text-success flex items-center animate-fade-in">
+                  <CheckCircle2 className="h-3 w-3 mr-1" /> applied
+                </span>
+              )}
+              <span className="text-[11px] text-text-secondary font-mono">{bgColor.toUpperCase()}</span>
+            </span>
           </div>
           
           <div 

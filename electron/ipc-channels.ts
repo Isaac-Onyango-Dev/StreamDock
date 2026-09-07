@@ -64,6 +64,8 @@ export const IPC = {
   // Engine management
   ENGINE_CLEAR_RECORDS: 'engine:clear-records',
   ENGINE_UPDATE:        'engine:update',
+  MENU_LABELS:          'menu:labels',
+  MENU_POPUP:           'menu:popup',
   ENGINE_STATUS:        'engine:status',
 
   // Active count update (renderer → main, for badge/tray)
