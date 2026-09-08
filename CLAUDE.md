@@ -55,7 +55,7 @@ actual runs — full yt-dlp spawn command lines, verbatim stderr, timestamps.
 
 ## Where things stand (as of this session)
 
-Twelve work sessions have happened against this repo so far.
+Thirteen work sessions have happened against this repo so far.
 
 **Correcting a claim this file carried for three sessions:** sessions 5 and 6
 were *not* unpushed. Verified in session 9 — `HEAD == origin/main` and
@@ -1055,8 +1055,121 @@ a project problem. Also of note: the Linux auto-updater logs a harmless 404 for
 `latest-linux.yml` until a release actually carries one; v1.6.0 is the first
 that does.
 
+### Session 13 — a full feature audit, and the plugin system that never worked
+
+Isaac asked for an audit of every advertised feature against the real code,
+then for the easy defects to be fixed. Version 1.6.0 -> 1.6.1, released.
+The audit is published at
+https://claude.ai/code/artifact/94a6e449-06b0-49c3-9708-6c3c19568834 —
+**with one row now wrong**, see below.
+
+**The audit's own headline finding was itself corrected by running the binary.**
+It marked bundled plugins as working, on the evidence that every piece of wiring
+is present: five plugin packages ship, `resolvePluginDirs()` enumerates them,
+`--plugin-dirs` is passed, electron-builder packages them. Then Isaac supplied
+real URLs, `anikototv.to` failed as `Unsupported URL` despite a bundled Anikoto
+extractor claiming that exact domain, and one `-v` run gave the answer:
+
+  --plugin-dirs plugins/anikoto  -> "Plugin directories: none", 1744 extractors
+  --plugin-dirs plugins          -> four packages resolved, 1750 extractors
+
+`resolvePluginDirs()` expanded each root into its individual package folders,
+carrying a comment asserting that is what yt-dlp wants. It is backwards — yt-dlp
+globs `<dir>/*/yt_dlp_plugins` itself. **Every bundled plugin had been inert in
+every build ever shipped.** Fixing it exposed a second problem: yt-dlp loads
+every package under a root, and `ChromeCookieUnlock` imports `windll` at module
+level, so off Windows it printed an ImportError traceback on every invocation —
+into the stderr the failure-details panel shows users. It moved to its own
+`plugins-win/` root, offered only on Windows.
+
+**Three defects fixed, all cross-platform and long-standing.**
+
+1. *Subtitles were embedded whatever the user chose.*
+   `applyLanguageAndSubtitleArgs` honoured the picker and `applyYtDlpOptions`
+   then appended `--embed-subs` from a global setting whose persisted default
+   was `true`. "None" still embedded; "Sidecar" embedded *and* wrote the file.
+   Checked against the engine rather than assumed —
+   `--skip-download` gives `requested_subtitles=NA`, adding `--embed-subs` gives
+   `{'en': {...}}` — so it was never harmless. The fix is structural:
+   `shared/subtitle-args.ts` owns the entire decision and the engine emits no
+   subtitle flags of its own. Mode gained `'both'`, so sidecar / embedded /
+   both are now distinct. Burned-in subtitles stay unimplemented on purpose.
+2. *The quality picker fabricated its options.* Isaac's premise was that there
+   is no quality selector; there is one, always rendered. The real defect was
+   `fallbackQualityChoices()` supplying a hardcoded 1080/720/480/360 ladder
+   whenever nothing had been detected — before Analyze, for every playlist, and
+   for every episode-range probe, because `qualityOptions` is only populated
+   when `entries.length === 0`. Now `client/src/lib/quality.ts` offers only
+   detected heights, and "Best quality" alone when there are none.
+3. *A saved subtitle default never reached the picker.* Found while wiring the
+   setting: App loads settings asynchronously and `useState` reads its initial
+   value once, so the stored value arrived after CaptureView had already
+   captured the fallback. The class of bug this file already warns about.
+
+**The quality semantics were already correct and were deliberately left alone.**
+Verified with one shared selector across two videos of different maximum
+resolution: `-f 'bestvideo[height<=1080]+...'` gave 240p and 720p — the 240p
+video was neither skipped nor upscaled. `height<=N` is a ceiling, so an explicit
+pick already means "best available, up to N", which is the Option C Isaac
+preferred. What was missing was saying so, so options read "up to 1080p" and the
+preview line states that each item downloads at its own best.
+
+**`shared/` is a new third tsconfig root**, included by both projects. The
+renderer needs the same subtitle rules the engine uses in order to preview them
+honestly, and this repo has already lost a session to the same logic existing
+twice (the site and README rendering one changelog through two parsers).
+
+**URL fixtures, measured with the real binary.** Both YouTube playlist forms
+behave identically (15 items, real title and thumbnail) and both report
+`qualities: NONE` — a live confirmation of the playlist gap. `reanime.to`,
+`animex.one` and `rivestream.app` are **absent from `host-config.json`
+entirely**, so they never reach the manifest extractor and fail as unsupported
+links. `shuttletv.su` is in `manifestProbeHosts` but its episode pattern needs
+`?e=`, which the sample URL lacks. `anikototv.to` now reaches its extractor and
+fails on the site's current markup — plugin-versus-site drift, not a StreamDock
+defect.
+
+**What could not be tested, and is exactly what those hosts need:** the hidden
+`BrowserWindow` manifest extractor requires a real Electron session. Moving on
+host coverage needs Isaac to run the app against one of these URLs and share
+`streamdock.log`.
+
+**Guards added, each validated by reintroducing the bug:**
+`verifySubtitleOwnership` (the engine emits no subtitle flags, and no `-vf`
+anywhere, so burned-in subtitles cannot appear as a side effect),
+`verifySubtitleModesOffered`, `verifyNoFabricatedQualities`, plus two
+`resolvePluginDirs` tests that assert the returned paths are *roots containing
+no package name* — a test that merely counted directories would have passed
+against the defect.
+
+**Also**: removed a Playwright test that was permanently skipping. The subtitle
+picker sits behind a probe and is unreachable in a network-free run, and a
+skipped test reads as coverage it does not provide; its assertion moved to
+verify-engine where it actually runs.
+
+**`HANDOVER.md` was added** at Isaac's request for the next clean session,
+including a task to evaluate `sdaqo/anipy-cli` and `pystardust/ani-cli` for
+provider coverage. Both are **GPL-3.0 and StreamDock is MIT**, so that file
+states plainly: study them for facts (which hosts exist, how a provider
+behaves), never copy or closely adapt their code. Noted there too: the repo has
+**no `LICENSE` file at all**, despite `package.json` and the site footer both
+claiming MIT.
+
+**Verification**: typecheck, ESLint 0/0, 172 Vitest tests (30 new),
+verify:engine 96 checks, Playwright 10/10 with no skips, production build, and
+v1.6.1 published with Windows and Linux assets, both update manifests, and the
+site reading 1.6.1.
+
 ## Working agreements for future sessions on this repo
 
+- **Wiring that exists is not a feature that works.** The plugin system had
+  every piece in place — packages present, args passed, files packaged — and had
+  never once loaded in any shipped build. Session 13's audit marked it working
+  from the code alone; one `-v` run against the real binary disproved it in
+  seconds. Run the thing.
+- **Check the licence before reading another project for answers.** The two
+  anime CLIs worth learning from are GPL-3.0 and StreamDock is MIT. Facts about
+  providers are free to use; their code is not.
 - **Test the artifact CI produced, not one you built.** `gh run download` gives
   the exact bytes a user gets. Session 12 verified Linux this way; a local build
   would not have proved the CI job packages real engines.
