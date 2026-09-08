@@ -21,34 +21,59 @@ export function resolvePluginDirs(userDirs: string[] = []): string[] {
   const dataPlugins = join(app.getPath('userData'), 'plugins');
   if (existsSync(dataPlugins)) roots.push(dataPlugins);
 
-  const appPlugins = process.env.NODE_ENV === 'development' || !app.isPackaged
-    ? join(app.getAppPath(), 'plugins')
-    : join(process.resourcesPath, 'plugins');
+  const pluginRoot = (name: string) =>
+    process.env.NODE_ENV === 'development' || !app.isPackaged
+      ? join(app.getAppPath(), name)
+      : join(process.resourcesPath, name);
+
+  const appPlugins = pluginRoot('plugins');
   if (existsSync(appPlugins)) roots.push(appPlugins);
 
-  // yt-dlp's --plugin-dirs expects each entry to directly CONTAIN a
-  // yt_dlp_plugins/ subfolder. Our layout is:
-  //   plugins/<name>/yt_dlp_plugins/...
-  // So we expand each root into its immediate subdirectories.
-  const dirs: string[] = [];
-  for (const root of roots) {
-    try {
-      // Check if the root itself is a flat plugin dir (legacy layout)
-      if (existsSync(join(root, 'yt_dlp_plugins'))) {
-        dirs.push(root);
-        continue;
-      }
-      // Otherwise enumerate subdirs — each one that has yt_dlp_plugins/ is a plugin
-      for (const entry of readdirSync(root)) {
-        const sub = join(root, entry);
-        try {
-          if (statSync(sub).isDirectory() && existsSync(join(sub, 'yt_dlp_plugins'))) {
-            dirs.push(sub);
-          }
-        } catch { /* skip unreadable entries */ }
-      }
-    } catch { /* skip unreadable roots */ }
+  // Platform-scoped root. ChromeCookieUnlock unlocks Chrome's cookie database
+  // through the Windows Restart Manager and imports `windll` from ctypes at
+  // module level, so on Linux and macOS it cannot even be imported:
+  //   ImportError: cannot import name 'windll' from 'ctypes'
+  // yt-dlp loads every package under a root it is given, so keeping it in the
+  // shared root printed that traceback on every single invocation off Windows —
+  // straight into the stderr the failure-details panel shows the user. It lives
+  // in its own root instead, offered only where it can actually run.
+  if (process.platform === 'win32') {
+    const winPlugins = pluginRoot('plugins-win');
+    if (existsSync(winPlugins)) roots.push(winPlugins);
   }
+
+  // Pass the ROOT that holds the plugin packages, not the packages themselves.
+  //
+  // This used to expand each root into its immediate subdirectories, on the
+  // stated assumption that "--plugin-dirs expects each entry to directly
+  // CONTAIN a yt_dlp_plugins/ subfolder". That assumption was never tested
+  // against the binary, and it is backwards: yt-dlp globs <dir>/*/yt_dlp_plugins
+  // itself. Handing it the package directory makes it find nothing, silently.
+  //
+  // Measured on yt-dlp 2026.08.19 with anikototv.to, which the bundled Anikoto
+  // extractor claims:
+  //   --plugin-dirs plugins/anikoto  -> "Plugin directories: none", 1744
+  //                                     extractors, "ERROR: Unsupported URL"
+  //   --plugin-dirs plugins          -> all five packages resolved, 1750
+  //                                     extractors, the Anikoto extractor runs
+  //
+  // So every bundled plugin has been inert in every build shipped so far. A
+  // root is only offered if it actually holds a plugin package, so yt-dlp is
+  // never handed a directory with nothing in it.
+  const dirs = roots.filter((root) => {
+    try {
+      return readdirSync(root).some((entry) => {
+        try {
+          const sub = join(root, entry);
+          return statSync(sub).isDirectory() && existsSync(join(sub, 'yt_dlp_plugins'));
+        } catch {
+          return false;
+        }
+      });
+    } catch {
+      return false;
+    }
+  });
 
   return dirs.filter((dir, index, list) => list.indexOf(dir) === index);
 }
