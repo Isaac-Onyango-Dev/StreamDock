@@ -1,17 +1,52 @@
 # Handover — next session
 
-Written at the end of session 15 (2026-09-08). Version **1.7.0**, released.
+Written at the end of session 18 (2026-09-09). Version **1.7.0**, released.
 
 `CLAUDE.md` is the long history and the working agreements — read it first.
 This file is only what the *next* session should pick up, and why.
 
 ---
 
+## 0a. FIRST, IF YOU JUST BOOTED INTO WINDOWS
+
+The repo is on a drive both operating systems write to. Two things follow, and
+the first one will stop you dead:
+
+```
+npm ci
+```
+
+**`node_modules` is currently a Linux install.** It holds
+`@esbuild/linux-x64`; Windows needs `@esbuild/win32-x64`. Without this, `tsx`,
+`vite`, every build script and `verify:engine` fail — while `npm run typecheck`
+keeps passing, because `tsc` is pure JS. A green typecheck is not evidence the
+toolchain works. One `npm ci` per OS switch, every time. There is no arrangement
+that serves both.
+
+**Node must be 20.19.0 or newer.** `npm run build` (electron-builder 26.15.3)
+needs `require(esm)`, which landed in Node 20.19. CI uses v20.20.2. The Linux
+side is on 20.18.1 and therefore *cannot* package locally; check what Windows
+has before assuming. Anything on the 20 line at 20.19+ is fine — this is not a
+Node 22 requirement.
+
+**Line endings are handled now** (`.gitattributes`, `* text=auto eol=lf`, added
+session 18). Git on Windows will no longer rewrite the tree to CRLF, so
+`git pull` will not be blocked by 30 phantom "modified" files the way it was.
+Nothing to do; just don't remove that file.
+
+Everything is pushed. `main` is the only branch, local and remote, and the
+working tree was clean at the end of session 18.
+
+---
+
 ## 0. Where things stand
 
-v1.7.0 is published. Dubbed downloads work, including across an episode range,
-and every content choice has a single home in the UI. Isaac confirmed dub on
-episodes 1 and 2 of Bleach through the real app.
+v1.7.0 is published, and the site now carries a screenshots carousel (sessions
+17-18) sized so the whole section fits a laptop viewport. Dubbed downloads work,
+including across an episode range, and every content choice has a single home in
+the UI. Isaac confirmed dub on episodes 1 and 2 of Bleach through the real app.
+
+Sessions 17-18 were site and infrastructure only — **no app code changed**.
 
 Baseline: **207 tests, 264 engine checks, Playwright 12/12, ESLint 0/0.**
 
@@ -142,6 +177,21 @@ above.
 
 ## 5. Still open, in rough value order
 
+0. **Decide on Electron 41.7.1 -> 41.10.7, which means deciding on Node 22.**
+   The only outstanding advisory that reaches users. Two of them, one high
+   (GHSA-9f4c-93c8-jc8g, CVSS 7.2 — a sandboxed iframe bypasses the
+   `allow-popups` restriction), and it is realistically reachable *here*
+   specifically because the app navigates hidden `BrowserWindow`s to arbitrary
+   streaming sites for manifest extraction. npm calls the fix semver-compatible
+   and by version it is, but **every patched 41.x declares
+   `engines.node >=22.12.0`**, so taking it means moving local Node plus five
+   `node-version: '20'` entries across ci.yml and release.yml. The risk is not
+   Electron: it is that Node 22 also runs esbuild, vite, vitest and
+   electron-builder in the pipeline that produces the real installers. Do it as
+   its own change, verify by watching the Build jobs, not as a dependency bump.
+   Everything else in the audit is dev-only; see session 18 in CLAUDE.md for why
+   each was declined.
+
 1. **Per-item quality detection for playlists.** `qualityOptions` is only
    populated when the probe resolved a single item, so a playlist reports none.
    Confirmed live: the YouTube playlist fixture returns `qualities: NONE`. Bound
@@ -188,13 +238,15 @@ command lines and verbatim stderr and has settled several bugs in one grep.
 - **No system node/npm on the Ubuntu box.** A user-local Node 20 lives at
   `~/.local/node-v20.18.1-linux-x64` — prepend it to `PATH`. The install
   timeouts `CLAUDE.md` records are a Windows/AV problem, not a project one.
+  **That Node is 20.18.1, below the 20.19 floor `npm run build` now needs**, so
+  packaging cannot be run from it; everything else (typecheck, lint, tests,
+  verify:engine, build:app, e2e) works fine. CI is on v20.20.2.
 - **No engine binaries in a fresh worktree** (`binaries/` is gitignored, and the
   main checkout holds Windows `.exe`s). `npm run download:binaries` fetches the
   Linux set; session 14 grabbed `yt-dlp_linux` alone (40MB) for a quick test.
-- **The screenshot sources live at `Screenshots/` in the main checkout** (capital
-  S), are untracked, and therefore **do not exist inside a worktree**. Point
-  `npm run screenshots:build -- <path>` at them. Only the generated `.webp`
-  files under `docs/assets/screenshots/` are committed.
+- **The screenshot sources are committed** at `Screenshots/` (capital S) as of
+  session 18 — the eight the site uses. `npm run screenshots:build` needs no
+  argument and reproduces `docs/assets/screenshots/` byte for byte.
 - `gh` is installed and authenticated as `Isaac-Onyango-Dev`.
 - Reference clones live in the session scratchpad, outside the repo, on purpose.
 
@@ -211,10 +263,17 @@ npx playwright test && npm run build:app
 
 Baseline: **207 tests, 264 engine checks, Playwright 12/12, ESLint 0/0.**
 
-The site has its own manual step now: `npm run screenshots:build` re-encodes
+The site has its own manual step: `npm run screenshots:build` re-encodes
 `Screenshots/` into `docs/assets/screenshots/`. It is not part of any build and
-CI never runs it — like `icons:build`, it needs a browser and it needs source
-files that are not committed.
+CI never runs it — like `icons:build`, it needs a browser.
+
+**After any dependency change, run the real packaging too**, not just
+`build:app`. Session 18's electron-builder bump passed typecheck, lint, tests
+and e2e while `electron-builder` itself was fatally broken on the local Node:
+
+```
+npm run build:app && npx electron-builder --linux dir --publish never
+```
 
 ---
 

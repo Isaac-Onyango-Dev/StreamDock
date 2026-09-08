@@ -1702,8 +1702,125 @@ viewport-height unit — structural, because whether a section fits a viewport i
 a rendered-layout fact a static script cannot evaluate, and a regression to
 width-only sizing brings the whole bug back.
 
+### Session 18 — the shared drive: line endings, a Windows node_modules, and a dependency audit
+
+No app code changed. Three commits, all infrastructure, driven by a `git pull`
+that failed. The through-line: **this repo lives on one drive that both a
+Windows boot and a Linux boot write to, and almost everything here follows from
+that.**
+
+**The failed pull was not a git problem.** The primary checkout was 34 commits
+behind with 30 modified files, and `pull --ff-only` refused. The diff stat named
+the cause before any file was read: **9097 insertions and 9097 deletions,
+exactly equal** — a line-ending change, not edits. Confirmed by every text file
+carrying 100% CRLF while HEAD carried none, and by `git diff --ignore-cr-at-eol`
+coming back empty apart from three PNGs upstream had already deleted. Nothing to
+preserve; `reset --hard origin/main` was safe, and the state was archived first
+anyway.
+
+`.gitattributes` now pins `* text=auto eol=lf`, with png/ico/webp declared
+binary. **`eol=lf`, not a bare `text=auto`**: the latter normalises what is
+*stored* but still checks out CRLF on Windows, so a shared checkout keeps
+flip-flopping. Renormalisation produced **zero churn** — the tree was already LF
+— so the commit touches no source file.
+
+*Proven, not asserted, and the first attempt at the proof was wrong.* Cloning
+then `git checkout HEAD~1` showed 0 CRLF and looked like a pass; it was
+meaningless, because `checkout` only rewrites files that differ between the two
+commits and everything except `.gitattributes` is identical. Redone with
+`--no-checkout` so the first materialisation happens at the commit under test:
+
+| simulated Windows clone (`core.autocrlf=true`) | text files with CRLF |
+| --- | --- |
+| commit **before** `.gitattributes` | **138 of 142** |
+| commit **with** `.gitattributes` | **0 of 143** |
+
+Both directions hold: a CRLF file staged is stored as LF, and an existing file
+rewritten wholesale to CRLF now produces **no diff at all** — the exact failure
+that blocked the pull.
+
+**`node_modules` was a Windows install**, `@esbuild/win32-x64` where Linux needs
+`@esbuild/linux-x64`, so `tsx`, `vite` and every build script failed. `tsc`
+passed throughout, because it is pure JS — which is exactly why a green
+typecheck hid it. `npm ci` fixed it in 12s. **One checkout across two OSes needs
+one `npm ci` per OS; there is no arrangement that serves both.**
+
+**The dependency audit: 29 advisories, and the dependencies-vs-devDependencies
+split is the wrong lens.** `npm ls --omit=dev` says only `builder-util-runtime`
+is in the production tree. That view is incomplete: `electron` is a
+devDependency whose *runtime ships inside the app*, and `app-builder-lib` is a
+devDependency that *builds the AppImage users install*. 26 of 29 reach nobody.
+
+- **Actioned:** GHSA-7g7r-gx96-252g, CWE-427 uncontrolled search path in the
+  AppImage produced by `app-builder-lib <26.15.0` (CVSS 7.8). Fixed by moving
+  `electron-builder` 26.8.1 -> 26.15.3 *within* the existing `^26.8.1` range, so
+  package.json is untouched and only the lockfile moves. Took 10 of the 29 with
+  it; 29 -> 19.
+- **False alarm:** `builder-util-runtime` is flagged because a vulnerable 9.5.1
+  was hoisted for electron-builder. The copy nested under `electron-updater` —
+  the one that ships — was already 9.7.0, above the advisory range. Confirmed by
+  extracting the packaged `app.asar`, which also proved production
+  `node_modules` really are packaged.
+- **Deferred:** `electron` 41.7.1 -> 41.10.7. Two advisories, one high (CVSS
+  7.2, sandboxed iframe bypasses `allow-popups`) that is realistically reachable
+  because this app navigates hidden `BrowserWindow`s to arbitrary streaming
+  sites. npm calls the fix semver-compatible and it is *by version*, but every
+  patched 41.x declares `engines.node >=22.12.0`. Taking it means moving the
+  whole toolchain — local plus five `node-version` entries across two workflows
+  — off Node 20. A separate, deliberate decision.
+- **Declined:** the vitest/vite/esbuild/happy-dom family (8 advisories, all
+  major-version fixes, all test-runner-only, none processing untrusted input),
+  and `npm audit fix` even without `--force` — measured at **+122 packages, -7**
+  for dev-only issues, which is tree restructuring, not a minimal fix.
+
+**The electron-builder bump nearly shipped a broken release, and only running
+the real packaging caught it.** `app-builder-lib >=26.14.0` depends on
+`@noble/hashes ^2`, which is **ESM-only**, and its own CommonJS `blockmap.js`
+`require()`s it. On Node 20.18.1 that throws `ERR_REQUIRE_ESM` and
+electron-builder dies before packaging anything. No electron-builder version
+carries the AppImage fix and avoids it. It works from **Node 20.19.0**, where
+`require(esm)` was backported — which is why `@noble/hashes` declares
+`>=20.19.0`. CI resolves `node-version: '20'` to **v20.20.2**, so the release
+pipeline was never at risk; verified by packaging end to end on 20.20.2 (exit 0,
+624 MB `linux-unpacked`). **typecheck, lint, tests and e2e were all green while
+the packaging step was fatally broken.**
+
+**`Screenshots/` is committed now** — the eight the site uses. It was untracked
+on the reasoning that 11 MB of binaries to regenerate 0.8 MB of assets is a bad
+trade, and that held right up until it made `optimize-screenshots.ts` runnable
+on exactly one machine. `live capture.png` (a 551x148 toast crop, 3:2 frame
+would upscale it ~3x) and `unsupported links.png` (an engine error; a red ERROR
+block should not lead a landing page) were deleted rather than left unused.
+Regenerating from the eight reproduces `docs/assets/screenshots/` byte for byte
+and leaves `docs/index.html` unchanged.
+
+**Two mistakes worth recording, both caught by checking rather than by luck.**
+`npx asar extract-file` writes to the *current directory* by basename, so it
+overwrote the project's `package.json` with `builder-util-runtime`'s; `git
+status` caught it and HEAD restored it exactly. And the first `.gitattributes`
+proof was invalid, as above.
+
 ## Working agreements for future sessions on this repo
 
+- **One checkout, two operating systems, two `node_modules`.** A Windows
+  install leaves `@esbuild/win32-x64` where Linux needs `@esbuild/linux-x64`;
+  every build script dies and `tsc` still passes, because it is pure JS. Run
+  `npm ci` after switching OS, and never try to make one tree serve both.
+- **An exactly-equal insertion and deletion count is a line-ending change.**
+  9097/9097 across 30 files named the cause before a single file was opened.
+  Confirm with `git diff --ignore-cr-at-eol`, then reset without fear.
+- **Prove a checkout-behaviour fix with `--no-checkout`.** Cloning and then
+  `git checkout HEAD~1` only rewrites files that *differ* between the commits,
+  so the control shows a pass and proves nothing. The first materialisation has
+  to happen at the commit under test.
+- **"Dev dependency" is not "cannot reach a user".** `electron`'s runtime ships
+  inside the app and `app-builder-lib` builds the installer users run — both are
+  devDependencies. Ask what lands on a user's disk, not which section of
+  package.json a package sits in.
+- **A semver-compatible fix is not automatically a safe fix.** The in-range
+  electron-builder bump pulled an ESM-only `@noble/hashes` that its own
+  CommonJS code `require()`s, killing packaging on Node 20.18. typecheck, lint,
+  tests and e2e were all green. Run the real build after any dependency change.
 - **"No horizontal overflow" is not "it fits".** The carousel was checked for
   horizontal overflow at three widths and passed every time while being 961px
   tall on a 664px screen. Assert the section's height against the viewport's,
