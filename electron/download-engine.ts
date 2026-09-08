@@ -88,6 +88,17 @@ export interface DownloadRequest {
   manifestUrl?: string;
   /** Referer URL for the selected manifest (for sites that require it) */
   manifestReferer?: string;
+  /**
+   * Language to select on each episode page, for hosts that serve sub and dub
+   * as separate streams.
+   *
+   * A batch cannot reuse one probed manifest — the CDN token expires in about
+   * 90 seconds, long before a queue reaches its later episodes — so each
+   * episode is probed at its own download time and needs to be told which
+   * language to pick. Without this every episode of a "Dub" range came down as
+   * the site default, which is Sub.
+   */
+  translation?: string;
 }
 
 export interface DownloadRecord {
@@ -732,7 +743,9 @@ export class DownloadEngine {
         record.title = 'Live stream capture';
       }
     } else if (matchesProbeHost(host)) {
-      record.title = 'Extracting stream manifest…';
+      record.title = request.translation && request.translation !== 'unknown'
+        ? `Finding ${request.translation} stream…`
+        : 'Extracting stream manifest…';
       this.emitProgress(record);
 
       log.info(`[engine] Attempting manifest extraction BEFORE yt-dlp for ${request.url}`);
@@ -745,7 +758,7 @@ export class DownloadEngine {
         // extractor has its own timeouts; this exists so a third such hang
         // cannot take the queue down with it.
         const result = await Promise.race([
-          extractManifest(request.url),
+          extractManifest(request.url, request.translation),
           new Promise<null>((resolve) => setTimeout(() => {
             log.warn(`[engine] Manifest extraction exceeded ${MANIFEST_EXTRACTION_CEILING_MS}ms for ${request.url}`);
             resolve(null);

@@ -676,6 +676,10 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
           // for its own manifest instead.
           manifestUrl: batchUrls.length > 1 ? undefined : selectedOption?.manifestUrl,
           manifestReferer: batchUrls.length > 1 ? undefined : selectedOption?.referer,
+          // The manifest cannot be reused across a batch, but the *choice* can.
+          // Each episode is probed at its own download time and is told which
+          // language to select, so a "Dub" range stops arriving as Sub.
+          translation: selectedOption?.translation,
         });
       }
       setUrl('');
@@ -934,6 +938,18 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
                     {detectedQualityCount > 0
                       ? `${detectedQualityCount} resolution${detectedQualityCount === 1 ? '' : 's'} detected · a chosen quality is a maximum, so each item downloads at its own best`
                       : 'No resolution list from this source · Best quality takes the highest it offers'}
+                  </p>
+                )}
+                {/* Why a range cannot show one up-front detection pass: the CDN
+                    token in a manifest URL is measured good for about 90
+                    seconds, so links resolved for episode 300 would be dead
+                    long before the queue reached them. Each episode is detected
+                    at its own turn instead, and its row says so while it runs. */}
+                {languageStreams && selectedIndices.size > 1 && (
+                  <p className="truncate text-xs text-text-disabled">
+                    {selectedIndices.size} episodes in{' '}
+                    {languageStreams.find((o) => o.manifestUrl === selectedStreamOption)?.language ?? 'the selected language'}
+                    {' '}· each is detected as its download starts, since stream links expire after about 90 seconds
                   </p>
                 )}
               </div>

@@ -758,6 +758,58 @@ function verifyExtractionCannotHang(): void {
   );
 }
 
+
+/**
+ * A language choice must reach every episode of a range.
+ *
+ * anikoto serves sub and dub as separate streams and opens on SUB, so a "Dub"
+ * range silently arrived entirely as Sub: `extractManifest` took no language
+ * argument at all, and the batch fix had (correctly) stopped reusing the one
+ * probed manifest.
+ *
+ * The manifest itself cannot be reused — the CDN token in it was measured good
+ * for about 90 seconds (200 at t+0 and t+60, 403 at t+120 and t+180), so links
+ * resolved up front for a long range would be dead before the queue reached
+ * them. The *choice* is what carries; each episode is resolved at its own turn.
+ */
+function verifyLanguageCarriesAcrossBatch(): void {
+  const capture = stripComments(readProjectFile('client/src/views/CaptureView/index.tsx'));
+  assert(
+    /translation: selectedOption\?\.translation/.test(capture),
+    'the chosen language is sent with every item in a batch',
+  );
+
+  const engine = stripComments(readProjectFile('electron/download-engine.ts'));
+  assert(
+    /extractManifest\(request\.url, request\.translation\)/.test(engine),
+    'the engine asks the extractor for the chosen language',
+  );
+  assert(
+    /Finding \$\{request\.translation\}/.test(engine),
+    'the row says which language it is resolving while it runs',
+  );
+
+  const extractor = stripComments(readProjectFile('electron/manifest-extractor.ts'));
+  assert(
+    extractor.includes('languageClickScript'),
+    'the extractor can select a language on the page',
+  );
+  assert(
+    /let languageReady = !wantsLanguage/.test(extractor),
+    'manifests are ignored until the requested language is selected',
+  );
+  // Without the gate the page's own SUB stream is captured before the click,
+  // which is exactly the bug: a dub download that quietly returns sub.
+  assert(
+    /if \(match && !languageReady\)/.test(extractor),
+    'the default-language manifest is not captured when another was asked for',
+  );
+  assert(
+    extractor.includes('LANGUAGE_WAIT_MS'),
+    'language selection is bounded and falls back rather than hanging',
+  );
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
@@ -774,5 +826,6 @@ verifyManifestReferer();
 verifyBatchManifestIsolation();
 verifySkippedDownloadsAreLabelled();
 verifyExtractionCannotHang();
+verifyLanguageCarriesAcrossBatch();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);
