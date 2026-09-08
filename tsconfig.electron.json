@@ -6,5 +6,5 @@
     "moduleResolution": "Bundler",
     "types": ["node"]
   },
-  "include": ["electron", "scripts", "tailwind.config.ts"]
+  "include": ["shared", "electron", "scripts", "tailwind.config.ts"]
 }

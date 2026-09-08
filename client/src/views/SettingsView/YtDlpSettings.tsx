@@ -40,7 +40,7 @@ export function YtDlpSettings({ settings, onSettingsChange }: YtDlpSettingsProps
   };
 
   const opts = settings.ytdlpOptions || {
-    embedSubs: true,
+    subtitleMode: 'embed' as const,
     embedMetadata: true,
     sponsorBlock: false,
     customArgs: '',
@@ -52,12 +52,26 @@ export function YtDlpSettings({ settings, onSettingsChange }: YtDlpSettingsProps
       <p className="mt-0.5 mb-4 text-xs text-text-secondary">Configure low-level download engine behavior.</p>
 
       <div className="space-y-4 border-t border-border-subtle pt-3">
-        <Toggle
-          label="Embed Subtitles"
-          ariaLabel="Embed subtitles in the output file if available"
-          enabled={opts.embedSubs ?? true}
-          onChange={(val) => updateYtdlpOption('embedSubs', val)}
-        />
+        <div>
+          <label htmlFor="default-subtitle-mode" className="mb-1.5 block text-sm font-medium text-text-primary">
+            Default subtitles
+          </label>
+          <select
+            id="default-subtitle-mode"
+            className="select-field w-full"
+            value={opts.subtitleMode ?? 'embed'}
+            onChange={(e) => updateYtdlpOption('subtitleMode', e.target.value)}
+          >
+            <option value="none">None</option>
+            <option value="sidecar">Separate file</option>
+            <option value="embed">Embed in video</option>
+            <option value="both">Both</option>
+          </select>
+          <p className="mt-1.5 text-xs text-text-secondary">
+            Starting point for new downloads. Each download can still choose its own —
+            this no longer overrides that choice.
+          </p>
+        </div>
         <Toggle
           label="Embed Metadata"
           ariaLabel="Embed video metadata (title, artist, etc) in output file"

@@ -338,11 +338,102 @@ function verifyLinuxIcons(): void {
   );
 }
 
+/**
+ * Exactly one module may decide what happens to subtitles.
+ *
+ * The shipped bug was not a wrong value, it was a second decider:
+ * `applyLanguageAndSubtitleArgs` honoured the per-download picker and
+ * `applyYtDlpOptions` then appended `--embed-subs` from a global setting whose
+ * default was true — so "None" still embedded and "Sidecar" embedded as well.
+ * The settings pass ran last, so it always won.
+ *
+ * A unit test on the pure builder cannot catch that, because the override lives
+ * outside it. This asserts the structural property instead: the engine emits no
+ * subtitle flags of its own, so nothing is in a position to contradict
+ * shared/subtitle-args.ts.
+ */
+function verifySubtitleOwnership(): void {
+  const engine = readProjectFile('electron/download-engine.ts');
+
+  for (const flag of ['--embed-subs', '--write-subs', '--write-auto-subs', '--convert-subs', '--sub-langs']) {
+    assert(
+      !engine.includes(`'${flag}'`),
+      `download-engine.ts emits no ${flag} of its own (subtitle flags belong to shared/subtitle-args.ts)`,
+    );
+  }
+
+  const shared = readProjectFile('shared/subtitle-args.ts');
+  assert(
+    shared.includes("'--embed-subs'") && shared.includes("'--write-subs'"),
+    'shared/subtitle-args.ts is the module that does emit them',
+  );
+
+  // Burned-in subtitles are destructive and deliberately unimplemented; they
+  // must never appear as a side effect of an embed path.
+  for (const source of [engine, shared]) {
+    assert(!source.includes('-vf'), 'no filter-graph flag: subtitles are never burned into the picture');
+  }
+}
+
+/**
+ * The quality picker offers only resolutions a source actually reported.
+ *
+ * It used to fall back to a hardcoded 1080/720/480/360 ladder whenever nothing
+ * had been detected — which is before Analyze runs, for every playlist, and for
+ * every episode-range probe. The list a user saw was therefore usually not the
+ * source's.
+ */
+/**
+ * All four subtitle behaviours stay reachable from the picker.
+ *
+ * "None" in particular: the shipped bug embedded subtitles anyway, so the
+ * option existing is the visible half of that fix. Asserted here rather than in
+ * e2e because the picker sits behind a probe and a network-free run cannot
+ * reach it — and a permanently-skipped test reads as coverage it is not.
+ */
+function verifySubtitleModesOffered(): void {
+  const capture = readProjectFile('client/src/views/CaptureView/index.tsx');
+  for (const mode of ['none', 'sidecar', 'embed', 'both']) {
+    assert(
+      capture.includes(`<option value="${mode}">`),
+      `the Subtitles picker offers "${mode}"`,
+    );
+  }
+
+  const settings = readProjectFile('client/src/views/SettingsView/YtDlpSettings.tsx');
+  assert(
+    !settings.includes("'embedSubs'"),
+    'the settings panel sets a default subtitle mode, not the old global embedSubs override',
+  );
+}
+
+function verifyNoFabricatedQualities(): void {
+  const capture = readProjectFile('client/src/views/CaptureView/index.tsx');
+  const quality = readProjectFile('client/src/lib/quality.ts');
+
+  for (const [name, source] of [['CaptureView', capture], ['lib/quality', quality]] as const) {
+    assert(
+      !/\[\s*1080\s*,\s*720\s*,\s*480/.test(source),
+      `${name} contains no hardcoded quality ladder`,
+    );
+  }
+
+  // An explicit pick is a ceiling, not a requirement — an item lacking the
+  // exact height is downgraded rather than skipped.
+  assert(
+    quality.includes('height<=') && !quality.includes('height='.replace('<', '')  + '$'),
+    'quality selectors are built as height<= ceilings',
+  );
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
 verifyChangelogRendering();
 verifySiteRendering();
 verifyLinuxIcons();
+verifySubtitleOwnership();
+verifySubtitleModesOffered();
+verifyNoFabricatedQualities();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);

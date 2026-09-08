@@ -29,6 +29,7 @@ import { detectFormat, buildFormatArgs } from './format-detector';
 import { NetworkMonitor, classifyNetworkLoss, type StallState } from './network-monitor';
 import { StateStore } from './state-store';
 import { buildOutputTemplate } from './smart-naming';
+import { buildSubtitleArgs, type SubtitleMode } from '../shared/subtitle-args';
 import { persistence } from './persistence';
 
 export interface DownloadRequest {
@@ -38,7 +39,7 @@ export interface DownloadRequest {
   quality?: string;
   playlistItems?: string;
   audioPreference?: 'auto' | 'dub' | 'sub';
-  subtitleMode?: 'none' | 'embed' | 'sidecar';
+  subtitleMode?: SubtitleMode;
   isPlaylist?: boolean;
   /** A suggested folder name from the UI (e.g. series or playlist title) */
   folderHint?: string;
@@ -1316,9 +1317,11 @@ export class DownloadEngine {
     const opts = settings.ytdlpOptions;
     if (!opts) return;
 
-    if (opts.embedSubs && !args.includes('--embed-subs')) {
-      args.push('--embed-subs');
-    }
+    // embedSubs deliberately does NOT appear here. It used to append
+    // --embed-subs after the per-download subtitle decision had already been
+    // made, which meant "None" still embedded and "Sidecar" embedded as well as
+    // writing the file. It is now the *default value* of the per-download
+    // picker (see subtitle-args.ts), resolved before any argument is built.
     if (opts.embedMetadata && !args.includes('--embed-metadata')) {
       args.push('--embed-metadata');
     }
@@ -1338,16 +1341,11 @@ export class DownloadEngine {
 
   private applyLanguageAndSubtitleArgs(args: string[], request: DownloadRequest): void {
     const packaging = request.downloadPackaging;
-    const wantsSubs =
-      packaging === 'video-subs' ||
-      packaging === 'video-audio-subs' ||
-      packaging === 'video-multi-subs' ||
-      packaging === 'subs-only' ||
-      (request.selectedSubtitleLanguages && request.selectedSubtitleLanguages.length > 0) ||
-      (request.subtitleMode && request.subtitleMode !== 'none');
 
+    // "Subtitles only" still needs --skip-download; the write flags themselves
+    // come from buildSubtitleArgs below, so they are not duplicated here.
     if (request.subsOnly || packaging === 'subs-only') {
-      args.push('--skip-download', '--write-subs', '--write-auto-subs');
+      args.push('--skip-download');
     }
 
     if (request.selectedAudioLanguage) {
@@ -1369,35 +1367,10 @@ export class DownloadEngine {
       args.push('--audio-multistreams');
     }
 
-    if (wantsSubs) {
-      // Default is plain 'en', not 'en.*'. The wildcard also matches YouTube's
-      // machine-translated tracks (en-en, en-de, …), turning one subtitle fetch
-      // into a burst of them — enough to earn a 429 that aborts the entire
-      // video download, reported to the user as a rate limit on the video.
-      const langs = request.selectedSubtitleLanguages?.length
-        ? request.selectedSubtitleLanguages.join(',')
-        : 'en';
-      args.push('--sub-langs', langs);
-
-      // Embedding and writing sidecars are separate requests, and asking for
-      // both is what left `.vtt` / `.en-orig.vtt` files sitting beside the
-      // finished .mp4: `--write-subs` means "keep the file", so yt-dlp embedded
-      // the track *and* kept it. On its own, `--embed-subs` fetches the
-      // subtitles it needs and deletes them again after muxing.
-      const wantsSidecar = request.subtitleMode === 'sidecar'
-        || request.subsOnly
-        || request.downloadPackaging === 'subs-only';
-
-      if (wantsSidecar) {
-        if (!args.includes('--write-subs')) args.push('--write-subs');
-        if (!args.includes('--write-auto-subs')) args.push('--write-auto-subs');
-      } else if (!args.includes('--embed-subs')) {
-        args.push('--embed-subs');
-      }
-
-      if (request.subtitleConvertFormat === 'srt') args.push('--convert-subs', 'srt');
-      if (request.subtitleConvertFormat === 'vtt') args.push('--convert-subs', 'vtt');
-    }
+    // One function owns the entire subtitle decision and returns the complete
+    // flag set. Nothing below may add subtitle arguments — that is exactly the
+    // shape of bug this replaced.
+    args.push(...buildSubtitleArgs(request));
   }
 
   /**

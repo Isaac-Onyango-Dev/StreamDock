@@ -27,7 +27,7 @@ type StartRequest = {
   quality?: string;
   playlistItems?: string;
   audioPreference?: 'auto' | 'dub' | 'sub';
-  subtitleMode?: 'none' | 'embed' | 'sidecar';
+  subtitleMode?: 'none' | 'sidecar' | 'embed' | 'both';
   isPlaylist?: boolean;
   folderHint?: string;
   /** Per-item title for episode/series downloads (e.g. "One Piece - Episode 1 - Romance Dawn"). */

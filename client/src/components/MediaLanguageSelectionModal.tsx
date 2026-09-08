@@ -7,7 +7,7 @@ interface MediaLanguageSelectionModalProps {
     streamOptions?: StreamOptionsProbeResult;
     selectedAudioId: string | null;
     selectedSubtitleIds: Set<string>;
-    subtitleMode: 'none' | 'embed' | 'sidecar';
+    subtitleMode: 'none' | 'sidecar' | 'embed' | 'both';
     subtitleConvert: 'original' | 'srt' | 'vtt';
     subsOnly: boolean;
     packagingMode: DownloadPackagingMode;
@@ -15,7 +15,7 @@ interface MediaLanguageSelectionModalProps {
     onAudioSelect: (id: string | null) => void;
     onSubtitleToggle: (id: string) => void;
     onSubtitleClear: () => void;
-    onSubtitleModeChange: (mode: 'none' | 'embed' | 'sidecar') => void;
+    onSubtitleModeChange: (mode: 'none' | 'sidecar' | 'embed' | 'both') => void;
     onSubtitleConvertChange: (format: 'original' | 'srt' | 'vtt') => void;
     onSubsOnlyChange: (value: boolean) => void;
     onStreamOptionSelect?: (manifestUrl: string) => void;

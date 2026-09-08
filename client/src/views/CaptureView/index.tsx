@@ -14,6 +14,8 @@ import { FlowToggle } from '../../components/FlowToggle';
 import { MediaLanguageSelectionModal } from '../../components/MediaLanguageSelectionModal';
 import type { CaptureMode, DownloadPackagingMode, MediaTrackProbe, PlaylistProbe, StreamOptionsProbeResult, UrlAnalysis } from '../../lib/types';
 import { computePackagingMode } from '../../lib/languages';
+import { buildQualityChoices } from '../../lib/quality';
+import { buildSubtitleArgs } from '../../../../shared/subtitle-args';
 import { inferModeFromText } from '../../lib/url-routing';
 import { playDiscovery, playPop } from '../../lib/audio';
 
@@ -33,6 +35,14 @@ interface CaptureViewProps {
    * be re-pasted by hand.
    */
   incomingUrl?: { url: string; seq: number } | null;
+  /**
+   * Starting value for the Subtitles picker, from settings.
+   *
+   * The old global `embedSubs` setting was applied *after* this picker had
+   * decided, so "None" still embedded. It seeds the control now instead of
+   * overriding it.
+   */
+  defaultSubtitleMode?: SubtitleMode;
   onError: (message: string) => void;
   onStarted: (info: { title: string; itemCount?: number }) => void;
 }
@@ -42,8 +52,7 @@ const PREVIEW_BATCH_SIZE = 50;
 
 type SelectionMode = 'all' | 'first' | 'range' | 'schedule';
 type AudioPreference = 'auto' | 'dub' | 'sub';
-type SubtitleMode = 'none' | 'embed' | 'sidecar';
-type QualityChoice = { label: string; value: string };
+type SubtitleMode = 'none' | 'sidecar' | 'embed' | 'both';
 
 function buildPlaylistItems(selection: SelectionMode, firstCount: number, rangeStart: number, rangeEnd: number) {
   if (selection === 'first') return `1-${Math.max(1, firstCount)}`;
@@ -65,23 +74,6 @@ function selectionLabel(value: SelectionMode, probe: PlaylistProbe | null) {
   if (value === 'first') return 'First N';
   if (value === 'range') return 'Range';
   return 'All';
-}
-
-function buildQualityValue(mode: CaptureMode, height: number) {
-  if (mode === 'video') {
-    return `bestvideo[height<=${height}]+bestaudio/best[height<=${height}]`;
-  }
-  return `best[height<=${height}]/best`;
-}
-
-function fallbackQualityChoices(mode: CaptureMode): QualityChoice[] {
-  const heights = [1080, 720, 480, 360];
-  const choices = heights.map((height) => ({
-    label: `${height}p`,
-    value: buildQualityValue(mode, height),
-  }));
-  choices.push({ label: 'Audio only', value: 'bestaudio/best' });
-  return choices;
 }
 
 function defaultAudioTrackId(probe: MediaTrackProbe): string | null {
@@ -127,7 +119,7 @@ function selectedEpisodeUrls(
   return urls;
 }
 
-export function CaptureView({ mode, setMode, outputDir, incomingUrl, onError, onStarted }: CaptureViewProps) {
+export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubtitleMode = 'embed', onError, onStarted }: CaptureViewProps) {
   const [url, setUrl] = useState('');
   const [analysis, setAnalysis] = useState<UrlAnalysis | null>(null);
   const [probe, setProbe] = useState<PlaylistProbe | null>(null);
@@ -140,7 +132,7 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, onError, on
   const [rangeEnd, setRangeEnd] = useState(24);
   const [scheduledAt, setScheduledAt] = useState('');
   const [audioPreference, setAudioPreference] = useState<AudioPreference>('auto');
-  const [subtitleMode, setSubtitleMode] = useState<SubtitleMode>('embed');
+  const [subtitleMode, setSubtitleMode] = useState<SubtitleMode>(defaultSubtitleMode);
   const [impersonate, setImpersonate] = useState('');
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
   const [dragOverWindow, setDragOverWindow] = useState(false);
@@ -384,33 +376,37 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, onError, on
     const format = selectedAudioTrack?.formatId
       ? `${quality || 'bestvideo'}+${selectedAudioTrack.formatId}`
       : quality || 'bestvideo+bestaudio/best';
-    const subLangs = selectedSubtitleLanguages.length ? selectedSubtitleLanguages.join(',') : undefined;
-    const subtitleArgs = subLangs && subtitleMode !== 'none'
-      ? `--write-subs --sub-langs ${subLangs}${subtitleMode === 'embed' ? ' --embed-subs' : ''}`
-      : 'no subtitles';
+    // Built from the same rules the engine uses, so the preview cannot drift
+    // from reality. It used to print `--write-subs … --embed-subs` for embed
+    // mode — describing the very bug that left stray .vtt files behind.
+    const subLangs = selectedSubtitleLanguages.length ? selectedSubtitleLanguages.join(',') : 'en';
+    const subtitleFlags = buildSubtitleArgs({
+      subtitleMode,
+      subsOnly,
+      subtitleConvertFormat: subtitleConvert,
+      selectedSubtitleLanguages: subLangs.split(','),
+    });
+    const subtitleArgs = subtitleFlags.length ? subtitleFlags.join(' ') : 'no subtitles';
     return {
       format,
       subtitleArgs,
     };
-  }, [quality, selectedAudioTrack?.formatId, selectedSubtitleLanguages, subtitleMode]);
+  }, [quality, selectedAudioTrack?.formatId, selectedSubtitleLanguages, subtitleMode, subsOnly, subtitleConvert]);
 
+  // Resolutions the source actually reported — never an invented ladder. With
+  // nothing detected the picker offers "Best quality" alone, so a user cannot
+  // choose 1080p for a source that tops out at 480p. "Audio only" is not a
+  // detected height, so it is appended here rather than in the pure builder.
   const qualityChoices = useMemo(() => {
-    const detectedHeights = Array.from(
-      new Set([
-        ...(probe?.qualityOptions || []).map((option) => option.height),
-        ...(trackProbe?.qualityOptions || []).map((option) => option.height),
-      ].filter((height) => height > 0)),
-    ).sort((a, b) => b - a);
-
-    if (detectedHeights.length === 0) return fallbackQualityChoices(mode);
-
-    const detectedChoices = detectedHeights.map((height) => ({
-      label: `${height}p`,
-      value: buildQualityValue(mode, height),
-    }));
-    detectedChoices.push({ label: 'Audio only', value: 'bestaudio/best' });
-    return detectedChoices;
+    const detected = buildQualityChoices(mode, [
+      ...(probe?.qualityOptions || []).map((option) => option.height),
+      ...(trackProbe?.qualityOptions || []).map((option) => option.height),
+    ]);
+    return [...detected, { label: 'Audio only', value: 'bestaudio/best' }];
   }, [mode, probe?.qualityOptions, trackProbe?.qualityOptions]);
+
+  /** Real resolutions on offer, excluding "Best quality" and "Audio only". */
+  const detectedQualityCount = qualityChoices.length - 2;
 
   useEffect(() => {
     if (!quality) return;
@@ -871,6 +867,19 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, onError, on
                 <p className="truncate text-xs text-text-secondary">
                   {probe ? `${probe.host} · ${supportLabel(probe)}` : busy ? 'Analyzing…' : 'Run analyze to inspect'}
                 </p>
+                {/*
+                  Says what the quality picker is actually working from. An
+                  explicit pick is a ceiling, so an item without that resolution
+                  is downgraded rather than skipped — stating it here is what
+                  keeps that from looking like a silent failure.
+                */}
+                {probe && (
+                  <p className="truncate text-xs text-text-disabled">
+                    {detectedQualityCount > 0
+                      ? `${detectedQualityCount} resolution${detectedQualityCount === 1 ? '' : 's'} detected · a chosen quality is a maximum, so each item downloads at its own best`
+                      : 'No resolution list from this source · Best quality takes the highest it offers'}
+                  </p>
+                )}
               </div>
               {probe?.thumbnail && (
                 <img src={probe.thumbnail} alt="" className="h-8 w-12 shrink-0 rounded object-cover" />
@@ -1040,9 +1049,10 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, onError, on
                 <div>
                   <label htmlFor="subtitle-mode" className="field-label">Subtitles</label>
                   <select id="subtitle-mode" value={subtitleMode} onChange={(e) => setSubtitleMode(e.target.value as SubtitleMode)} className="select-field">
-                    <option value="embed">Embed</option>
-                    <option value="sidecar">Sidecar .srt</option>
                     <option value="none">None</option>
+                    <option value="sidecar">Separate file</option>
+                    <option value="embed">Embed in video</option>
+                    <option value="both">Both</option>
                   </select>
                 </div>
                 <div className="col-span-2">
