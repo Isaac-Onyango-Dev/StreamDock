@@ -6,9 +6,28 @@ dist/
 dist-electron/
 release/
 
+# TypeScript incremental build state. `composite: true` in tsconfig.base.json
+# makes tsc emit these even under --noEmit, so they are rewritten by every
+# typecheck. They were tracked until now and churned through 17 commits,
+# including release commits — they are build-machine state, not source.
+*.tsbuildinfo
+
 # Binaries (ffmpeg, ffprobe, yt-dlp) — too large for GitHub (>100 MB).
 # Run `npm run download:binaries` to fetch them locally.
 binaries/
+
+# Test output
+coverage/
+playwright-report/
+test-results/
+
+# Generated during a release by scripts/release-notes.ts (see release.yml).
+RELEASE_NOTES.md
+
+# Environment and secrets — never commit these.
+.env
+.env.*
+!.env.example
 
 # Logs and OS
 *.log
@@ -21,14 +40,13 @@ test-download/
 test-*.cjs
 test-*.py
 
-# IDE (optional local overrides)
-.vscode/*.local.*
+# IDE
+.vscode/
 
-# Agent tooling caches (not part of the app)
+# Agent tooling (not part of the app). `.claude/` also holds git worktrees and
+# a launch.json carrying an absolute path to a user-local Node install, so it
+# must never be committed.
+.claude/
 .gemini/
 .opencode/
 .kiro/
-
-# Playwright output
-playwright-report/
-test-results/

@@ -19,6 +19,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.renderer.json && tsc --noEmit -p tsconfig.electron.json",
     "typecheck:renderer": "tsc --noEmit -p tsconfig.renderer.json",
     "typecheck:electron": "tsc --noEmit -p tsconfig.electron.json",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "verify:engine": "tsx scripts/verify-engine.ts",
     "build:site": "tsx scripts/generate-tokens.ts && tsx scripts/build-site.ts",
     "sync:readme": "tsx scripts/sync-readme.ts",
@@ -39,15 +41,11 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
     "electron-log": "^5.4.3",
     "electron-updater": "^6.8.9",
     "lucide-react": "^0.511.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-error-boundary": "^6.1.2",
-    "tailwind-merge": "^3.3.0"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.10.0",
@@ -68,9 +66,7 @@
     "eslint-plugin-react": "^7.37.1",
     "eslint-plugin-react-hooks": "^5.0.0",
     "happy-dom": "^15.7.4",
-    "jsdom": "^25.0.1",
     "postcss": "^8.5.4",
-    "source-map": "^0.7.4",
     "tailwindcss": "3.4.19",
     "tsx": "^4.21.0",
     "typescript": "^5.8.3",
