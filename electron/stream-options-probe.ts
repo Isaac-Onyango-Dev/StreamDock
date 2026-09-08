@@ -9,6 +9,7 @@ import { randomUUID } from 'crypto';
 import { getProbeStrategy } from './url-router';
 import { probeViaYtDlp } from './manifest-extractor';
 import {
+  classifyDeclaredTranslation,
   classifyLanguageHints,
   type LanguageClassification,
   type LanguageConfidence,
@@ -65,7 +66,6 @@ const LANGUAGE_SELECTOR_QUERIES = [
   // Common patterns across anime sites
   '[class*="language"] [class*="item"]',
   '[class*="dub"] button, [class*="sub"] button',
-  '[data-type="dub"], [data-type="sub"]',
   '.server-item, .source-item',
   'select[name*="language"] option',
   '[class*="audio"] [class*="option"]',
@@ -167,12 +167,53 @@ async function waitForPlayer(win: BrowserWindow): Promise<boolean> {
   `);
 }
 
-async function discoverLanguageOptions(win: BrowserWindow): Promise<Array<{ query: string; index: number; text: string; value: string | null; isActive: boolean }>> {
+interface DiscoveredOption {
+  query: string;
+  index: number;
+  text: string;
+  value: string | null;
+  isActive: boolean;
+  /** Translation type the page states outright, e.g. data-type="sub". */
+  declaredLanguage?: string;
+}
+
+async function discoverLanguageOptions(win: BrowserWindow): Promise<DiscoveredOption[]> {
   try {
     const options = await win.webContents.executeJavaScript(`
       (() => {
         const queries = ${JSON.stringify(LANGUAGE_SELECTOR_QUERIES)};
         const found = [];
+
+        // Sites that state the language on a container. anikoto renders
+        //   <div class="type" data-type="sub"><label>SUB</label><ul><li>HD-1</li>…
+        // so the container itself is not clickable — clicking it does nothing
+        // at all, which is why every language switch used to capture no new
+        // manifest. The clickable elements are the server items inside it, and
+        // the container's data-type is a language the site declares rather than
+        // one we infer. One representative server per language is enough: the
+        // user is choosing dub or sub, not which CDN serves it.
+        for (const type of ['sub', 'dub', 'raw']) {
+          const query = '[data-type="' + type + '"] li, [data-type="' + type + '"] button';
+          try {
+            const elements = document.querySelectorAll(query);
+            if (!elements.length) continue;
+            let index = 0;
+            elements.forEach((el, i) => {
+              if (el.classList && el.classList.contains('active')) index = i;
+            });
+            const chosen = elements[index];
+            found.push({
+              query,
+              index,
+              text: chosen.textContent?.trim() || type,
+              value: type,
+              isActive: Boolean(chosen.classList && chosen.classList.contains('active')),
+              declaredLanguage: type,
+            });
+          } catch (e) {
+            // Ignore selector errors
+          }
+        }
 
         for (const query of queries) {
           try {
@@ -353,7 +394,7 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
       log.info(`[stream-options-probe] Initial manifests found: ${initialManifests.length}`);
 
       // Discover language options
-      const languageOptions = await discoverLanguageOptions(win);
+      let languageOptions = await discoverLanguageOptions(win);
       log.info(`[stream-options-probe] Language options found: ${languageOptions.length}`);
       languageOptions.forEach((opt, i) => {
         log.info(`[stream-options-probe]   Option ${i}: text="${opt.text}", query="${opt.query}", index=${opt.index}, isActive=${opt.isActive}, value="${opt.value}"`);
@@ -378,6 +419,17 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
         return;
       }
 
+      // A site that states its languages does not need guessing. Restricting to
+      // the declared set also drops the false positives the broad selectors
+      // produce on anikoto — a "Contribute" button matched by
+      // `[class*="sub"] button`, and a "720p1080p" quality row — each of which
+      // otherwise costs a click and a full manifest wait for nothing.
+      const declaredOptions = languageOptions.filter((option) => option.declaredLanguage);
+      if (declaredOptions.length > 0) {
+        languageOptions = declaredOptions;
+        log.info(`[stream-options-probe] Using ${languageOptions.length} declared language option(s)`);
+      }
+
       // Click through each option and capture new manifests
       const allOptions: StreamOption[] = [];
       const processedLabels = new Set<string>();
@@ -385,8 +437,20 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
       // Add initial default option
       if (initialManifests.length > 0) {
         const first = initialManifests[0];
-        const defaultLabel = languageOptions.find(o => o.isActive)?.text || 'Default';
-        let normalizedLabel = normalizeLanguageLabel(defaultLabel);
+        const active = languageOptions.find(o => o.isActive);
+        // The page loads with one language already selected. Where the site
+        // declares which, that is the label: the *server* name ("Vidstream-2")
+        // is not a language, and using it here collapsed the whole list — both
+        // the sub and dub entries are served by a server of the same name, so
+        // the label-keyed dedupe below discarded both and the probe returned a
+        // single nameless option.
+        const activeClassification = active?.declaredLanguage
+          ? classifyDeclaredTranslation(active.declaredLanguage)
+          : classifyLanguageHints(active?.text, first.url);
+        let normalizedLabel =
+          activeClassification.confidence === 'unknown'
+            ? normalizeLanguageLabel(active?.text || 'Default')
+            : activeClassification.label;
         if (normalizedLabel === 'Unknown' || normalizedLabel === 'Default' || /^stream \d+$/i.test(normalizedLabel)) {
           normalizedLabel = inferLabelFromManifestUrl(first.url, 0);
         }
@@ -396,7 +460,7 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
           manifestType: first.type,
           referer: pageUrl,
           isDefault: true,
-          ...toStreamLanguage(classifyLanguageHints(defaultLabel, first.url)),
+          ...toStreamLanguage(activeClassification),
         });
         processedLabels.add(normalizedLabel);
       }
@@ -404,7 +468,11 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
       for (const option of languageOptions) {
         if (settled) break;
 
-        const label = normalizeLanguageLabel(option.text);
+        // A declared language names itself; only a guessed option falls back to
+        // its button text.
+        const label = option.declaredLanguage
+          ? classifyDeclaredTranslation(option.declaredLanguage).label
+          : normalizeLanguageLabel(option.text);
         if (processedLabels.has(label)) continue; // Skip duplicates
         if (!option.text.trim()) continue; // Skip empty labels
 
@@ -462,7 +530,11 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
               manifestType: newest.type,
               referer: pageUrl,
               isDefault: false,
-              ...toStreamLanguage(classifyLanguageHints(option.text, newest.url)),
+              ...toStreamLanguage(
+                option.declaredLanguage
+                  ? classifyDeclaredTranslation(option.declaredLanguage)
+                  : classifyLanguageHints(option.text, newest.url),
+              ),
             });
             processedLabels.add(finalLabel);
             log.info(`[stream-options-probe] Found stream for "${finalLabel}": ${newest.url}`);

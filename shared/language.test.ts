@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { classifyDeclaredLanguage, classifyLanguageHints, languageName, normalizeLanguageCode } from './language';
+import {
+  classifyDeclaredLanguage,
+  classifyDeclaredTranslation,
+  classifyLanguageHints,
+  languageName,
+  normalizeLanguageCode,
+} from './language';
 
 /**
  * The probe's old classifier tested bare substrings over whole URLs:
@@ -121,5 +127,38 @@ describe('languageName', () => {
   it('names known codes and says Unknown for und', () => {
     expect(languageName('ja')).toBe('Japanese');
     expect(languageName('und')).toBe('Unknown');
+  });
+});
+
+/**
+ * anikoto marks its server lists `data-type="sub"` / `data-type="dub"`, so the
+ * tri-state arrives as provider data. Measured against the live page: the
+ * declared pass yields exactly two options where the previous selectors
+ * produced five, three of which were not languages at all.
+ */
+describe('classifyDeclaredTranslation', () => {
+  it('treats a stated sub/dub/raw as declared, not guessed', () => {
+    for (const [value, translation, label] of [
+      ['sub', 'sub', 'Sub'],
+      ['dub', 'dub', 'Dub'],
+      ['raw', 'raw', 'Raw'],
+    ] as const) {
+      const result = classifyDeclaredTranslation(value);
+      expect(result.translation).toBe(translation);
+      expect(result.label).toBe(label);
+      expect(result.confidence).toBe('declared');
+    }
+  });
+
+  it('leaves the spoken language unknown — "dub" says dubbed, not into what', () => {
+    expect(classifyDeclaredTranslation('dub').languageCode).toBe('und');
+  });
+
+  it('reports unknown for anything it was not given', () => {
+    for (const value of [undefined, null, '', 'Vidstream-2', '720p']) {
+      const result = classifyDeclaredTranslation(value);
+      expect(result.confidence).toBe('unknown');
+      expect(result.label).toBe('Unknown');
+    }
   });
 });
