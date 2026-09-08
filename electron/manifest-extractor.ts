@@ -122,6 +122,10 @@ function isPlayableUrl(url: string): boolean {
  * within this window the promise resolves with `null`.
  */
 const EXTRACTION_TIMEOUT_MS = 45_000;
+/** Ceiling on the last-resort JS read, which can hang with a stuck renderer. */
+const JS_LAST_RESORT_MS = 5_000;
+/** Ceiling on a single raw fetch, so a silent server cannot stall the queue. */
+const FETCH_TIMEOUT_MS = 20_000;
 
 /**
  * How long to wait after page load before triggering a reload retry
@@ -323,15 +327,29 @@ function fetchUrlRaw(url: string, extraHeaders: Record<string, string>): Promise
       });
       let body = '';
       let setCookies: string[] = [];
+      // A server that accepts the connection and then never answers left this
+      // promise pending forever, with no timeout anywhere above it.
+      let done = false;
+      const settle = (result: FetchResult): void => {
+        if (done) return;
+        done = true;
+        clearTimeout(deadline);
+        resolve(result);
+      };
+      const deadline = setTimeout(() => {
+        try { request.abort(); } catch { /* already finished */ }
+        settle({ body: null, setCookies: [] });
+      }, FETCH_TIMEOUT_MS);
+
       request.on('response', (response) => {
         const raw = response.headers['set-cookie'];
         if (Array.isArray(raw)) setCookies = raw;
         else if (typeof raw === 'string') setCookies = [raw];
         response.on('data', (chunk: Buffer) => { body += chunk.toString(); });
-        response.on('end', () => resolve({ body: body || null, setCookies }));
-        response.on('error', () => resolve({ body: null, setCookies: [] }));
+        response.on('end', () => settle({ body: body || null, setCookies }));
+        response.on('error', () => settle({ body: null, setCookies: [] }));
       });
-      request.on('error', () => resolve({ body: null, setCookies: [] }));
+      request.on('error', () => settle({ body: null, setCookies: [] }));
       request.end();
     } catch { resolve({ body: null, setCookies: [] }); }
   });
@@ -758,22 +776,37 @@ async function probeOnce(
     };
 
     const timeout = setTimeout(() => {
-      // Before giving up, try JS context extraction as a last resort
-      if (!settled) {
-        win.webContents.executeJavaScript(EXTRACT_JS).then((urls: string[]) => {
-          const found = manifestFromStr(urls);
-          if (found) {
-            log.info(`[manifest-extractor] Found manifest via JS context: ${found.manifestUrl}`);
-            finish(found);
-            return;
-          }
-          log.warn(`[manifest-extractor] Timed out after ${EXTRACTION_TIMEOUT_MS}ms for ${pageUrl}`);
-          finish(null);
-        }).catch(() => {
-          log.warn(`[manifest-extractor] Timed out after ${EXTRACTION_TIMEOUT_MS}ms for ${pageUrl}`);
-          finish(null);
+      if (settled) return;
+
+      // Before giving up, try JS context extraction as a last resort — but on a
+      // deadline of its own. `executeJavaScript` never settles when the
+      // renderer is hung: neither `.then` nor `.catch` runs, so the timeout
+      // meant to rescue the extraction hung inside it instead, silently and
+      // with no log line. The queue is serialised, so one such hang stalls
+      // every remaining episode indefinitely — observed as a download stuck on
+      // "starting" with nothing after `Probing …` in the log.
+      let answered = false;
+      const give = (found: ManifestResult | null, reason: string): void => {
+        if (answered) return;
+        answered = true;
+        if (found) {
+          log.info(`[manifest-extractor] Found manifest via JS context: ${found.manifestUrl}`);
+        } else {
+          log.warn(`[manifest-extractor] Timed out after ${EXTRACTION_TIMEOUT_MS}ms for ${pageUrl} (${reason})`);
+        }
+        finish(found);
+      };
+
+      const lastResort = setTimeout(() => give(null, 'JS context read never returned'), JS_LAST_RESORT_MS);
+      win.webContents.executeJavaScript(EXTRACT_JS)
+        .then((urls: string[]) => {
+          clearTimeout(lastResort);
+          give(manifestFromStr(urls), 'no manifest in JS context');
+        })
+        .catch(() => {
+          clearTimeout(lastResort);
+          give(null, 'JS context read failed');
         });
-      }
     }, EXTRACTION_TIMEOUT_MS);
 
     const cleanup = () => {
