@@ -26,13 +26,34 @@ on:
       - 'docs/404.html'
       - 'docs/robots.txt'
       - 'docs/sitemap.xml'
-      - 'CHANGELOG.md'
+      # NOT 'CHANGELOG.md'. A release commit edits CHANGELOG.md *and*
+      # package.json, so listing it here started this workflow in parallel with
+      # Build & Release instead of after it. Measured on the real v1.7.0 push,
+      # where both fired at 15:13:08:
+      #
+      #   Deploy Site  (push/CHANGELOG.md)  15:13:08 -> 15:13:37   site says 1.7.0
+      #   Build & Release                   15:13:08 -> 15:17:03   installer exists
+      #
+      # For those 3m26s the site advertised v1.7.0 while `releases/latest`
+      # still served the v1.6.1 installer — the same user-visible failure that
+      # dropping the package.json trigger was meant to end, reopened through a
+      # second path. The workflow_run trigger above already covers the release
+      # case and waits for the installers to exist; that is the 15:17:06 run.
+      # A changelog edit that is NOT part of a release can be published with
+      # workflow_dispatch.
       - 'scripts/build-site.ts'
       - 'scripts/sync-readme.ts'
       - 'scripts/lib/changelog.ts'
       - 'scripts/generate-tokens.ts'
       - 'design/tokens.json'
   workflow_dispatch:
+
+# This workflow pushes a commit to main, so two overlapping runs would race on
+# the same branch (the loser fails on a non-fast-forward). Queue them instead of
+# cancelling: a cancelled run would leave the site un-synced with no retry.
+concurrency:
+  group: deploy-site
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -41,15 +62,16 @@ jobs:
   build-and-deploy:
     name: Build and sync docs/index.html
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: 'npm'

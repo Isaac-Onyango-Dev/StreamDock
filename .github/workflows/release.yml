@@ -33,25 +33,37 @@ on:
         required: false
         type: string
 
+# Never two release runs at once: both would resolve the same version and race to
+# create the same tag. Queued rather than cancelled — a half-finished release is
+# worse than a slow one.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+# Least privilege: only the publish job creates the tag and the release. `check`,
+# `quality` and `build` just read the repo — and `build` in particular runs a lot
+# of third-party code (npm install, downloaded engine binaries), which should not
+# be holding a token that can write to the repository.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   check:
     name: Decide whether to release
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       version: ${{ steps.decide.outputs.version }}
       tag: ${{ steps.decide.outputs.tag }}
       should_release: ${{ steps.decide.outputs.should_release }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
 
@@ -79,6 +91,51 @@ jobs:
             echo "::notice::$TAG is new — building and publishing it."
           fi
 
+  # The gate the release itself owns.
+  #
+  # `build` used to depend only on `check`, so nothing stopped a commit with a
+  # failing typecheck, a lint error or a broken test from being packaged and
+  # published — ci.yml runs on the same commit, but in a separate workflow whose
+  # result this one never observed. A release must verify the exact commit it
+  # ships rather than trust another workflow's timing, so these run here too.
+  # Same gate set ci.yml requires before packaging (e2e excluded there as well).
+  quality:
+    name: Quality gate
+    needs: check
+    if: needs.check.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          # check:version compares against existing tags.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint -- --max-warnings 0
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Verify engine
+        run: npm run verify:engine
+
+      - name: Version is valid, documented and not moving backwards
+        run: npm run check:version
+
   # Windows and Linux. macOS is deliberately absent.
   #
   # download-binaries.ts is now platform-aware, so each runner fetches the
@@ -89,9 +146,10 @@ jobs:
   # exercised.
   build:
     name: Build ${{ matrix.label }}
-    needs: check
+    needs: [check, quality]
     if: needs.check.outputs.should_release == 'true'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -104,10 +162,10 @@ jobs:
             artifact: streamdock-linux
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: 'npm'
@@ -141,7 +199,7 @@ jobs:
         run: npm run build -- --publish never
 
       - name: Upload build output
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.artifact }}
           path: |
@@ -159,15 +217,19 @@ jobs:
 
   publish:
     name: Publish release ${{ needs.check.outputs.tag }}
+    # The only job that writes: it creates the tag and the GitHub Release.
+    permissions:
+      contents: write
     needs: [check, build]
     if: needs.check.outputs.should_release == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: 'npm'
@@ -176,7 +238,7 @@ jobs:
         run: npm ci
 
       - name: Collect built assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: dist-artifacts
           merge-multiple: true
@@ -190,7 +252,7 @@ jobs:
         run: npx tsx scripts/release-notes.ts "${{ needs.check.outputs.version }}" > RELEASE_NOTES.md
 
       - name: Create GitHub Release and attach assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           # The tag does not exist yet; the action creates it at this commit.
           tag_name: ${{ needs.check.outputs.tag }}
