@@ -329,7 +329,11 @@ nav {
 }
 
 /* ── Download cards ── */
-.download-section { padding: 40px 24px 88px; }
+/* Same sticky-nav clearance the screenshots section needs, and for the same
+   reason: 40px of top padding is less than the ~75px nav, so following the
+   Download nav button or a hero platform pill parked "Choose your platform"
+   underneath the bar. Measured at y=40 against a 75px nav before this. */
+.download-section { padding: 40px 24px 88px; scroll-margin-top: 88px; }
 
 .cards {
   display: grid;

@@ -329,7 +329,11 @@ nav {
 }
 
 /* ── Download cards ── */
-.download-section { padding: 40px 24px 88px; }
+/* Same sticky-nav clearance the screenshots section needs, and for the same
+   reason: 40px of top padding is less than the ~75px nav, so following the
+   Download nav button or a hero platform pill parked "Choose your platform"
+   underneath the bar. Measured at y=40 against a 75px nav before this. */
+.download-section { padding: 40px 24px 88px; scroll-margin-top: 88px; }
 
 .cards {
   display: grid;
@@ -907,7 +911,7 @@ footer {
     <div class="shots-stage">
       <div class="shots-viewport">
         <button type="button" class="shot" data-shot="0" data-pos="0" tabindex="0">
-          <span class="sr-only">Screenshot 1 of 9. </span>
+          <span class="sr-only">Screenshot 1 of 8. </span>
           <img src="assets/screenshots/capture-1600.webp"
                srcset="assets/screenshots/capture-800.webp 800w, assets/screenshots/capture-1200.webp 1200w, assets/screenshots/capture-1600.webp 1600w"
                sizes="(max-width: 720px) 86vw, (max-width: 1100px) 72vw, (max-width: 1483px) 58vw, 860px"
@@ -916,7 +920,7 @@ footer {
                alt="StreamDock's Capture tab with an empty URL field, a Video and Stream toggle, and a quality selector beside the Download button." />
         </button>
         <button type="button" class="shot" data-shot="1" data-pos="1" tabindex="0">
-          <span class="sr-only">Screenshot 2 of 9. </span>
+          <span class="sr-only">Screenshot 2 of 8. </span>
           <img src="assets/screenshots/analyze-1600.webp"
                srcset="assets/screenshots/analyze-800.webp 800w, assets/screenshots/analyze-1200.webp 1200w, assets/screenshots/analyze-1600.webp 1600w"
                sizes="(max-width: 720px) 86vw, (max-width: 1100px) 72vw, (max-width: 1483px) 58vw, 860px"
@@ -925,7 +929,7 @@ footer {
                alt="The Capture tab with an anime episode URL pasted into the field, ready to analyze." />
         </button>
         <button type="button" class="shot" data-shot="2" data-pos="2" tabindex="0">
-          <span class="sr-only">Screenshot 3 of 9. </span>
+          <span class="sr-only">Screenshot 3 of 8. </span>
           <img src="assets/screenshots/playlist-1600.webp"
                srcset="assets/screenshots/playlist-800.webp 800w, assets/screenshots/playlist-1200.webp 1200w, assets/screenshots/playlist-1600.webp 1600w"
                sizes="(max-width: 720px) 86vw, (max-width: 1100px) 72vw, (max-width: 1483px) 58vw, 860px"
@@ -934,7 +938,7 @@ footer {
                alt="A YouTube playlist of fifteen networking videos analyzed in StreamDock, each row showing a thumbnail, title, duration and checkbox, next to All, First N, Range and Schedule options." />
         </button>
         <button type="button" class="shot" data-shot="3" data-pos="far-right" tabindex="-1" aria-hidden="true">
-          <span class="sr-only">Screenshot 4 of 9. </span>
+          <span class="sr-only">Screenshot 4 of 8. </span>
           <img src="assets/screenshots/queue-1600.webp"
                srcset="assets/screenshots/queue-800.webp 800w, assets/screenshots/queue-1200.webp 1200w, assets/screenshots/queue-1600.webp 1600w"
                sizes="(max-width: 720px) 86vw, (max-width: 1100px) 72vw, (max-width: 1483px) 58vw, 860px"
@@ -943,7 +947,7 @@ footer {
                alt="StreamDock's Downloads tab with one episode running at 28 percent showing 1.49 MB per second, and a second episode queued behind it." />
         </button>
         <button type="button" class="shot" data-shot="4" data-pos="far-right" tabindex="-1" aria-hidden="true">
-          <span class="sr-only">Screenshot 5 of 9. </span>
+          <span class="sr-only">Screenshot 5 of 8. </span>
           <img src="assets/screenshots/completed-1600.webp"
                srcset="assets/screenshots/completed-800.webp 800w, assets/screenshots/completed-1200.webp 1200w, assets/screenshots/completed-1600.webp 1600w"
                sizes="(max-width: 720px) 86vw, (max-width: 1100px) 72vw, (max-width: 1483px) 58vw, 860px"
@@ -952,16 +956,7 @@ footer {
                alt="The Downloads tab showing one completed 222 MB episode with Open, Folder and Remove buttons, and a second episode still downloading at 52 percent." />
         </button>
         <button type="button" class="shot" data-shot="5" data-pos="far-left" tabindex="-1" aria-hidden="true">
-          <span class="sr-only">Screenshot 6 of 9. </span>
-          <img src="assets/screenshots/unsupported-1600.webp"
-               srcset="assets/screenshots/unsupported-800.webp 800w, assets/screenshots/unsupported-1200.webp 1200w, assets/screenshots/unsupported-1600.webp 1600w"
-               sizes="(max-width: 720px) 86vw, (max-width: 1100px) 72vw, (max-width: 1483px) 58vw, 860px"
-               width="1600" height="1034" loading="lazy" fetchpriority="low"
-               decoding="async" draggable="false"
-               alt="StreamDock reporting that a source offers one audio track and no subtitles, with the engine's unsupported-URL error shown below it." />
-        </button>
-        <button type="button" class="shot" data-shot="6" data-pos="far-left" tabindex="-1" aria-hidden="true">
-          <span class="sr-only">Screenshot 7 of 9. </span>
+          <span class="sr-only">Screenshot 6 of 8. </span>
           <img src="assets/screenshots/settings-1600.webp"
                srcset="assets/screenshots/settings-800.webp 800w, assets/screenshots/settings-1200.webp 1200w, assets/screenshots/settings-1600.webp 1600w"
                sizes="(max-width: 720px) 86vw, (max-width: 1100px) 72vw, (max-width: 1483px) 58vw, 860px"
@@ -969,8 +964,8 @@ footer {
                decoding="async" draggable="false"
                alt="StreamDock's Settings tab showing an Engines ready badge, the save location, concurrency slider, clipboard URL watcher, and advanced yt-dlp options." />
         </button>
-        <button type="button" class="shot" data-shot="7" data-pos="-2" tabindex="0">
-          <span class="sr-only">Screenshot 8 of 9. </span>
+        <button type="button" class="shot" data-shot="6" data-pos="-2" tabindex="0">
+          <span class="sr-only">Screenshot 7 of 8. </span>
           <img src="assets/screenshots/themes-1600.webp"
                srcset="assets/screenshots/themes-800.webp 800w, assets/screenshots/themes-1200.webp 1200w, assets/screenshots/themes-1600.webp 1600w"
                sizes="(max-width: 720px) 86vw, (max-width: 1100px) 72vw, (max-width: 1483px) 58vw, 860px"
@@ -978,8 +973,8 @@ footer {
                decoding="async" draggable="false"
                alt="The Advanced Background panel showing a grid of twelve ambient theme swatches and a live wallpaper preview with a refresh interval." />
         </button>
-        <button type="button" class="shot" data-shot="8" data-pos="-1" tabindex="0">
-          <span class="sr-only">Screenshot 9 of 9. </span>
+        <button type="button" class="shot" data-shot="7" data-pos="-1" tabindex="0">
+          <span class="sr-only">Screenshot 8 of 8. </span>
           <img src="assets/screenshots/wallpaper-1600.webp"
                srcset="assets/screenshots/wallpaper-800.webp 800w, assets/screenshots/wallpaper-1200.webp 1200w, assets/screenshots/wallpaper-1600.webp 1600w"
                sizes="(max-width: 720px) 86vw, (max-width: 1100px) 72vw, (max-width: 1483px) 58vw, 860px"
@@ -1017,18 +1012,14 @@ footer {
           <p>Completed files keep the title the source gave them — no invented episode numbering — with Open and Folder right there on the row.</p>
         </div>
         <div class="shot-caption" data-caption="5">
-          <h3>It tells you when it can't</h3>
-          <p>No silent failures. When a source offers no subtitles, or the engine cannot reach it at all, StreamDock says so in plain words and keeps the raw error underneath.</p>
-        </div>
-        <div class="shot-caption" data-caption="6">
           <h3>Engines already bundled</h3>
           <p>yt-dlp and ffmpeg ship inside the app and report ready on launch. Set the save folder, concurrency and clipboard watcher once and forget them.</p>
         </div>
-        <div class="shot-caption" data-caption="7">
+        <div class="shot-caption" data-caption="6">
           <h3>Twelve ambient themes</h3>
           <p>Match the app to this site's gradient, pick one of the twelve themes, pull a fresh photo on a schedule, or drop in a flat colour.</p>
         </div>
-        <div class="shot-caption" data-caption="8">
+        <div class="shot-caption" data-caption="7">
           <h3>Make it yours</h3>
           <p>Whatever background you choose sits behind every screen, with the chrome staying readable on top of it.</p>
         </div>
@@ -1050,16 +1041,13 @@ footer {
         <button type="button" class="shots-seg" data-step="4" aria-label="Show screenshot 5: Finished, and easy to find">
           <span class="shots-seg-track"><span class="shots-seg-fill"></span></span>
         </button>
-        <button type="button" class="shots-seg" data-step="5" aria-label="Show screenshot 6: It tells you when it can't">
+        <button type="button" class="shots-seg" data-step="5" aria-label="Show screenshot 6: Engines already bundled">
           <span class="shots-seg-track"><span class="shots-seg-fill"></span></span>
         </button>
-        <button type="button" class="shots-seg" data-step="6" aria-label="Show screenshot 7: Engines already bundled">
+        <button type="button" class="shots-seg" data-step="6" aria-label="Show screenshot 7: Twelve ambient themes">
           <span class="shots-seg-track"><span class="shots-seg-fill"></span></span>
         </button>
-        <button type="button" class="shots-seg" data-step="7" aria-label="Show screenshot 8: Twelve ambient themes">
-          <span class="shots-seg-track"><span class="shots-seg-fill"></span></span>
-        </button>
-        <button type="button" class="shots-seg" data-step="8" aria-label="Show screenshot 9: Make it yours">
+        <button type="button" class="shots-seg" data-step="7" aria-label="Show screenshot 8: Make it yours">
           <span class="shots-seg-track"><span class="shots-seg-fill"></span></span>
         </button>
       </div>

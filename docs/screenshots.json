@@ -9,9 +9,13 @@
     "captions and the progress segments from it. The carousel script never names an image.",
     "Order here is the order on the page.",
     "",
-    "Screenshots/live capture.png is deliberately not listed: it is a 551x148 crop of the",
-    "clipboard toast, and the frame is 3:2, so it would be upscaled ~3x beside nine 2544x1644",
-    "shots. Add it here if a full-window version is ever captured."
+    "Two of the ten captures in Screenshots/ are deliberately not listed.",
+    "  live capture.png is a 551x148 crop of the clipboard toast; the frame is 3:2, so it",
+    "  would be upscaled ~3x beside the 2544x1644 shots. Add it if a full-window version",
+    "  is ever captured.",
+    "  unsupported links.png shows an engine error. It was on the page briefly and Isaac",
+    "  asked for it off: a red ERROR block is not what a landing page should lead with.",
+    "  Re-adding it is one entry, but ask first."
   ],
   "shots": [
     {
@@ -48,13 +52,6 @@
       "title": "Finished, and easy to find",
       "caption": "Completed files keep the title the source gave them — no invented episode numbering — with Open and Folder right there on the row.",
       "alt": "The Downloads tab showing one completed 222 MB episode with Open, Folder and Remove buttons, and a second episode still downloading at 52 percent."
-    },
-    {
-      "id": "unsupported",
-      "source": "unsupported links.png",
-      "title": "It tells you when it can't",
-      "caption": "No silent failures. When a source offers no subtitles, or the engine cannot reach it at all, StreamDock says so in plain words and keeps the raw error underneath.",
-      "alt": "StreamDock reporting that a source offers one audio track and no subtitles, with the engine's unsupported-URL error shown below it."
     },
     {
       "id": "settings",
