@@ -408,6 +408,36 @@ function verifyScreenshotCarousel(): void {
     'the carousel script clears aria-hidden when a slide comes back on stage',
   );
 
+  // The carousel must be sized by viewport *height* as well as width.
+  //
+  // It was `min(58vw, 860px)` — width only — so the section was 961px tall on
+  // every screen whatever its height. On a laptop with a bookmarks bar and a
+  // sidebar (~664px of viewport) it overflowed by ~300px and pushed the heading
+  // and the caption out of sight, which is what a user actually reported. The
+  // earlier checks all passed because they only ever asked about *horizontal*
+  // overflow.
+  //
+  // Asserted structurally, because whether a section fits a viewport is a
+  // rendered-layout fact this static script cannot evaluate: every breakpoint's
+  // --shot-w must consult --shot-limit, and --shot-limit must come from a
+  // viewport-height unit. A regression to width-only sizing brings the bug back
+  // wholesale, and that is the shape this catches.
+  const limitDecls = [...html.matchAll(/--shot-limit:\s*calc\(\(100(v|sv)h\s*-/g)];
+  assert(
+    limitDecls.length >= 2,
+    `--shot-limit is derived from the viewport height, with an svh line and a vh fallback (found ${limitDecls.length})`,
+  );
+
+  const widthDecls = [...html.matchAll(/--shot-w:\s*([^;]+);/g)].map((m) => m[1]);
+  assert(widthDecls.length === 3, `--shot-w is declared once per breakpoint (found ${widthDecls.length})`);
+  const widthOnly = widthDecls.filter((decl) => !decl.includes('var(--shot-limit)'));
+  assert(
+    widthOnly.length === 0,
+    `every --shot-w consults --shot-limit, so a short window shrinks the carousel${
+      widthOnly.length ? ` (width-only: "${widthOnly[0].trim()}")` : ''
+    }`,
+  );
+
   // Slide images must not be native drag sources.
   //
   // Chromium starts an image drag on mouse-down-and-move, fires dragstart, and

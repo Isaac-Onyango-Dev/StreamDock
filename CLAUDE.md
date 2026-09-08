@@ -1655,8 +1655,67 @@ new guards (off-stage focusability, the script maintaining it, and
 non-draggable images) were each confirmed red against their bug.
 
 
+**Follow-up — the carousel was sized by width only, and overflowed short
+viewports.** Isaac reported the section title and the caption falling off screen
+and sent a browser screenshot; his viewport is about 1440x664, a laptop with a
+bookmarks bar and a sidebar. Measured: the section was **961px tall on every
+screen whatever its height**, because `--shot-w` was `min(58vw, 860px)` — two
+width terms and nothing else. It overflowed his viewport by ~300px, and by 21px
+even on the 940px-tall bench this session had been testing against. Every
+earlier check passed because they only ever asked about *horizontal* overflow.
+
+The fix is a third term in the same `min()`: `--shot-limit`, the height left
+after the section's own furniture, converted back through the aspect ratio into
+a width. A tall window is capped by width, a short one by height, and the whole
+section fits either way. `svh` rather than `dvh` — `dvh` changes as a mobile URL
+bar hides and would resize the carousel mid-scroll — with a `vh` line beneath it
+as the fallback. The furniture constant was measured, not guessed: 289px of
+non-stage content plus a 26px stage pad, so 322px, and the first attempt at 300
+overflowed by exactly the 15px it was short.
+
+Also trimmed, all locally so other sections keep the site's rhythm: section
+padding, the label and title margins, and the gaps under the stage — 349px of
+furniture down to 289. The stage no longer reserves 72px of height for the
+centre slide's shadow either: `overflow-x: clip` with `overflow-y: visible`
+clips the slides horizontally while letting the shadow spill into the gap
+below, with plain `overflow: hidden` declared first as the fallback for
+browsers without `clip`.
+
+Result across a 14-viewport matrix: every realistic size fits with slack to
+spare, aspect ratio 1.547 preserved throughout, and the centre slide is 720px
+wide on a normal desktop, 529px on Isaac's, 780px on a large screen. Only a
+landscape phone (844x390) still overflows, by 64px, and no amount of shrinking
+the image fixes that — the title, caption and progress row are ~300px on their
+own, so the furniture is the binding constraint there.
+
+**A second horizontal overflow, from the same nav link as before.** The
+`.nav-links` row bottoms out at 781px wide with four text links and the CTA, so
+below ~800px the Download button was pushed off the right edge — measured at
+736px and 768px as the only element contributing to `scrollWidth`. Session 17's
+first fix tightened the gap and padding and was verified at 820px only; the
+links now hide at 820px rather than 720px. **Tuning a responsive fix at one
+width proves it at one width.**
+
+`verify:engine` is at 264 checks. The new guard asserts every breakpoint's
+`--shot-w` consults `--shot-limit` and that `--shot-limit` comes from a
+viewport-height unit — structural, because whether a section fits a viewport is
+a rendered-layout fact a static script cannot evaluate, and a regression to
+width-only sizing brings the whole bug back.
+
 ## Working agreements for future sessions on this repo
 
+- **"No horizontal overflow" is not "it fits".** The carousel was checked for
+  horizontal overflow at three widths and passed every time while being 961px
+  tall on a 664px screen. Assert the section's height against the viewport's,
+  and test a short viewport — a laptop with a bookmarks bar has far less height
+  than a maximised test window.
+- **Size by both axes when a component's height follows from its width.** An
+  aspect-ratio box driven by `min(Nvw, Npx)` ignores the viewport height
+  entirely. Adding the height-derived term to the same `min()` costs one line
+  and cannot be forgotten at a breakpoint.
+- **Tuning a responsive fix at one width proves it at one width.** The nav
+  overflow was fixed and verified at 820px, and still overflowed at 768px.
+  Sweep a range.
 - **A synthetic event cannot reproduce a native browser gesture.** A swipe test
   built on dispatched `PointerEvent`s passed against a carousel whose mouse
   swipe was completely broken: Chromium's native image drag ate the gesture,
