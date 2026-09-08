@@ -185,6 +185,7 @@ export default function App() {
                 setMode={setMode}
                 outputDir={settings.downloadDir}
                 incomingUrl={incomingUrl}
+                defaultSubtitleMode={settings.ytdlpOptions?.subtitleMode ?? 'embed'}
                 onError={setError}
                 onStarted={(info) => {
                   setError(null);

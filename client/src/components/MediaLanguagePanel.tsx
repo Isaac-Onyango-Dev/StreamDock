@@ -6,14 +6,14 @@ interface MediaLanguagePanelProps {
   probe: MediaTrackProbe;
   selectedAudioId: string | null;
   selectedSubtitleIds: Set<string>;
-  subtitleMode: 'none' | 'embed' | 'sidecar';
+  subtitleMode: 'none' | 'sidecar' | 'embed' | 'both';
   subtitleConvert: 'original' | 'srt' | 'vtt';
   subsOnly: boolean;
   packagingMode: DownloadPackagingMode;
   onAudioSelect: (id: string | null) => void;
   onSubtitleToggle: (id: string) => void;
   onSubtitleClear: () => void;
-  onSubtitleModeChange: (mode: 'none' | 'embed' | 'sidecar') => void;
+  onSubtitleModeChange: (mode: 'none' | 'sidecar' | 'embed' | 'both') => void;
   onSubtitleConvertChange: (format: 'original' | 'srt' | 'vtt') => void;
   onSubsOnlyChange: (value: boolean) => void;
 }
@@ -121,7 +121,7 @@ export function MediaLanguagePanel({
               <select
                 id="subtitle-delivery"
                 value={subtitleMode}
-                onChange={(e) => onSubtitleModeChange(e.target.value as 'none' | 'embed' | 'sidecar')}
+                onChange={(e) => onSubtitleModeChange(e.target.value as 'none' | 'sidecar' | 'embed' | 'both')}
                 className="select-field"
                 disabled={selectedSubtitleIds.size === 0}
               >

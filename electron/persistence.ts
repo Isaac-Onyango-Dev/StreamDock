@@ -1,3 +1,4 @@
+import { DEFAULT_SUBTITLE_MODE, type SubtitleMode } from '../shared/subtitle-args';
 import { app } from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
@@ -30,6 +31,15 @@ export interface AppSettings {
   bingRefreshInterval?: number;
   clipboardWatcher?: boolean;
   ytdlpOptions?: {
+    /**
+     * Default for the per-download Subtitles picker.
+     *
+     * Replaces `embedSubs`, which was a global override applied *after* the
+     * per-download choice — so "None" still embedded. It is a default now, not
+     * an override.
+     */
+    subtitleMode?: SubtitleMode;
+    /** @deprecated Migrated to `subtitleMode` on read. Kept so old files still parse. */
     embedSubs?: boolean;
     embedMetadata?: boolean;
     sponsorBlock?: boolean;
@@ -55,7 +65,7 @@ export class PersistenceGateway {
       bingRefreshInterval: 1440,
       clipboardWatcher: true,
       ytdlpOptions: {
-        embedSubs: true,
+        subtitleMode: DEFAULT_SUBTITLE_MODE,
         embedMetadata: true,
         sponsorBlock: false,
         customArgs: '',
@@ -67,7 +77,8 @@ export class PersistenceGateway {
     try {
       if (!existsSync(this.path)) return this.fallback;
       const stored = JSON.parse(readFileSync(this.path, 'utf-8')) as Partial<AppSettings>;
-      return this.applyBackgroundDefault({ ...this.fallback, ...stored }, stored);
+      const merged = this.applyBackgroundDefault({ ...this.fallback, ...stored }, stored);
+      return this.applySubtitleModeDefault(merged, stored);
     } catch {
       return this.fallback;
     }
@@ -95,6 +106,29 @@ export class PersistenceGateway {
       (stored.solidColorBg === undefined || stored.solidColorBg === LEGACY_DEFAULT_SOLID_BG);
 
     return untouched ? { ...merged, backgroundMode: 'gradient' } : merged;
+  }
+
+  /**
+   * Carry the old `embedSubs` boolean forward as a subtitle mode.
+   *
+   * `embedSubs` used to be applied globally, after the per-download picker had
+   * already decided — which is the bug this replaces. An install that had it
+   * off meant "do not put subtitles in my files", so that becomes 'none';
+   * anything else keeps today's behaviour. Applied on read only: nothing is
+   * written back, so a downgrade still finds the file it expects.
+   */
+  private applySubtitleModeDefault(merged: AppSettings, stored: Partial<AppSettings>): AppSettings {
+    const opts = merged.ytdlpOptions;
+    if (opts?.subtitleMode) return merged;
+
+    const legacy = stored.ytdlpOptions?.embedSubs;
+    return {
+      ...merged,
+      ytdlpOptions: {
+        ...opts,
+        subtitleMode: legacy === false ? 'none' : DEFAULT_SUBTITLE_MODE,
+      },
+    };
   }
 
   public updateSettings(updates: Partial<AppSettings>): AppSettings {

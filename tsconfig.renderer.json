@@ -6,5 +6,5 @@
     "moduleResolution": "Bundler",
     "jsx": "react-jsx"
   },
-  "include": ["client/src", "vite.config.ts"]
+  "include": ["shared", "client/src", "vite.config.ts"]
 }

@@ -145,7 +145,7 @@ export interface StartRequest {
   quality?: string;
   playlistItems?: string;
   audioPreference?: 'auto' | 'dub' | 'sub';
-  subtitleMode?: 'none' | 'embed' | 'sidecar';
+  subtitleMode?: 'none' | 'sidecar' | 'embed' | 'both';
   isPlaylist?: boolean;
   folderHint?: string;
   /** Per-item title for episode/series downloads (e.g. "One Piece - Episode 1 - Romance Dawn"). */
@@ -189,6 +189,9 @@ export interface Settings {
   bingRefreshInterval?: number;
   clipboardWatcher?: boolean;
   ytdlpOptions?: {
+    /** Default for the per-download Subtitles picker (replaces embedSubs). */
+    subtitleMode?: 'none' | 'sidecar' | 'embed' | 'both';
+    /** @deprecated Migrated to subtitleMode on read. */
     embedSubs?: boolean;
     embedMetadata?: boolean;
     sponsorBlock?: boolean;
