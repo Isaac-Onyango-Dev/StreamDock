@@ -668,8 +668,14 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
           subtitleConvertFormat: subtitleConvert,
           subsOnly,
           downloadPackaging: packagingMode,
-          manifestUrl: selectedOption?.manifestUrl,
-          manifestReferer: selectedOption?.referer,
+          // A manifest belongs to the one episode it was probed from. Applying
+          // the selected option to every URL in a batch made a 5-episode range
+          // download episode 1 five times — five queue rows, five progress
+          // bars, one episode, and five yt-dlp processes on the same CDN until
+          // it answered 429. For a batch the engine probes each episode page
+          // for its own manifest instead.
+          manifestUrl: batchUrls.length > 1 ? undefined : selectedOption?.manifestUrl,
+          manifestReferer: batchUrls.length > 1 ? undefined : selectedOption?.referer,
         });
       }
       setUrl('');

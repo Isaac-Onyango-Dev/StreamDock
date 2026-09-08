@@ -645,6 +645,42 @@ function verifyManifestReferer(): void {
   );
 }
 
+
+/**
+ * A batch must not reuse one episode's manifest, and probe-host downloads must
+ * stay serialised.
+ *
+ * Selecting a 5-episode range downloaded episode 1 five times: the renderer
+ * applied the probed `manifestUrl` to every URL in the batch, so five queue
+ * rows with five progress bars all fetched one episode. Worse, the engine
+ * rewrites `request.url` to the CDN manifest once resolved, which made those
+ * running downloads invisible to the "one probe-host download at a time" guard
+ * — so all five ran concurrently against the same CDN until it returned
+ * HTTP 429, roughly three quarters of the way through.
+ */
+function verifyBatchManifestIsolation(): void {
+  const capture = stripComments(readProjectFile('client/src/views/CaptureView/index.tsx'));
+  assert(
+    /manifestUrl: batchUrls\.length > 1 \? undefined :/.test(capture),
+    'a selected manifest is not reused across a multi-item batch',
+  );
+  assert(
+    /manifestReferer: batchUrls\.length > 1 \? undefined :/.test(capture),
+    'a selected manifest referer is not reused across a multi-item batch',
+  );
+
+  const engine = stripComments(readProjectFile('electron/download-engine.ts'));
+  // The guard must count on the queued page URL, which survives the rewrite.
+  assert(
+    /matchesProbeHost\(extractHost\(t\.originalUrl\)\)/.test(engine),
+    'probe-host concurrency is counted on the queued URL, not the rewritten one',
+  );
+  assert(
+    /originalUrl: request\.url/.test(engine),
+    'each task records the page URL it was queued for',
+  );
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
@@ -658,5 +694,6 @@ verifySubtitleModesOffered();
 verifyNoFabricatedQualities();
 verifyNoFabricatedAudioChoices();
 verifyManifestReferer();
+verifyBatchManifestIsolation();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);
