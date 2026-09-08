@@ -1502,8 +1502,187 @@ mirroring release.yml's own decision exactly (package.json changed **and**
 never gated, because release.yml never builds it.
 
 
+### Session 17 — the screenshots carousel on the site
+
+No version bump, **nothing released**. Site only; no app code touched. The
+screenshots came from `Screenshots/` at the repo root — **untracked, and not
+present in a worktree**, which is worth knowing before hunting for it.
+
+**Nine of the ten shots are on the site**, as a centre-mode autoplay carousel
+between the hero and "Choose your platform" (Isaac's call: people should see it
+working before they are asked to pick a platform).
+
+- **`Screenshots/live capture.png` is deliberately not listed.** It is 551x148 —
+  a crop of the clipboard toast, not a window capture — against nine 2544x1644
+  shots in a 3:2 frame. It would be upscaled ~3x. One JSON entry adds it back if
+  a full-window version is ever taken.
+- `unsupported links.png` **is** included, captioned "It tells you when it
+  can't". A visible error block on a landing page is a real trade; it is one
+  entry to drop if Isaac disagrees.
+
+**The list is data.** `docs/screenshots.json` holds `{id, source, title,
+caption, alt}` per shot and is the only place a screenshot is named.
+`scripts/lib/screenshots.ts` is the single reader — `optimize-screenshots.ts`
+encodes from it, `build-site.ts` generates slides/captions/segments from it, and
+`verify-engine.ts` checks the page against it. Three consumers, one parser, on
+purpose: the site and the README rendered one changelog through two parsers for
+months and only one of them was right.
+
+**Images: 14 MB of PNG became 689 KB of WebP** at two widths (800/1600) via
+`npm run screenshots:build`. It encodes with Playwright's Chromium canvas —
+already a devDependency, the same reason `generate-icons.ts` rasterizes with it,
+and no new native module. The sources are **not committed**; the committed
+artifact is the .webp set, and the script says exactly that when the source
+folder is absent. Two guards inside it earn their keep: Chromium silently
+returns a *PNG* data URL when it cannot encode the requested type, and a
+successful-looking encode under 4 KB is a blank canvas.
+
+**No new dependency, and no carousel library.** Plain CSS transforms plus one
+vanilla IIFE in the site's existing style.
+
+**One timer owns both the advance and the fill.** The progress bar is not an
+animation running alongside a `setInterval` — it is the elapsed hold rendered,
+so they cannot drift and a manual jump resets both by resetting one number.
+`requestAnimationFrame`, not `setInterval`/CSS animation, because it stops by
+itself in a background tab; the frame delta is clamped to 100 ms so returning to
+a tab **resumes** the hold rather than firing through every slide that
+"elapsed" while nobody was watching.
+
+**Three things that were nearly wrong, each caught by measuring:**
+
+1. *The slides would have flown in across the stage on first paint.* Serving
+   every slide parked off-stage and letting JS correct it on load is the obvious
+   shape and the wrong one: the transform transition fires on the correction, so
+   the left-hand slides visibly travel in from the right. `build-site.ts` now
+   runs the same ring arithmetic the script does and serves each slide on its
+   final `data-pos`, and `verify-engine` asserts the two agree.
+2. *Adding a fifth nav link pushed the Download CTA off the right edge* between
+   721 px and ~900 px — the row only just fitted at four. Found by measuring
+   `scrollWidth` against `clientWidth`, not by looking. A tightened gap and
+   padding under 960 px keeps every link reachable.
+3. *The first guard I wrote had a false positive and then a false negative.*
+   "The carousel script names no screenshot" tripped on the word *capture* in a
+   comment about pointer capture; stripping comments then made it pass wrongly,
+   because the regex anchored on the string "Screenshots carousel", which
+   appears **first in the stylesheet banner** — so it was matching from `<style>`
+   through the generated `<img>` tags. It is anchored on the script's own first
+   statement now. A guard that matches prose is not guarding code.
+
+**The mobile peek is set by `--shot-w`, not by the step.** The visible sliver at
+each edge is (half the window − half the centre slide); moving the neighbours
+closer or further does nothing, because they sit *behind* the centre. At 86vw it
+was 27 px and read as a rendering artefact; 80vw makes it 39 px.
+
+**Verified live at 1440/820/390** in a real browser, not by reading CSS: autoplay
+advancing and the fill resetting, click-a-side-slide, prev/next, segment clicks,
+arrow keys, hover-pause and resume, swipe left/right, and that a 15 px drag and a
+vertical drag both change nothing (vertical page scroll survives). Horizontal
+overflow checked at every width — `scrollWidth === clientWidth`, and the page
+does not scroll sideways. `prefers-reduced-motion: reduce` confirmed with
+Playwright's emulation: **no advance in 7 s**, against an advance in the same
+window without it.
+
+**Guards: `verify:engine` is at 241 checks (from 162)**, and every one of the
+five conditions `verifyScreenshotCarousel` claims was confirmed red against its
+bug — a deleted .webp, a wrong start position, a truncated caption, a
+caption-count mismatch, and an asset path in the script.
+
+**Found but not fixed, because it is pre-existing and out of scope:**
+`#download`'s section label lands at y=40 under a 75 px sticky nav, so the
+site's own "Download" nav button scrolls to a heading the nav is covering.
+`#screenshots` carries a `scroll-margin-top` for exactly this; `#download` wants
+the same one-liner.
+
+**Review pass — five defects, four of them only findable by driving a real
+browser.** The implementation above was measured rather than re-read: 51
+behavioural assertions across three Playwright suites (geometry, autoplay
+timing, a11y, responsive, real touch), each run against the live page.
+
+1. *A mouse swipe did nothing at all.* Chromium treats an `<img>` as a native
+   drag source: the gesture fires `dragstart` and then delivers **no
+   pointerup**, so the release handler never ran. This is session 4's wallpaper
+   button trap, in a second place, exactly as the working agreement about
+   carrying a fix across every site of the same bug predicts. Fixed with
+   `draggable="false"` plus a cancelled `dragstart` (Firefox honours no
+   equivalent attribute). **The earlier phase's own swipe test passed against
+   this bug** — it dispatched synthetic `PointerEvent`s, and dispatched events
+   do not start native drag-and-drop. A test that cannot reach the failure is
+   not covering it.
+2. *Clicking a progress dot with a mouse stalled autoplay permanently.* A click
+   leaves DOM focus on the button it hit, `focusin` set `focused = true`, and
+   nothing ever cleared it. Pausing on focus is for the keyboard user who just
+   tabbed to a slide, so it now consults `:focus-visible` — the browser's own
+   judgement about which kind of focus just happened.
+3. *Four invisible slides were keyboard-focusable and announced.* Slides parked
+   off-stage sit at opacity 0; left in the tab order they take focus into
+   nothing, and a screen reader reads four screenshots nobody can see. They now
+   carry `tabindex="-1"` and `aria-hidden="true"` together — aria-hidden on a
+   focusable element is itself an error — maintained by `render()` and served
+   that way by the generator, so it is right before the first frame of script.
+4. *The animation loop never stopped.* `requestAnimationFrame` ran for the life
+   of the page and returned early when paused, so a visitor who never scrolled
+   to the section still paid a callback every frame. It is started and
+   cancelled now; `lastTs` is cleared on every stop, or the first frame after a
+   resume banks the whole paused interval as elapsed time.
+5. *`pointermove` was bound to `window` for the life of the page* behind an
+   `if (!dragging)`. It is attached on pointerdown and removed on release.
+
+**Payload cut 37% by adding one number.** All nine slides were being fetched at
+1600w — `sizes` claims 860 px on desktop and the only candidate at or above it
+was 1600. Adding a 1200w candidate to `SCREENSHOT_WIDTHS` (one edit; the
+optimizer, the generated srcset and the guard all read that list) gives:
+1x desktop 493→310 KB, 2x tablet 493→310 KB, 1x tablet 196 KB, 2x desktop
+unchanged at 493 KB.
+
+**Two false results worth recording, both mine.** A hold measured as 3939 ms
+looked like a timing bug and was a partially-elapsed hold — hovering preserves
+`elapsed`, so the first gap after an unhover is short by design. And a mobile
+"tap a side slide" failure was a bad coordinate in the test, not a dead
+control: the side slide's box is mostly *behind* the centre, so the tap has to
+land on the visible sliver at the window edge. Both were confirmed by
+instrumenting the page rather than by adjusting the assertion until it passed.
+
+**Also**: the optimizer now validates every source before it deletes anything
+and then rebuilds the output directory from scratch, so a removed shot cannot
+leave an orphaned `.webp` behind and a missing source cannot leave the
+committed assets half-deleted. `verify:engine` is at **272 checks**; the three
+new guards (off-stage focusability, the script maintaining it, and
+non-draggable images) were each confirmed red against their bug.
+
+
 ## Working agreements for future sessions on this repo
 
+- **A synthetic event cannot reproduce a native browser gesture.** A swipe test
+  built on dispatched `PointerEvent`s passed against a carousel whose mouse
+  swipe was completely broken: Chromium's native image drag ate the gesture,
+  and dispatched events never start native drag-and-drop. Drive the real input
+  (Playwright's `mouse`/`touchscreen`, or CDP touch events) for anything that
+  competes with a browser default.
+- **`<img>` is a drag source, and that swallows the pointer sequence.** Session
+  4 hit it on the wallpaper button, session 17 on the carousel slides. Any
+  drag-, swipe- or click-on-image interaction needs `draggable="false"` and a
+  cancelled `dragstart`.
+- **Pause on `:focus-visible`, not on focus.** A mouse click leaves DOM focus on
+  the button it hit, so "pause while focused" meant a carousel that stopped
+  forever the first time someone clicked a dot.
+- **A timer that also draws the progress bar cannot drift from it.** The
+  carousel's fill is the elapsed hold rendered, not a parallel animation, so a
+  manual jump resets both by resetting one number. Two mechanisms answering
+  "how far through are we" is the same shape as the two error classifiers and
+  the four language classifiers this file already records.
+- **A guard that can match prose is not guarding code.** "The carousel script
+  names no screenshot" tripped on the word *capture* inside a comment about
+  pointer capture, and then passed wrongly because its regex anchored on a
+  string that appears first in the stylesheet. Strip comments, and anchor on
+  code that only the thing you mean can contain.
+- **Measure overflow, don't look at it.** A fifth nav link pushed the Download
+  button off the right edge only between 721px and ~900px, where nothing was
+  being screenshotted. `document.documentElement.scrollWidth` against
+  `clientWidth` found it in one line.
+- **Serve the end state, don't let JS correct it on load.** Slides shipped
+  parked off-stage and repositioned by script animate across the page on first
+  paint, because the transition fires on the correction. Generate the same
+  state the script would compute, and assert the two agree.
 - **An ignore rule enforces what documentation can only request.** HANDOVER said
   `.claude/launch.json` "must stay untracked"; nothing stopped anyone adding it,
   and the same directory holds whole worktree checkouts. If a note asks a human
