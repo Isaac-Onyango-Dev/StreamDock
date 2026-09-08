@@ -16,6 +16,7 @@ import type { CaptureMode, DownloadPackagingMode, MediaTrackProbe, PlaylistProbe
 import { computePackagingMode } from '../../lib/languages';
 import { buildQualityChoices } from '../../lib/quality';
 import { buildSubtitleArgs } from '../../../../shared/subtitle-args';
+import { buildAudioChoices, hasLanguageStreams } from '../../lib/audio-choices';
 import { inferModeFromText } from '../../lib/url-routing';
 import { playDiscovery, playPop } from '../../lib/audio';
 
@@ -420,6 +421,22 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
   /** Real resolutions on offer, excluding "Best quality" and "Audio only". */
   const detectedQualityCount = qualityChoices.length - 2;
 
+  // Audio preferences are offered on the same rule as quality: only when the
+  // source reported something that makes them meaningful. `--format-sort lang:`
+  // reorders audio renditions inside one manifest, so with fewer than two
+  // detected audio languages there is nothing for it to sort.
+  const audioChoices = useMemo(() => buildAudioChoices(trackProbe?.audioTracks), [trackProbe?.audioTracks]);
+
+  // Separate language streams are a different mechanism from audio tracks, and
+  // they are what actually carries dub/sub on the anime hosts. When a source
+  // has them the choice belongs in the main row, not behind a button.
+  const languageStreams = hasLanguageStreams(streamOptions?.options.length) ? streamOptions!.options : null;
+
+  useEffect(() => {
+    if (audioChoices.some((choice) => choice.value === audioPreference)) return;
+    setAudioPreference('auto');
+  }, [audioChoices, audioPreference]);
+
   useEffect(() => {
     if (!quality) return;
     if (qualityChoices.some((option) => option.value === quality)) return;
@@ -779,6 +796,26 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
           </button>
 
           <div className="ml-auto flex flex-wrap items-center gap-2">
+            {languageStreams && (
+              /* The mechanism that actually carries dub/sub on these hosts.
+                 It used to be reachable only through a "Select Stream" button
+                 while a non-functional Audio preference sat in plain sight. */
+              <select
+                name="stream-language"
+                aria-label="Language"
+                value={selectedStreamOption ?? ''}
+                onChange={(e) => setSelectedStreamOption(e.target.value || null)}
+                disabled={busy}
+                className="select-field h-8 w-32"
+              >
+                {languageStreams.map((option) => (
+                  <option key={option.manifestUrl} value={option.manifestUrl}>
+                    {option.language}
+                    {option.languageConfidence === 'inferred' ? '?' : ''}
+                  </option>
+                ))}
+              </select>
+            )}
             <select
               name="download-quality"
               aria-label="Quality"
@@ -787,7 +824,8 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
               disabled={busy}
               className="select-field h-8 w-36"
             >
-              <option value="">Best quality</option>
+              {/* buildQualityChoices already leads with "Best quality"; a second
+                  hardcoded one here rendered it twice in the dropdown. */}
               {qualityChoices.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -1052,11 +1090,18 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
               <div className="mt-2 grid grid-cols-2 gap-2 border-t border-border-subtle pt-2">
                 <div>
                   <label htmlFor="audio-mode" className="field-label">Audio</label>
-                  <select id="audio-mode" value={audioPreference} onChange={(e) => setAudioPreference(e.target.value as AudioPreference)} className="select-field">
-                    <option value="auto">Auto</option>
-                    <option value="dub">English dub</option>
-                    <option value="sub">Original</option>
+                  <select id="audio-mode" value={audioPreference} onChange={(e) => setAudioPreference(e.target.value as AudioPreference)} className="select-field" disabled={audioChoices.length < 2}>
+                    {audioChoices.map((choice) => (
+                      <option key={choice.value} value={choice.value}>{choice.label}</option>
+                    ))}
                   </select>
+                  <p className="mt-1 text-[11px] leading-tight text-text-disabled">
+                    {languageStreams
+                      ? 'This source serves each language as its own stream — choose it above.'
+                      : audioChoices.length > 1
+                        ? 'Multiple audio languages detected in this source.'
+                        : 'No alternate audio languages detected.'}
+                  </p>
                 </div>
                 <div>
                   <label htmlFor="subtitle-mode" className="field-label">Subtitles</label>
