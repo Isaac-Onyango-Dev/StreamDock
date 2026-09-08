@@ -1,12 +1,12 @@
 // Role: turn the raw app captures in Screenshots/ into the web assets the site
 // serves from docs/assets/screenshots/.
 //
-// The originals are 2544x1644 PNGs, ~1.4 MB each and 14 MB for the set — an
+// The originals are 2544x1644 PNGs, ~1.4 MB each and 11.4 MB for the set — an
 // unusable payload for a landing page whose entire current weight is a few
-// hundred KB of HTML. Each one is re-encoded to WebP at two widths so the
-// browser can pick: 800w for the phone frame and the small side slides, 1600w
-// for the magnified centre slide on a HiDPI desktop. Nothing is rendered above
-// 1600 because nothing on the page is ever displayed wider than ~860 CSS px.
+// hundred KB of HTML. Each one is re-encoded to WebP at three widths so the
+// browser can pick; see SCREENSHOT_WIDTHS in lib/screenshots.ts for which and
+// why. Nothing is rendered above 1600 because nothing on the page is ever
+// displayed wider than ~860 CSS px.
 //
 // Playwright does the encoding for the same reason generate-icons.ts uses it to
 // rasterize: it is already a devDependency and is the only image pipeline in
@@ -15,12 +15,17 @@
 // hand a few times a year).
 //
 // Manual, like `npm run icons:build` — a normal build and CI never need a
-// browser. The source PNGs are deliberately NOT committed: 14 MB of binaries in
-// git to regenerate ~1 MB of assets is a bad trade, so the committed artifact is
-// the .webp set and this script is what you run when you add to it. If the
-// source directory is missing, that is what the error says.
+// browser.
 //
-// Usage: npm run screenshots:build [-- <source-dir>]
+// The source PNGs in Screenshots/ ARE committed. They were left out at first —
+// 11 MB of binaries in git to regenerate 0.8 MB of assets looked like a bad
+// trade — but that made this script unrunnable by anyone who did not already
+// have the captures, which is the shape of a script nobody can run. Only the
+// eight the site actually uses are kept; regenerating from them reproduces
+// docs/assets/screenshots/ byte for byte.
+//
+// Usage: npm run screenshots:build [-- <source-dir>]   (the argument is only
+// needed to encode from a folder other than the committed one)
 import { chromium, type Browser, type Page } from '@playwright/test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join, resolve } from 'path';
@@ -105,9 +110,9 @@ async function main(): Promise<void> {
 
   if (!existsSync(sourceDir)) {
     throw new Error(
-      `Source screenshots not found at ${sourceDir}. They are not committed — ` +
-        'point this script at the folder holding the raw captures, e.g. ' +
-        '`npm run screenshots:build -- ../Screenshots`.',
+      `Source screenshots not found at ${sourceDir}. The committed set lives in ` +
+        'Screenshots/ at the repo root; pass a path only to encode from somewhere ' +
+        'else, e.g. `npm run screenshots:build -- ../other-captures`.',
     );
   }
 
