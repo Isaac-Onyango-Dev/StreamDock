@@ -298,7 +298,10 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
 
   return new Promise((resolve) => {
     let settled = false;
-    const capturedManifests = new Map<string, { url: string; type: 'm3u8' | 'mpd' | 'mp4'; timestamp: number }>();
+    const capturedManifests = new Map<
+      string,
+      { url: string; type: 'm3u8' | 'mpd' | 'mp4'; timestamp: number; referer?: string }
+    >();
 
     const finish = (result: StreamOptionsProbeResult) => {
       if (settled) return;
@@ -316,7 +319,7 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
         label: idx === 0 ? 'Default Stream' : `Stream ${idx + 1}`,
         manifestUrl: m.url,
         manifestType: m.type,
-        referer: pageUrl,
+        referer: m.referer || pageUrl,
         isDefault: idx === 0,
         ...toStreamLanguage(classifyLanguageHints(m.url)),
       }));
@@ -344,6 +347,23 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
       }
 
       callback({});
+    });
+
+    // The Referer the *player* sends is not the page the user pasted.
+    // anikoto's CDN serves the manifest only for `Referer: https://megaplay.buzz/`
+    // — the embed origin — and returns 403 for the anikoto page URL, which is
+    // what the engine was handing yt-dlp. Verified against the live CDN: UA plus
+    // the megaplay referer returns 200, every other referer tested returns 403,
+    // and no cookie is involved. Capturing the header the browser actually sent
+    // keeps this correct for any host rather than hardcoding one CDN's rule.
+    probeSession.webRequest.onBeforeSendHeaders({ urls: ['<all_urls>'] }, (details, callback) => {
+      const captured = capturedManifests.get(details.url);
+      if (captured && !captured.referer) {
+        const headers = details.requestHeaders;
+        const referer = headers['Referer'] || headers['referer'];
+        if (referer) captured.referer = referer;
+      }
+      callback({ requestHeaders: details.requestHeaders });
     });
 
     win.webContents.setUserAgent(SPOOF_UA);
@@ -406,7 +426,7 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
           label: idx === 0 ? 'Default' : `Stream ${idx + 1}`,
           manifestUrl: m.url,
           manifestType: m.type,
-          referer: pageUrl,
+          referer: m.referer || pageUrl,
           isDefault: idx === 0,
           ...toStreamLanguage(classifyLanguageHints(m.url)),
         }));
@@ -458,7 +478,7 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
           label: normalizedLabel,
           manifestUrl: first.url,
           manifestType: first.type,
-          referer: pageUrl,
+          referer: first.referer || pageUrl,
           isDefault: true,
           ...toStreamLanguage(activeClassification),
         });
@@ -528,7 +548,7 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
               label: finalLabel,
               manifestUrl: newest.url,
               manifestType: newest.type,
-              referer: pageUrl,
+              referer: newest.referer || pageUrl,
               isDefault: false,
               ...toStreamLanguage(
                 option.declaredLanguage
