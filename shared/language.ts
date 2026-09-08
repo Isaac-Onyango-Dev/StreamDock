@@ -215,3 +215,30 @@ export function classifyLanguageHints(
 
   return { translation: 'unknown', languageCode: 'und', label: 'Unknown', confidence: 'unknown' };
 }
+
+/**
+ * Classify a translation type the site itself states — e.g. anikoto marks its
+ * server lists `data-type="sub"` / `data-type="dub"`.
+ *
+ * This is the tri-state arriving as provider data rather than being guessed
+ * out of a URL, which is the whole point of separating the two. The spoken
+ * language stays `und`: "dub" says the audio is dubbed, not into what.
+ */
+export function classifyDeclaredTranslation(
+  raw: string | undefined | null,
+): LanguageClassification {
+  const value = (raw || '').trim().toLowerCase();
+  const translation: TranslationType =
+    value === 'dub' ? 'dub' : value === 'sub' ? 'sub' : value === 'raw' ? 'raw' : 'unknown';
+
+  if (translation === 'unknown') {
+    return { translation, languageCode: 'und', label: 'Unknown', confidence: 'unknown' };
+  }
+
+  return {
+    translation,
+    languageCode: 'und',
+    label: describeTranslation(translation),
+    confidence: 'declared',
+  };
+}
