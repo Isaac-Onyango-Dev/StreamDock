@@ -217,7 +217,13 @@ export function ProgressRow({
                   {isQueued && queuePosition !== undefined && (
                     <span className="text-[10px] text-text-disabled">#{queuePosition + 1}</span>
                   )}
-                  <span className={`badge ${statusTone(item.status)}`}>{statusLabel(item.status)}</span>
+                  {/* A skipped file exits 0 and used to read as a fresh download —
+                      a 200MB episode "completing" in six seconds. Say which it was. */}
+                  <span className={`badge ${statusTone(item.status)}`}>
+                    {item.status === 'completed' && item.alreadyExisted
+                      ? 'Already saved'
+                      : statusLabel(item.status)}
+                  </span>
                 </div>
                 <span className="text-[10px] tabular-nums text-text-disabled">{shortDate(item.createdAt)}</span>
               </div>

@@ -693,6 +693,34 @@ function verifyBatchManifestIsolation(): void {
   );
 }
 
+
+/**
+ * A skipped file must not read as a fresh download.
+ *
+ * `--no-overwrites` makes yt-dlp exit 0 with "has already been downloaded" when
+ * the file is on disk. The engine did not notice, so the row said "completed" —
+ * a 200MB episode finishing in six seconds. Stale files from an earlier buggy
+ * run then masked whether a later fix worked: five episodes reported success
+ * while nothing was fetched, and every file was actually episode 1.
+ */
+function verifySkippedDownloadsAreLabelled(): void {
+  const engine = stripComments(readProjectFile('electron/download-engine.ts'));
+  assert(
+    /has already been downloaded/.test(engine),
+    'the engine notices when yt-dlp skips an existing file',
+  );
+  assert(
+    /alreadyExisted = true/.test(engine),
+    'a skipped download is recorded as such',
+  );
+
+  const row = stripComments(readProjectFile('client/src/components/ProgressRow.tsx'));
+  assert(
+    row.includes('alreadyExisted'),
+    'the queue row distinguishes a skipped file from a fresh download',
+  );
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
@@ -707,5 +735,6 @@ verifyNoFabricatedQualities();
 verifyNoFabricatedAudioChoices();
 verifyManifestReferer();
 verifyBatchManifestIsolation();
+verifySkippedDownloadsAreLabelled();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);

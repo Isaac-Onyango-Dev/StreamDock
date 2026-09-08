@@ -62,6 +62,8 @@ export interface DownloadRecord {
   detectedFormat?: string;
   /** Stall message shown in UI when connection drops */
   stallMessage?: string;
+  /** yt-dlp skipped this because the file was already on disk. */
+  alreadyExisted?: boolean;
   /** Redacted engine output for a failure, shown behind a "details" toggle. */
   errorDetail?: string;
 }
