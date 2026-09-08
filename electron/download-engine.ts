@@ -113,6 +113,14 @@ export interface DownloadRecord {
   /** Stall message for UI */
   stallMessage?: string;
   /**
+   * The file was already on disk, so yt-dlp skipped it (`--no-overwrites`).
+   *
+   * Without this the row reported a plain "completed" for a run that fetched
+   * nothing — a 200MB episode "downloading" in six seconds. Stale files from an
+   * earlier bad run then silently masked whether a fix worked at all.
+   */
+  alreadyExisted?: boolean;
+  /**
    * Redacted engine output for the failure, shown behind a "details" toggle.
    *
    * `error` is a friendly one-liner, which on its own made this whole class of
@@ -873,6 +881,16 @@ export class DownloadEngine {
       if (!trimmed) continue;
 
       log.debug(`[engine:${id}] ${trimmed.substring(0, 200)}`);
+
+      // `--no-overwrites` makes yt-dlp skip an existing file and exit 0. That
+      // is correct behaviour, but it must not be presented as a fresh download:
+      // a stale 200MB file made an episode "complete" in six seconds, which
+      // silently masked whether a fix had worked at all.
+      const skipped = trimmed.match(/^\[download\]\s+(.+?)\s+has already been downloaded/i);
+      if (skipped) {
+        task.record.alreadyExisted = true;
+        task.record.outputPath = skipped[1].trim();
+      }
 
       // The finishing move out of the staging directory. This is the last word
       // on where the file actually lives: every earlier Destination/Merger line
