@@ -568,6 +568,43 @@ function verifyLanguageOwnership(): void {
   );
 }
 
+
+/**
+ * The Audio control must offer only what was detected, like the quality one.
+ *
+ * It shipped as a hardcoded Auto / English dub / Original list, rendered before
+ * anything was analysed. Being built on `--format-sort lang:` it cannot take
+ * effect unless the source carries two audio languages — and on the anime hosts
+ * it never can, because they serve each language as its own manifest. So the
+ * prominent control was the one that could not work, while the detected stream
+ * options that do work were hidden behind a button.
+ */
+function verifyNoFabricatedAudioChoices(): void {
+  const capture = stripComments(readProjectFile('client/src/views/CaptureView/index.tsx'));
+
+  // The literal option list that used to sit in the markup.
+  assert(
+    !/<option value="dub">/.test(capture) && !/<option value="sub">/.test(capture),
+    'CaptureView renders no hardcoded dub/sub audio options',
+  );
+  assert(
+    capture.includes('buildAudioChoices('),
+    'the Audio picker is built from detected audio tracks',
+  );
+
+  const audio = readProjectFile('client/src/lib/audio-choices.ts');
+  assert(
+    audio.includes('languages.size < 2'),
+    'audio preferences need at least two detected languages to be offered',
+  );
+
+  // The working control has to be reachable without opening a dialog.
+  assert(
+    /aria-label="Language"/.test(capture),
+    'detected language streams are offered in the main row, not only behind a button',
+  );
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
@@ -579,5 +616,6 @@ verifyLinuxIcons();
 verifySubtitleOwnership();
 verifySubtitleModesOffered();
 verifyNoFabricatedQualities();
+verifyNoFabricatedAudioChoices();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);
