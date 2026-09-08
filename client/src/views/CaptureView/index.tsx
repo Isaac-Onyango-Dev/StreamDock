@@ -299,7 +299,6 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
         console.warn('[StreamDock] probeMediaTracks failed:', result?.error);
         return;
       }
-      console.log('[StreamDock] probeMediaTracks result:', result.data);
       setTrackProbe(result.data);
       const defaultSubs = result.data.subtitleTracks.filter((t) => t.isDefault).map((t) => t.id);
       if (defaultSubs.length > 0) setSelectedSubtitleIds(new Set(defaultSubs));
@@ -316,7 +315,6 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
     setProbingStreamOptions(true);
     try {
       const result = await window.streamDock.probeStreamOptions(pageUrl);
-      console.log('[StreamDock] probeStreamOptions result:', result);
       if (result.success && result.options.length > 1) {
         setStreamOptions(result);
         const defaultManifestUrl = result.defaultOption?.manifestUrl || result.options[0].manifestUrl;

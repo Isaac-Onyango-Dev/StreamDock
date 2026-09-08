@@ -15,14 +15,6 @@ import {
   type SubtitleTrackInfo,
 } from './manifest-parser';
 
-export type DownloadPackagingMode =
-  | 'video-only'
-  | 'video-audio'
-  | 'video-subs'
-  | 'video-audio-subs'
-  | 'video-multi-subs'
-  | 'subs-only';
-
 export interface MediaTrackProbe {
   url: string;
   manifestUrl?: string;
@@ -356,21 +348,4 @@ export async function probeMediaTracks(request: ProbeMediaTracksRequest): Promis
     notes,
     source,
   };
-}
-
-export function resolvePackagingMode(input: {
-  includeVideo: boolean;
-  audioLanguage?: string;
-  subtitleLanguages?: string[];
-  subsOnly?: boolean;
-}): DownloadPackagingMode {
-  if (input.subsOnly) return 'subs-only';
-  const hasAudio = Boolean(input.audioLanguage);
-  const subCount = input.subtitleLanguages?.length || 0;
-  if (!hasAudio && subCount === 0) return 'video-only';
-  if (hasAudio && subCount === 0) return 'video-audio';
-  if (!hasAudio && subCount === 1) return 'video-subs';
-  if (hasAudio && subCount === 1) return 'video-audio-subs';
-  if (subCount > 1) return 'video-multi-subs';
-  return 'video-subs';
 }

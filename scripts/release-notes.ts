@@ -7,10 +7,13 @@
 // section alone loses the contributor/PR attribution.
 //
 // Usage: tsx scripts/release-notes.ts [version] > notes.md
-import { entryForVersion, parseChangelog, readProjectFile, resolveVersion } from './lib/changelog';
+import { parseChangelog, readProjectFile, resolveVersion } from './lib/changelog';
 
 const version = process.argv[2]?.replace(/^v/i, '') || resolveVersion();
 const entries = parseChangelog(readProjectFile('CHANGELOG.md'));
+// Deliberately an exact match rather than `entryForVersion`, which falls back to
+// the newest entry: for release notes that would silently attach the *previous*
+// version's notes to this release. A missing entry must produce the stub below.
 const entry = entries.find((candidate) => candidate.version === version);
 
 if (!entry) {

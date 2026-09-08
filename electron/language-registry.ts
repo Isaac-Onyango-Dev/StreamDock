@@ -38,28 +38,6 @@ const LANGUAGE_NAMES: Record<string, string> = {
   und: 'Unknown',
 };
 
-const LANGUAGE_FLAGS: Record<string, string> = {
-  en: '🇺🇸',
-  ja: '🇯🇵',
-  es: '🇪🇸',
-  fr: '🇫🇷',
-  de: '🇩🇪',
-  pt: '🇧🇷',
-  ar: '🇸🇦',
-  hi: '🇮🇳',
-  ko: '🇰🇷',
-  zh: '🇨🇳',
-  it: '🇮🇹',
-  ru: '🇷🇺',
-  id: '🇮🇩',
-  ms: '🇲🇾',
-  th: '🇹🇭',
-  vi: '🇻🇳',
-  tr: '🇹🇷',
-  nl: '🇳🇱',
-  pl: '🇵🇱',
-};
-
 const ORIGINAL_LANGUAGE_HINTS = new Set(['ja', 'jpn', 'jp', 'japanese', 'original', 'native']);
 
 export function normalizeLanguageCode(raw: string | undefined | null): string {
@@ -80,11 +58,6 @@ export function getLanguageName(code: string, fallbackName?: string): string {
     return fallbackName.trim();
   }
   return LANGUAGE_NAMES[normalized] || LANGUAGE_NAMES[normalizeLanguageCode(normalized)] || code.toUpperCase();
-}
-
-export function getLanguageFlag(code: string): string {
-  const base = normalizeLanguageCode(code);
-  return LANGUAGE_FLAGS[base] || '🌐';
 }
 
 export function isOriginalLanguageHint(code: string, name?: string): boolean {
