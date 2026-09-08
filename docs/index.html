@@ -427,7 +427,13 @@ nav {
    smaller than the 80px the sections below it carry — so without a scroll
    margin, following the Screenshots nav link parks the label and half the
    heading underneath the nav bar. */
-.shots { padding: 24px 24px 40px; scroll-margin-top: 88px; }
+.shots { padding: 16px 24px 28px; scroll-margin-top: 88px; }
+
+/* Local overrides, not edits to the shared rules: every pixel taken off the
+   furniture is a pixel the screenshot can have while the section still fits a
+   viewport. Other sections keep the site's normal rhythm. */
+.shots .section-label { margin-bottom: 8px; }
+.shots .section-title { margin-bottom: 24px; }
 
 /* Everything the pointer can interact with, and the hover target that pauses
    autoplay. The section heading is deliberately outside it: hovering a title
@@ -438,10 +444,25 @@ nav {
   /* Geometry lives in custom properties so the breakpoints below restate three
      numbers instead of five transform rules. --shot-step is the distance
      between neighbouring slide centres; the scale and opacity ramps come off
-     the position attribute JS writes. */
-  --shot-w: min(58vw, 860px);
+     the position attribute JS writes.
+     
+     --shot-w was min(58vw, 860px) — width only — so the section was 961px tall
+     on every screen, whatever its height. On a laptop with a bookmarks bar and
+     a sidebar (~664px of viewport) that overflowed by ~300px and pushed the
+     heading and the caption out of sight.
+     
+     --shot-limit is the third term that fixes it: the height left after the
+     section's own furniture, converted back through the aspect ratio into a
+     width. Whichever of the three is smallest wins, so a tall window is capped
+     by width and a short one by height, and the whole section fits either way.
+     svh rather than dvh: dvh changes as a mobile URL bar hides and would
+     resize the carousel mid-scroll. The vh line is the fallback beneath it. */
+  --shot-furniture: 322px;
+  --shot-limit: calc((100vh - var(--shot-furniture)) * 1.5474);
+  --shot-limit: calc((100svh - var(--shot-furniture)) * 1.5474);
+  --shot-w: max(340px, min(50vw, 780px, var(--shot-limit)));
   --shot-step: calc(var(--shot-w) * .60);
-  --shot-pad: 72px;
+  --shot-pad: 26px;
   --shot-side-scale: .78;
   --shot-side-opacity: .4;
   --shot-far-scale: .64;
@@ -455,7 +476,14 @@ nav {
      also what keeps the off-centre slides — which reach well past the viewport
      on a phone — from widening the page. */
   margin: 0 -24px;
+  /* `hidden` first as the fallback: clipping one axis while leaving the other
+     visible needs `clip`, which older Safari lacks. Where it is supported the
+     two lines below win, and the centre slide's shadow can spill into the gap
+     under the stage instead of the stage having to reserve 70px of height for
+     it — or, worse, cutting it off with a hard edge. */
   overflow: hidden;
+  overflow-x: clip;
+  overflow-y: visible;
   height: calc(var(--shot-w) / 1.5474 + var(--shot-pad));
   /* Horizontal drags are the carousel's; vertical ones stay the page's. */
   touch-action: pan-y;
@@ -502,7 +530,7 @@ nav {
   z-index: 4;
   cursor: default;
   border-color: var(--border-strong);
-  box-shadow: 0 30px 70px rgba(0, 0, 0, .55), 0 0 60px rgba(139, 92, 246, .16);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .5), 0 0 44px rgba(139, 92, 246, .15);
 }
 .shot[data-pos="-1"] {
   transform: translate(-50%, -50%) translateX(calc(-1 * var(--shot-step))) scale(var(--shot-side-scale));
@@ -574,7 +602,7 @@ nav {
 .shots-caption {
   display: grid;
   max-width: 620px;
-  margin: 26px auto 0;
+  margin: 18px auto 0;
   text-align: center;
 }
 .shot-caption {
@@ -593,7 +621,7 @@ nav {
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  margin: 24px auto 0;
+  margin: 16px auto 0;
   max-width: 620px;
 }
 
@@ -644,9 +672,12 @@ nav {
    side slides read as screenshots rather than as decoration. */
 @media (max-width: 1100px) {
   .shots-viewport {
-    --shot-w: min(72vw, 660px);
+    /* More furniture than desktop: the caption wraps to more lines in a
+       narrower column, so less height is left for the stage. */
+    --shot-furniture: 330px;
+    --shot-w: max(240px, min(66vw, 600px, var(--shot-limit)));
     --shot-step: calc(var(--shot-w) * .58);
-    --shot-pad: 56px;
+    --shot-pad: 22px;
     --shot-side-scale: .88;
     --shot-side-opacity: .5;
     --shot-far-scale: .76;
@@ -658,14 +689,19 @@ nav {
    sliver at each edge — enough to say "there is more", not enough to compete.
    Swipe replaces the arrows. */
 @media (max-width: 720px) {
-  .shots { padding: 16px 20px 28px; }
+  .shots { padding: 12px 20px 24px; }
   .shots-viewport {
     /* The peek at each edge is (half the window - half the centre slide), so
        it is --shot-w that sets it, not the step: at 86vw it was a 27px sliver
-       that read as a rendering artefact rather than as another screenshot. */
-    --shot-w: 80vw;
+       that read as a rendering artefact rather than as another screenshot.
+       
+       The height term matters most here, and for landscape: a phone on its
+       side has ~390px of viewport, where 80vw alone would be far taller than
+       the screen. The floor keeps --shot-limit from going negative there. */
+    --shot-furniture: 370px;
+    --shot-w: max(180px, min(80vw, var(--shot-limit)));
     --shot-step: calc(var(--shot-w) * .62);
-    --shot-pad: 34px;
+    --shot-pad: 18px;
     --shot-side-scale: .9;
     --shot-side-opacity: .42;
     margin: 0 -20px;
@@ -815,9 +851,18 @@ footer {
 @media (max-width: 860px) {
   .req-grid { grid-template-columns: 1fr; }
 }
+/* The nav-links row bottoms out at 781px wide with four text links and the
+   CTA, so below ~800px the Download button was pushed off the right edge —
+   measured, at 736px and 768px, as the only element contributing to
+   scrollWidth. Hiding the text links here rather than at 720px keeps the CTA
+   reachable at every width; the fourth link (Screenshots) is what took the row
+   past what 720px could carry. */
+@media (max-width: 820px) {
+  .nav-links .text-link { display: none; }
+}
+
 @media (max-width: 720px) {
   nav { padding: 14px 20px; }
-  .nav-links .text-link { display: none; }
   .hero { padding: 60px 18px 48px; }
   footer { padding: 32px 20px; flex-direction: column; align-items: flex-start; }
   .section-title { margin-bottom: 32px; }

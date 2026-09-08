@@ -13,7 +13,7 @@ v1.7.0 is published. Dubbed downloads work, including across an episode range,
 and every content choice has a single home in the UI. Isaac confirmed dub on
 episodes 1 and 2 of Bleach through the real app.
 
-Baseline: **207 tests, 261 engine checks, Playwright 12/12, ESLint 0/0.**
+Baseline: **207 tests, 264 engine checks, Playwright 12/12, ESLint 0/0.**
 
 Anikoto is now genuinely working end to end — series listing, real episode
 counts, per-episode language selection, and downloads that complete. That was
@@ -209,7 +209,7 @@ npm run typecheck && npx eslint . && npm test && npm run verify:engine
 npx playwright test && npm run build:app
 ```
 
-Baseline: **207 tests, 261 engine checks, Playwright 12/12, ESLint 0/0.**
+Baseline: **207 tests, 264 engine checks, Playwright 12/12, ESLint 0/0.**
 
 The site has its own manual step now: `npm run screenshots:build` re-encodes
 `Screenshots/` into `docs/assets/screenshots/`. It is not part of any build and
