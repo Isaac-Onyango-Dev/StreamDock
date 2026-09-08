@@ -4,6 +4,61 @@ All notable changes to StreamDock are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.7.0] - 2026-09-08
+
+### Added
+- **Dubbed episodes actually download dubbed.** Sites that serve sub and dub as
+  separate streams open on sub, and StreamDock took whatever the page loaded —
+  so choosing "Dub" and queueing a range gave you the whole series in Japanese.
+  The language you pick is now applied to every episode as its download starts.
+- Sub and dub are offered as a **Language** control beside Quality, populated
+  from what the source declares rather than guessed from a link.
+- **Real episode counts.** A series page that states no total is now read from
+  the site's own listing instead: One Piece reports 1177 episodes rather than 1.
+- Episode ranges work on `anikototv.to`. The host was configured everywhere else
+  in the app but was missing from the one place that recognises episode URLs, so
+  pasting an episode there silently offered only that single episode.
+- StreamDock now carries its MIT licence text. The project has always described
+  itself as MIT without actually including the licence.
+
+### Fixed
+- **Downloads that failed with "the video host refused the download (403)" now
+  work.** The media server was being told the wrong page had requested the
+  video. Nothing about the site had changed and no amount of retrying would have
+  helped. yt-dlp reports any such refusal as an anti-bot challenge, which is why
+  this looked for a long time like something that could not be fixed.
+- **An episode range no longer downloads the same episode repeatedly.** Every
+  episode in a range reused the first one's video link, so a five-episode
+  selection produced five progress bars, five files, and one episode.
+- Downloads no longer trigger "too many requests" against themselves. A limit of
+  one download at a time for these sites existed but stopped applying once a
+  download started, so an entire range ran at once and the host throttled it
+  part-way through.
+- A stuck detection no longer freezes everything behind it. One episode failing
+  to resolve left its download on "starting" forever and the rest of the queue
+  waiting on it.
+- A file that already exists on disk now says **Already saved** rather than
+  reporting a fresh download. A 200 MB episode "finishing" in six seconds was
+  reported as success.
+- Detected languages are no longer guessed from link text and shown as fact. A
+  guess is marked; a language the source states is not. Among other things, a
+  stream served from a host with "hub" in its name was being labelled as a
+  language called "Hub".
+- The quality menu no longer lists "Best quality" twice.
+
+### Changed
+- **One place to make each choice.** Language, audio and subtitles could each be
+  set from two or three different screens, and the copies that were always
+  visible were often the ones that could not affect the download. Every choice
+  now has a single home in the main row, and appears only once the source is
+  known to offer it.
+- Nothing is offered before you press Analyze except the URL and quality,
+  because nothing else is known yet.
+- The advanced section is now "Connection settings" and holds only browser
+  impersonation, with a note that it is for sites that refuse a download.
+- The stream dialog is now "Track details" and covers only per-track audio and
+  subtitle choices, which is the one thing the main row cannot show.
+
 ## [1.6.1] - 2026-09-08
 
 ### Fixed
