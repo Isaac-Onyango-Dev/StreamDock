@@ -42,3 +42,31 @@ test.describe('quality picker', () => {
 // The subtitle picker sits behind a probe, so it is not reachable in a network-free
 // e2e run. A permanently-skipped test reads as coverage it does not provide, so the
 // assertion that all four behaviours are offered lives in verify-engine instead.
+
+/**
+ * Controls appear when the source is known to offer them, not before.
+ *
+ * The Audio and Subtitles selects used to sit in Advanced for every source,
+ * alongside a stream picker and a language select that answered the same
+ * question — three owners for one choice, and the two that were always visible
+ * were the ones that often could not work.
+ */
+test.describe('choices are event-driven', () => {
+  test('offers no language, audio or subtitle control before anything is analyzed', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByRole('button', { name: 'Analyze' })).toBeVisible();
+
+    for (const label of ['Language', 'Audio', 'Subtitles']) {
+      await expect(page.getByLabel(label, { exact: true })).toHaveCount(0);
+    }
+    // Quality is always meaningful — "Best quality" needs no detection.
+    await expect(page.getByLabel('Quality', { exact: true })).toBeVisible();
+  });
+
+  test('keeps advanced scoped to settings detection cannot decide', async ({ page }) => {
+    await page.goto('/');
+    // The panel only exists once there is something to download, and even then
+    // it holds no content choice.
+    await expect(page.getByText('Advanced options', { exact: true })).toHaveCount(0);
+  });
+});

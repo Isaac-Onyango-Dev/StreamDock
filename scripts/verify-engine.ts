@@ -561,10 +561,12 @@ function verifyLanguageOwnership(): void {
   }
 
   // The UI must actually act on the confidence, or carrying it changes nothing.
-  const modal = readProjectFile('client/src/components/MediaLanguageSelectionModal.tsx');
+  // This lives on the main row's language select — the dialog's duplicate copy
+  // of that choice was removed when each decision got a single owner.
+  const capture = readProjectFile('client/src/views/CaptureView/index.tsx');
   assert(
-    modal.includes('languageConfidence'),
-    'the stream picker distinguishes a declared language from a guess',
+    capture.includes('languageConfidence'),
+    'the language control distinguishes a declared language from a guess',
   );
 }
 
@@ -810,6 +812,60 @@ function verifyLanguageCarriesAcrossBatch(): void {
   );
 }
 
+
+/**
+ * One control per decision.
+ *
+ * The same choice had up to three owners: the stream picker dialog, an Audio
+ * preference in Advanced, and the language select in the main row. Advanced
+ * showed its copy for every source, including ones where it could not work,
+ * and the dialog's copy sat behind the button most people actually pressed —
+ * so the control that worked looked like the redundant one.
+ *
+ * Ownership now: the main row holds every choice the source actually offers,
+ * the dialog holds per-track detail the row cannot, and Advanced holds only
+ * settings detection cannot decide.
+ */
+function verifySingleOwnerPerChoice(): void {
+  const modal = stripComments(readProjectFile('client/src/components/MediaLanguageSelectionModal.tsx'));
+  assert(
+    !modal.includes('Stream language'),
+    'the dialog no longer duplicates the stream-language choice',
+  );
+  assert(
+    !/name="stream-option"/.test(modal),
+    'the dialog offers no second stream selector',
+  );
+
+  const capture = stripComments(readProjectFile('client/src/views/CaptureView/index.tsx'));
+
+  // Advanced must hold no content choice — those belong to the row, where they
+  // appear only when detection found something to choose between.
+  const advancedStart = capture.indexOf('Connection settings');
+  assert(advancedStart !== -1, 'the advanced section is scoped to connection settings');
+  const advanced = capture.slice(advancedStart);
+  for (const owned of ['audio-mode', 'subtitle-mode']) {
+    assert(
+      !advanced.includes(`id="${owned}"`),
+      `the advanced section does not also own ${owned}`,
+    );
+  }
+
+  // Each row control is gated on the source actually offering it.
+  assert(
+    /showAudioPreference = !languageStreams/.test(capture),
+    'an audio preference is offered only when there are no language streams',
+  );
+  assert(
+    /hasSubtitleTracks && \(/.test(capture),
+    'the subtitle control appears only when subtitles were detected',
+  );
+  assert(
+    !/Select Stream</.test(capture),
+    'the summary no longer offers a second route to the language choice',
+  );
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
@@ -827,5 +883,6 @@ verifyBatchManifestIsolation();
 verifySkippedDownloadsAreLabelled();
 verifyExtractionCannotHang();
 verifyLanguageCarriesAcrossBatch();
+verifySingleOwnerPerChoice();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);

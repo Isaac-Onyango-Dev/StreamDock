@@ -1,24 +1,21 @@
 import { X } from 'lucide-react';
-import type { MediaTrackProbe, DownloadPackagingMode, StreamOptionsProbeResult } from '../lib/types';
+import type { MediaTrackProbe, DownloadPackagingMode } from '../lib/types';
 import { MediaLanguagePanel } from './MediaLanguagePanel';
 
 interface MediaLanguageSelectionModalProps {
     probe?: MediaTrackProbe;
-    streamOptions?: StreamOptionsProbeResult;
     selectedAudioId: string | null;
     selectedSubtitleIds: Set<string>;
     subtitleMode: 'none' | 'sidecar' | 'embed' | 'both';
     subtitleConvert: 'original' | 'srt' | 'vtt';
     subsOnly: boolean;
     packagingMode: DownloadPackagingMode;
-    selectedStreamOption?: string;
     onAudioSelect: (id: string | null) => void;
     onSubtitleToggle: (id: string) => void;
     onSubtitleClear: () => void;
     onSubtitleModeChange: (mode: 'none' | 'sidecar' | 'embed' | 'both') => void;
     onSubtitleConvertChange: (format: 'original' | 'srt' | 'vtt') => void;
     onSubsOnlyChange: (value: boolean) => void;
-    onStreamOptionSelect?: (manifestUrl: string) => void;
     resolvedFormat: string;
     resolvedSubtitleArgs: string;
     onConfirm: () => void;
@@ -27,21 +24,18 @@ interface MediaLanguageSelectionModalProps {
 
 export function MediaLanguageSelectionModal({
     probe,
-    streamOptions,
     selectedAudioId,
     selectedSubtitleIds,
     subtitleMode,
     subtitleConvert,
     subsOnly,
     packagingMode,
-    selectedStreamOption,
     onAudioSelect,
     onSubtitleToggle,
     onSubtitleClear,
     onSubtitleModeChange,
     onSubtitleConvertChange,
     onSubsOnlyChange,
-    onStreamOptionSelect,
     resolvedFormat,
     resolvedSubtitleArgs,
     onConfirm,
@@ -50,7 +44,6 @@ export function MediaLanguageSelectionModal({
     const hasAudio = (probe?.audioTracks?.length ?? 0) > 1;
     const hasSubs = (probe?.subtitleTracks?.length ?? 0) > 0;
     const hasAlternateTracks = hasAudio || hasSubs;
-    const hasStreamOptions = streamOptions?.options && streamOptions.options.length > 1;
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-[2px] animate-fade-in">
@@ -58,7 +51,7 @@ export function MediaLanguageSelectionModal({
                 {/* Header */}
                 <div className="flex items-center justify-between border-b border-border-subtle px-4 py-3">
                     <h2 className="text-sm font-semibold text-text-primary">
-                        {hasStreamOptions ? 'Select Stream Language' : hasAlternateTracks ? 'Select Languages & Subtitles' : 'Probe Details'}
+                        {hasAlternateTracks ? 'Audio & subtitle tracks' : 'Source details'}
                     </h2>
                     <button type="button" onClick={onCancel} className="btn-icon" aria-label="Close">
                         <X className="h-4 w-4" />
@@ -67,52 +60,10 @@ export function MediaLanguageSelectionModal({
 
                 {/* Content */}
                 <div className="flex-1 overflow-y-auto px-4 py-3 custom-scrollbar">
-                    {hasStreamOptions && onStreamOptionSelect && (
-                        <section className="mb-4 space-y-2">
-                            <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-text-secondary">
-                                <span>Stream language</span>
-                            </div>
-                            <div className="space-y-1">
-                                {streamOptions!.options.map((option) => (
-                                    <label
-                                        key={option.manifestUrl}
-                                        className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-surface-3"
-                                    >
-                                        <input
-                                            type="radio"
-                                            name="stream-option"
-                                            checked={selectedStreamOption === option.manifestUrl}
-                                            onChange={() => onStreamOptionSelect(option.manifestUrl)}
-                                            className="accent-accent"
-                                        />
-                                        <span className="min-w-0 flex-1 truncate text-text-primary">{option.label}</span>
-                                        {option.isDefault && <span className="badge bg-surface-3 text-text-secondary">Default</span>}
-                                        {/* A language read out of a URL is a guess, and used to be shown in the
-                                            same badge as one the source declared. Inferred values are now visibly
-                                            marked so a guess never reads as a fact — see shared/language.ts */}
-                                        <span
-                                            className={
-                                                option.languageConfidence === 'declared'
-                                                    ? 'badge bg-accent/15 text-accent'
-                                                    : 'badge bg-surface-3 text-text-secondary'
-                                            }
-                                            title={
-                                                option.languageConfidence === 'declared'
-                                                    ? 'Language declared by the source'
-                                                    : option.languageConfidence === 'inferred'
-                                                      ? 'Guessed from the stream URL or button text — this may be wrong'
-                                                      : 'The source exposed no language information'
-                                            }
-                                        >
-                                            {option.language}
-                                            {option.languageConfidence === 'inferred' && '?'}
-                                        </span>
-                                        <span className="badge bg-surface-3 text-text-disabled">{option.manifestType.toUpperCase()}</span>
-                                    </label>
-                                ))}
-                            </div>
-                        </section>
-                    )}
+                    {/* The stream-language list used to live here as well as in the
+                        main row, so the same choice had two owners and the modal's
+                        copy was the one behind a button. The row owns it now; this
+                        dialog is for per-track detail the row cannot hold. */}
 
                     {probe && (
                         <MediaLanguagePanel
@@ -175,7 +126,7 @@ export function MediaLanguageSelectionModal({
                         onClick={onConfirm}
                         className="btn-primary flex-1"
                     >
-                        {hasStreamOptions ? 'Confirm & Download' : hasAlternateTracks ? 'Confirm & Download' : 'Proceed with Default'}
+                        {hasAlternateTracks ? 'Confirm & Download' : 'Proceed with Default'}
                     </button>
                 </div>
             </div>
