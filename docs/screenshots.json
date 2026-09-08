@@ -1,0 +1,81 @@
+{
+  "_comment": [
+    "The screenshot carousel's data. Adding a shot to the site is three steps and no code:",
+    "  1. drop the PNG in Screenshots/ at the repo root,",
+    "  2. add an entry here (source = its filename, id = the web asset's basename),",
+    "  3. run `npm run screenshots:build && npm run build:site`.",
+    "scripts/optimize-screenshots.ts reads `source` and writes docs/assets/screenshots/<id>-800.webp",
+    "and <id>-1600.webp; scripts/build-site.ts reads this file and generates the slides, the",
+    "captions and the progress segments from it. The carousel script never names an image.",
+    "Order here is the order on the page.",
+    "",
+    "Screenshots/live capture.png is deliberately not listed: it is a 551x148 crop of the",
+    "clipboard toast, and the frame is 3:2, so it would be upscaled ~3x beside nine 2544x1644",
+    "shots. Add it here if a full-window version is ever captured."
+  ],
+  "shots": [
+    {
+      "id": "capture",
+      "source": "capture.png",
+      "title": "Paste a link, pick a quality",
+      "caption": "One field takes a video, a playlist or a live stream. Nothing is downloaded until you have seen what the link actually is.",
+      "alt": "StreamDock's Capture tab with an empty URL field, a Video and Stream toggle, and a quality selector beside the Download button."
+    },
+    {
+      "id": "analyze",
+      "source": "capture link.png",
+      "title": "Analyze before you download",
+      "caption": "StreamDock probes the link first — what it is, how many items it holds, and which audio and subtitle tracks the source really offers.",
+      "alt": "The Capture tab with an anime episode URL pasted into the field, ready to analyze."
+    },
+    {
+      "id": "playlist",
+      "source": "playlist.png",
+      "title": "Playlists, understood",
+      "caption": "Every item comes back with its real title, thumbnail and length. Take all of it, the first few, a range, or schedule it for later.",
+      "alt": "A YouTube playlist of fifteen networking videos analyzed in StreamDock, each row showing a thumbnail, title, duration and checkbox, next to All, First N, Range and Schedule options."
+    },
+    {
+      "id": "queue",
+      "source": "downloads.png",
+      "title": "A queue you can steer",
+      "caption": "Live speed and time remaining on every row, pause or cancel any of them, and a details panel carrying the engine's own output when something goes wrong.",
+      "alt": "StreamDock's Downloads tab with one episode running at 28 percent showing 1.49 MB per second, and a second episode queued behind it."
+    },
+    {
+      "id": "completed",
+      "source": "successful downloads.png",
+      "title": "Finished, and easy to find",
+      "caption": "Completed files keep the title the source gave them — no invented episode numbering — with Open and Folder right there on the row.",
+      "alt": "The Downloads tab showing one completed 222 MB episode with Open, Folder and Remove buttons, and a second episode still downloading at 52 percent."
+    },
+    {
+      "id": "unsupported",
+      "source": "unsupported links.png",
+      "title": "It tells you when it can't",
+      "caption": "No silent failures. When a source offers no subtitles, or the engine cannot reach it at all, StreamDock says so in plain words and keeps the raw error underneath.",
+      "alt": "StreamDock reporting that a source offers one audio track and no subtitles, with the engine's unsupported-URL error shown below it."
+    },
+    {
+      "id": "settings",
+      "source": "settings.png",
+      "title": "Engines already bundled",
+      "caption": "yt-dlp and ffmpeg ship inside the app and report ready on launch. Set the save folder, concurrency and clipboard watcher once and forget them.",
+      "alt": "StreamDock's Settings tab showing an Engines ready badge, the save location, concurrency slider, clipboard URL watcher, and advanced yt-dlp options."
+    },
+    {
+      "id": "themes",
+      "source": "backgrounds.png",
+      "title": "Twelve ambient themes",
+      "caption": "Match the app to this site's gradient, pick one of the twelve themes, pull a fresh photo on a schedule, or drop in a flat colour.",
+      "alt": "The Advanced Background panel showing a grid of twelve ambient theme swatches and a live wallpaper preview with a refresh interval."
+    },
+    {
+      "id": "wallpaper",
+      "source": "capture section.png",
+      "title": "Make it yours",
+      "caption": "Whatever background you choose sits behind every screen, with the chrome staying readable on top of it.",
+      "alt": "StreamDock's Capture tab rendered over a mountain landscape wallpaper, its panels still legible against the photo."
+    }
+  ]
+}

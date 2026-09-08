@@ -418,6 +418,273 @@ nav {
 }
 .btn-ghost:hover { border-color: var(--border-strong); color: var(--text); }
 
+/* ── Screenshots carousel ── */
+/* The nav is sticky and ~71px tall, and this section's top padding is far
+   smaller than the 80px the sections below it carry — so without a scroll
+   margin, following the Screenshots nav link parks the label and half the
+   heading underneath the nav bar. */
+.shots { padding: 24px 24px 40px; scroll-margin-top: 88px; }
+
+/* Everything the pointer can interact with, and the hover target that pauses
+   autoplay. The section heading is deliberately outside it: hovering a title
+   two hundred pixels above the carousel should not stop it. */
+.shots-stage { max-width: 1240px; margin: 0 auto; }
+
+.shots-viewport {
+  /* Geometry lives in custom properties so the breakpoints below restate three
+     numbers instead of five transform rules. --shot-step is the distance
+     between neighbouring slide centres; the scale and opacity ramps come off
+     the position attribute JS writes. */
+  --shot-w: min(58vw, 860px);
+  --shot-step: calc(var(--shot-w) * .60);
+  --shot-pad: 72px;
+  --shot-side-scale: .78;
+  --shot-side-opacity: .4;
+  --shot-far-scale: .64;
+  --shot-far-opacity: .14;
+  --shot-ease: cubic-bezier(.22, .68, .3, 1);
+  --shot-speed: .6s;
+
+  position: relative;
+  /* Full-bleed against the section's padding, so a side slide is clipped by
+     the window edge rather than by an arbitrary inset. The hidden overflow is
+     also what keeps the off-centre slides — which reach well past the viewport
+     on a phone — from widening the page. */
+  margin: 0 -24px;
+  overflow: hidden;
+  height: calc(var(--shot-w) / 1.5474 + var(--shot-pad));
+  /* Horizontal drags are the carousel's; vertical ones stay the page's. */
+  touch-action: pan-y;
+}
+
+.shot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--shot-w);
+  aspect-ratio: 1600 / 1034;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  overflow: hidden;
+  background: var(--surface);
+  cursor: pointer;
+  /* translate(-50%,-50%) first, so the step distance that follows is in
+     unscaled pixels and stays constant however the slide is scaled. */
+  transform: translate(-50%, -50%);
+  transition:
+    transform var(--shot-speed) var(--shot-ease),
+    opacity var(--shot-speed) ease,
+    border-color .3s ease,
+    box-shadow var(--shot-speed) ease;
+}
+.shot img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* Chromium treats an <img> as a native drag source. Starting that gesture
+     fires dragstart and then swallows the rest of the pointer sequence — no
+     pointerup — so a mouse swipe silently did nothing. Session 4 hit the same
+     trap on the wallpaper button; this is the second place in the project. */
+  -webkit-user-drag: none;
+  user-select: none;
+}
+.shot:focus-visible { outline: 2px solid var(--pink-bright); outline-offset: 4px; }
+
+.shot[data-pos="0"] {
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
+  z-index: 4;
+  cursor: default;
+  border-color: var(--border-strong);
+  box-shadow: 0 30px 70px rgba(0, 0, 0, .55), 0 0 60px rgba(139, 92, 246, .16);
+}
+.shot[data-pos="-1"] {
+  transform: translate(-50%, -50%) translateX(calc(-1 * var(--shot-step))) scale(var(--shot-side-scale));
+  opacity: var(--shot-side-opacity);
+  z-index: 3;
+}
+.shot[data-pos="1"] {
+  transform: translate(-50%, -50%) translateX(var(--shot-step)) scale(var(--shot-side-scale));
+  opacity: var(--shot-side-opacity);
+  z-index: 3;
+}
+.shot[data-pos="-2"] {
+  transform: translate(-50%, -50%) translateX(calc(-1.72 * var(--shot-step))) scale(var(--shot-far-scale));
+  opacity: var(--shot-far-opacity);
+  z-index: 2;
+}
+.shot[data-pos="2"] {
+  transform: translate(-50%, -50%) translateX(calc(1.72 * var(--shot-step))) scale(var(--shot-far-scale));
+  opacity: var(--shot-far-opacity);
+  z-index: 2;
+}
+.shot[data-pos="-1"]:hover, .shot[data-pos="1"]:hover { opacity: .75; }
+.shot[data-pos="-2"]:hover, .shot[data-pos="2"]:hover { opacity: .3; }
+
+/* Parked out of sight on the side they left from, so a slide never animates
+   across the stage. The transform transition is dropped here on purpose: at
+   the wrap point a slide jumps from one end of the ring to the other, and it
+   should teleport while invisible rather than fly. */
+.shot[data-pos="far-left"], .shot[data-pos="far-right"] {
+  opacity: 0;
+  z-index: 1;
+  pointer-events: none;
+  transition: opacity .3s ease;
+}
+.shot[data-pos="far-left"] {
+  transform: translate(-50%, -50%) translateX(calc(-2.4 * var(--shot-step))) scale(var(--shot-far-scale));
+}
+.shot[data-pos="far-right"] {
+  transform: translate(-50%, -50%) translateX(calc(2.4 * var(--shot-step))) scale(var(--shot-far-scale));
+}
+
+.shots-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 6;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: rgba(23, 15, 43, .78);
+  backdrop-filter: blur(12px);
+  color: var(--muted);
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition: color .2s ease, border-color .2s ease, transform .2s ease;
+}
+.shots-nav:hover { color: var(--text); border-color: var(--border-strong); transform: translateY(-50%) scale(1.07); }
+.shots-nav:focus-visible { outline: 2px solid var(--pink-bright); outline-offset: 3px; }
+.shots-nav svg { width: 20px; height: 20px; }
+.shots-prev { left: 20px; }
+.shots-next { right: 20px; }
+
+/* Grid stacking, not absolute positioning: the row sizes itself to the tallest
+   caption at whatever the current width is, so switching slides never shifts
+   the progress bar below and no min-height has to be guessed per breakpoint. */
+.shots-caption {
+  display: grid;
+  max-width: 620px;
+  margin: 26px auto 0;
+  text-align: center;
+}
+.shot-caption {
+  grid-area: 1 / 1;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .3s ease, visibility 0s linear .3s;
+}
+.shot-caption.is-active { opacity: 1; visibility: visible; transition: opacity .3s ease .06s, visibility 0s; }
+.shot-caption h3 { font-family: var(--font-display); font-size: 1.15rem; font-weight: 700; letter-spacing: -.01em; margin-bottom: 7px; }
+.shot-caption p { font-size: .88rem; color: var(--muted); line-height: 1.62; }
+
+.shots-progress {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 24px auto 0;
+  max-width: 620px;
+}
+
+.shots-seg {
+  padding: 10px 3px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  line-height: 0;
+}
+.shots-seg:focus-visible { outline: 2px solid var(--pink-bright); outline-offset: 0; border-radius: 6px; }
+
+.shots-seg-track {
+  display: block;
+  width: 22px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  /* Clips the fill, so the bar keeps its rounded ends while the fill inside
+     stays a plain scaled rectangle — scaling a rounded box distorts its caps. */
+  overflow: hidden;
+  transition: width .45s var(--shot-ease), background-color .3s ease;
+}
+.shots-seg:hover .shots-seg-track { background: var(--border-strong); }
+.shots-seg.is-active .shots-seg-track { width: 68px; background: rgba(167, 139, 250, .25); }
+
+.shots-seg-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--brand-grad);
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Tablet: the centre still leads, but with the scale gap closed up so the
+   side slides read as screenshots rather than as decoration. */
+@media (max-width: 1100px) {
+  .shots-viewport {
+    --shot-w: min(72vw, 660px);
+    --shot-step: calc(var(--shot-w) * .58);
+    --shot-pad: 56px;
+    --shot-side-scale: .88;
+    --shot-side-opacity: .5;
+    --shot-far-scale: .76;
+    --shot-far-opacity: .18;
+  }
+}
+
+/* Phone: the active shot takes the frame and its neighbours are reduced to a
+   sliver at each edge — enough to say "there is more", not enough to compete.
+   Swipe replaces the arrows. */
+@media (max-width: 720px) {
+  .shots { padding: 16px 20px 28px; }
+  .shots-viewport {
+    /* The peek at each edge is (half the window - half the centre slide), so
+       it is --shot-w that sets it, not the step: at 86vw it was a 27px sliver
+       that read as a rendering artefact rather than as another screenshot. */
+    --shot-w: 80vw;
+    --shot-step: calc(var(--shot-w) * .62);
+    --shot-pad: 34px;
+    --shot-side-scale: .9;
+    --shot-side-opacity: .42;
+    margin: 0 -20px;
+  }
+  .shots-nav { display: none; }
+  .shot[data-pos="-2"], .shot[data-pos="2"] { opacity: 0; pointer-events: none; }
+  .shots-caption { margin-top: 20px; }
+  .shots-progress { gap: 4px; }
+  .shots-seg { padding: 9px 2px; }
+  .shots-seg-track { width: 16px; }
+  .shots-seg.is-active .shots-seg-track { width: 44px; }
+}
+
+/* Motion off: the slides swap without travelling, autoplay never starts (see
+   the carousel script), and the active segment simply reads as filled. */
+@media (prefers-reduced-motion: reduce) {
+  .shot { transition: opacity .25s ease, border-color .25s ease; }
+  .shot[data-pos="-2"], .shot[data-pos="2"],
+  .shot[data-pos="far-left"], .shot[data-pos="far-right"] { transition: opacity .25s ease; }
+  .shots-seg-track { transition: none; }
+  .shots-nav { transition: none; }
+}
+
 /* ── Features ── */
 .features { padding: 80px 24px; }
 .features-grid {
@@ -533,6 +800,14 @@ footer {
 .card:nth-child(3) { animation-delay: .19s; }
 
 /* ── Responsive ── */
+/* A fifth nav item (Screenshots) does not fit beside the CTA at tablet widths
+   with the desktop gap and padding, and the Download button was the thing
+   pushed off the right edge. Tightening the row keeps every link reachable
+   down to where they are hidden altogether at 720px. */
+@media (max-width: 960px) {
+  nav { padding: 16px 26px; }
+  .nav-links { gap: 16px; }
+}
 @media (max-width: 860px) {
   .req-grid { grid-template-columns: 1fr; }
 }
@@ -568,6 +843,7 @@ footer {
       <span class="nav-badge">v{{VERSION}}</span>
     </a>
     <ul class="nav-links">
+      <li><a class="text-link" href="#screenshots">Screenshots</a></li>
       <li><a class="text-link" href="#features">Features</a></li>
       <li><a class="text-link" href="#changelog">Changelog</a></li>
       <li><a class="text-link" href="#requirements">Requirements</a></li>
@@ -617,6 +893,38 @@ footer {
       alt="Total downloads"
       hidden
     />
+  </section>
+
+  <!-- SCREENSHOTS -->
+  <!-- Slides, captions and progress segments are all generated by
+       scripts/build-site.ts from docs/screenshots.json, in that file's order.
+       Adding a screenshot is an entry there plus `npm run screenshots:build`;
+       nothing below and nothing in the carousel script names an image. -->
+  <section class="shots" id="screenshots" aria-roledescription="carousel" aria-label="StreamDock screenshots">
+    <p class="section-label">See it running</p>
+    <h2 class="section-title">This is the whole app</h2>
+
+    <div class="shots-stage">
+      <div class="shots-viewport">
+{{SCREENSHOT_SLIDES}}
+        <button type="button" class="shots-nav shots-prev" aria-label="Previous screenshot">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <button type="button" class="shots-nav shots-next" aria-label="Next screenshot">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+      </div>
+
+      <div class="shots-caption">
+{{SCREENSHOT_CAPTIONS}}
+      </div>
+
+      <div class="shots-progress" role="group" aria-label="Choose a screenshot">
+{{SCREENSHOT_STEPS}}
+      </div>
+    </div>
+
+    <p class="sr-only" id="shots-live" aria-live="polite"></p>
   </section>
 
   <!-- DOWNLOAD CARDS -->
@@ -834,6 +1142,248 @@ footer {
     var pill = document.querySelector('.platform-pill[data-os="' + os + '"]');
     if (pill) pill.classList.add('is-detected');
   }
+})();
+
+// Screenshots carousel — centre-mode, stepped, with a timed progress bar.
+//
+// One timer drives both the advance and the fill, deliberately: the progress
+// bar is not a decoration animating alongside a setInterval, it *is* the
+// elapsed hold rendered, so the two can never drift apart and a manual jump
+// resets both by resetting one number.
+//
+// rAF rather than setInterval/CSS animation for the same reason it has to be
+// interruptible: it stops on its own in a background tab, and the frame delta
+// is clamped so returning to the tab resumes the hold instead of instantly
+// firing through the slides that "elapsed" while nobody was looking.
+(function () {
+  var root = document.getElementById('screenshots');
+  if (!root) return;
+
+  var viewport = root.querySelector('.shots-viewport');
+  var stage = root.querySelector('.shots-stage');
+  var slides = [].slice.call(root.querySelectorAll('.shot'));
+  var captions = [].slice.call(root.querySelectorAll('.shot-caption'));
+  var segments = [].slice.call(root.querySelectorAll('.shots-seg'));
+  var fills = segments.map(function (seg) { return seg.querySelector('.shots-seg-fill'); });
+  var live = document.getElementById('shots-live');
+  var count = slides.length;
+
+  // One structural check, here rather than a null test inside the frame loop:
+  // the three lists are generated together from docs/screenshots.json, so if
+  // they ever disagree the page is malformed and half-wiring it would be worse
+  // than leaving the served first slide standing on its own.
+  if (!viewport || !stage || !count) return;
+  if (captions.length !== count || segments.length !== count) return;
+  if (fills.indexOf(null) !== -1) return;
+
+  /** How long each screenshot holds the centre, and the width of the fill. */
+  var HOLD_MS = 5200;
+  /** A frame longer than this means the tab was away; don't bank the gap. */
+  var MAX_FRAME_MS = 100;
+  /** Past this, a drag is a swipe rather than a tap on a side slide. */
+  var SWIPE_PX = 45;
+
+  var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var active = 0;
+  var elapsed = 0;
+  var lastTs = null;
+  var raf = null;
+  var hovered = false;
+  var focused = false;
+  var dragging = false;
+  var swiped = false;
+  var onScreen = true;
+  var startX = 0;
+  var startY = 0;
+
+  /** Signed distance from the active slide around the ring, shortest way. */
+  function offsetOf(i) {
+    var d = i - active;
+    if (d > count / 2) d -= count;
+    if (d < -count / 2) d += count;
+    return d;
+  }
+
+  function render() {
+    for (var i = 0; i < count; i++) {
+      var d = offsetOf(i);
+      var isActive = d === 0;
+      var onStage = Math.abs(d) <= 2;
+      slides[i].setAttribute('data-pos', onStage ? String(d) : (d < 0 ? 'far-left' : 'far-right'));
+      slides[i].setAttribute('aria-current', isActive ? 'true' : 'false');
+      // A slide parked off-stage is at opacity 0. Left in the tab order it
+      // takes focus into nothing — the focus ring lands on an invisible
+      // element — and a screen reader reads four screenshots nobody can see.
+      // Both attributes move together: aria-hidden on a focusable element is
+      // itself an error.
+      slides[i].setAttribute('tabindex', onStage ? '0' : '-1');
+      if (onStage) slides[i].removeAttribute('aria-hidden');
+      else slides[i].setAttribute('aria-hidden', 'true');
+      captions[i].classList.toggle('is-active', isActive);
+      segments[i].classList.toggle('is-active', isActive);
+      segments[i].setAttribute('aria-current', isActive ? 'true' : 'false');
+      // Reset every fill, including the one leaving: a segment that keeps a
+      // stale width reads as a slide still in progress.
+      fills[i].style.transform = 'scaleX(' + (isActive && reduced ? 1 : 0) + ')';
+    }
+
+    if (live) {
+      var heading = captions[active].querySelector('h3');
+      live.textContent = 'Screenshot ' + (active + 1) + ' of ' + count +
+        (heading ? ': ' + heading.textContent : '');
+    }
+  }
+
+  /** The one entry point for changing slides: it resets the hold with it. */
+  function goTo(index) {
+    active = ((index % count) + count) % count;
+    elapsed = 0;
+    render();
+  }
+
+  function step(delta) { goTo(active + delta); }
+
+  function frame(ts) {
+    if (lastTs === null) lastTs = ts;
+    var dt = Math.min(ts - lastTs, MAX_FRAME_MS);
+    lastTs = ts;
+
+    elapsed += dt;
+    if (elapsed >= HOLD_MS) step(1);
+    else fills[active].style.transform = 'scaleX(' + (elapsed / HOLD_MS) + ')';
+
+    raf = requestAnimationFrame(frame);
+  }
+
+  /**
+   * Starts and stops the loop rather than letting it spin and check flags.
+   *
+   * The first version ran requestAnimationFrame for the life of the page and
+   * returned early when paused — so a visitor who never scrolled to this
+   * section still paid for a 60fps callback on every frame, for as long as the
+   * tab was open. Cancelling instead means a paused carousel costs nothing.
+   *
+   * lastTs is cleared on every stop: on resume the first frame would otherwise
+   * bank the whole paused interval as elapsed time.
+   */
+  function sync() {
+    var shouldPlay = !reduced && onScreen && !hovered && !focused && !dragging;
+    if (shouldPlay === (raf !== null)) return;
+    if (shouldPlay) {
+      lastTs = null;
+      raf = requestAnimationFrame(frame);
+    } else {
+      cancelAnimationFrame(raf);
+      raf = null;
+    }
+  }
+
+  slides.forEach(function (slide, i) {
+    slide.addEventListener('click', function () {
+      // A swipe that ends on a slide also fires a click; that one is not a tap.
+      if (swiped) return;
+      goTo(i);
+    });
+  });
+
+  segments.forEach(function (seg, i) {
+    seg.addEventListener('click', function () { goTo(i); });
+  });
+
+  var prev = root.querySelector('.shots-prev');
+  var next = root.querySelector('.shots-next');
+  if (prev) prev.addEventListener('click', function () { step(-1); });
+  if (next) next.addEventListener('click', function () { step(1); });
+
+  root.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }
+  });
+
+  stage.addEventListener('mouseenter', function () { hovered = true; sync(); });
+  stage.addEventListener('mouseleave', function () { hovered = false; sync(); });
+  // Pausing on focus is for the keyboard user reading the slide they just
+  // tabbed to. Pausing on *any* focus stalled it for mouse users instead: a
+  // click leaves DOM focus on the button it hit, so clicking a dot and moving
+  // the pointer away stopped autoplay permanently. :focus-visible is the
+  // browser's own judgement about which of the two just happened. If a browser
+  // cannot evaluate the selector, pause — losing autoplay beats trapping
+  // someone on a slide that keeps moving under them.
+  stage.addEventListener('focusin', function (e) {
+    try {
+      focused = Boolean(e.target && e.target.matches && e.target.matches(':focus-visible'));
+    } catch (selectorUnsupported) {
+      focused = true;
+    }
+    sync();
+  });
+  stage.addEventListener('focusout', function () { focused = false; sync(); });
+
+  // Swipe. No pointer capture on the viewport: capturing would retarget the
+  // click to the container and break tap-a-side-slide, so the release is
+  // caught on window instead, which also handles a drag ending off-screen.
+  //
+  // The window listeners are bound on pointerdown and removed on release,
+  // rather than living for the life of the page behind an `if (!dragging)`.
+  // pointermove fires for every pixel of every mouse movement anywhere on the
+  // page; there is no reason for this section to be in that path when nobody
+  // is dragging it.
+  function onDragMove(e) {
+    var dx = e.clientX - startX;
+    if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(e.clientY - startY)) swiped = true;
+  }
+
+  function detachDrag() {
+    window.removeEventListener('pointermove', onDragMove);
+    window.removeEventListener('pointerup', endDrag);
+    window.removeEventListener('pointercancel', cancelDrag);
+    dragging = false;
+    sync();
+  }
+
+  function endDrag(e) {
+    detachDrag();
+    var dx = e.clientX - startX;
+    if (swiped && Math.abs(dx) > SWIPE_PX) step(dx < 0 ? 1 : -1);
+  }
+
+  function cancelDrag() {
+    detachDrag();
+    swiped = false;
+  }
+
+  // draggable="false" on the images handles Chromium and WebKit; Firefox has no
+  // equivalent attribute honour for this, so the gesture is cancelled outright.
+  // Without it a mouse swipe starts a native image drag, pointerup never
+  // arrives, and the swipe is lost — which no synthetic PointerEvent test can
+  // reproduce, because dispatched events do not start native drag-and-drop.
+  viewport.addEventListener('dragstart', function (e) { e.preventDefault(); });
+
+  viewport.addEventListener('pointerdown', function (e) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    dragging = true;
+    swiped = false;
+    startX = e.clientX;
+    startY = e.clientY;
+    sync();
+    window.addEventListener('pointermove', onDragMove);
+    window.addEventListener('pointerup', endDrag);
+    window.addEventListener('pointercancel', cancelDrag);
+  });
+
+  // Don't burn through the set before the visitor has scrolled to it — and
+  // stop the loop again once they scroll away.
+  if (window.IntersectionObserver) {
+    onScreen = false;
+    new IntersectionObserver(function (entries) {
+      onScreen = entries[0].isIntersecting;
+      sync();
+    }, { threshold: 0.25 }).observe(root);
+  }
+
+  render();
+  sync();
 })();
 
 // Live download counter — Tier 1: sums GitHub Releases' real per-asset

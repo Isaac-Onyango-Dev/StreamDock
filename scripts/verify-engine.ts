@@ -15,6 +15,7 @@ import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { buildOutputTemplate, sanitizeName } from '../electron/smart-naming';
 import { parseChangelog } from './lib/changelog';
+import { readShots, SCREENSHOT_DIR, SCREENSHOT_WIDTHS } from './lib/screenshots';
 
 const root = join(import.meta.dirname, '..');
 let assertions = 0;
@@ -304,6 +305,145 @@ function verifySiteRendering(): void {
   assert(
     !/class="req-item"[^>]*style="[^"]*opacity/.test(html),
     'no requirements entry carries an inline opacity (use .is-pending)',
+  );
+}
+
+/**
+ * The screenshot carousel must render exactly what docs/screenshots.json says,
+ * against images that exist.
+ *
+ * Everything here is an end-state assertion on the generated page, for the same
+ * reason the changelog guard is: the failure modes are silent ones.
+ *
+ *  - A slide whose .webp was never generated renders as a broken-image glyph.
+ *    Nothing in the build fails — build-site.ts writes the <img> from the JSON
+ *    without looking for the file, so a shot added to the list but never passed
+ *    through `screenshots:build` ships as a hole in the carousel.
+ *  - A count mismatch between slides, captions and segments makes the carousel
+ *    script return early by design rather than run half-wired. The page then
+ *    shows one static screenshot and no error anywhere.
+ *  - A slide whose served data-pos does not match the script's ring arithmetic
+ *    animates across the stage on first paint, because the transform
+ *    transition fires while the script corrects it.
+ */
+function verifyScreenshotCarousel(): void {
+  const shots = readShots();
+  const html = readProjectFile('docs/index.html');
+  const section = html.match(/<section class="shots"[\s\S]*?<\/section>/)?.[0];
+  assert(Boolean(section), 'docs/index.html contains the screenshots section');
+  if (!section) return;
+
+  const slides = [...section.matchAll(/data-shot="(\d+)" data-pos="([^"]+)" tabindex="([^"]+)"([^>]*)>/g)];
+  const captions = [...section.matchAll(/class="shot-caption[^"]*" data-caption="(\d+)"/g)];
+  const segments = [...section.matchAll(/class="shots-seg[^"]*" data-step="(\d+)"/g)];
+
+  assert(slides.length === shots.length, `the carousel renders ${shots.length} slides, not ${slides.length}`);
+  assert(
+    captions.length === shots.length && segments.length === shots.length,
+    `slides, captions and progress segments all number ${shots.length} ` +
+      `(got ${slides.length}/${captions.length}/${segments.length})`,
+  );
+
+  // Exactly one of each is active on the served page, and they agree.
+  const activeSlides = [...section.matchAll(/data-shot="(\d+)" data-pos="0"/g)].map((m) => m[1]);
+  const activeCaptions = [...section.matchAll(/class="shot-caption is-active" data-caption="(\d+)"/g)].map((m) => m[1]);
+  const activeSegments = [...section.matchAll(/class="shots-seg is-active" data-step="(\d+)"/g)].map((m) => m[1]);
+  assert(
+    activeSlides.length === 1 && activeCaptions.length === 1 && activeSegments.length === 1,
+    'exactly one slide, one caption and one progress segment start active',
+  );
+  assert(
+    activeSlides[0] === activeCaptions[0] && activeSlides[0] === activeSegments[0],
+    `the active slide, caption and segment are the same index (got ${activeSlides[0]}/${activeCaptions[0]}/${activeSegments[0]})`,
+  );
+
+  for (const [i, shot] of shots.entries()) {
+    // Every width the srcset offers is a file that exists. A missing one is a
+    // broken image on exactly the devices that ask for that width.
+    for (const width of SCREENSHOT_WIDTHS) {
+      const asset = join('docs', SCREENSHOT_DIR, `${shot.id}-${width}.webp`);
+      assert(existsSync(join(root, asset)), `${asset} exists (run \`npm run screenshots:build\`)`);
+      assert(section.includes(`${SCREENSHOT_DIR}/${shot.id}-${width}.webp`), `the carousel offers ${shot.id} at ${width}w`);
+    }
+
+    // The prose reaches the page whole. The site rendered the changelog through
+    // a second parser for months and published every bullet cut off at its
+    // first line break; captions are hard-wrapped prose from a file too.
+    for (const text of [shot.title, shot.caption, shot.alt]) {
+      const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      assert(section.includes(escaped), `shot "${shot.id}" renders its full text ("${text.slice(0, 40)}…")`);
+    }
+
+    // The same ring arithmetic the carousel script runs, with slide 0 active.
+    const d = i > shots.length / 2 ? i - shots.length : i;
+    const expected = Math.abs(d) <= 2 ? String(d) : d < 0 ? 'far-left' : 'far-right';
+    assert(
+      slides[i][2] === expected,
+      `slide ${i} is served at data-pos="${expected}", not "${slides[i][2]}" — a mismatch animates it across the stage on load`,
+    );
+
+    // A slide parked off-stage is at opacity 0, and must be out of both the tab
+    // order and the accessibility tree — otherwise focus lands on an invisible
+    // element and a screen reader announces four screenshots nobody can see.
+    // The two attributes are asserted together because aria-hidden on a
+    // focusable element is itself an accessibility error.
+    const offStage = expected.startsWith('far');
+    const hidden = slides[i][4].includes('aria-hidden="true"');
+    assert(
+      slides[i][3] === (offStage ? '-1' : '0') && hidden === offStage,
+      offStage
+        ? `off-stage slide ${i} is served tabindex="-1" and aria-hidden="true" (got tabindex="${slides[i][3]}", aria-hidden=${hidden})`
+        : `on-stage slide ${i} is focusable and not aria-hidden (got tabindex="${slides[i][3]}", aria-hidden=${hidden})`,
+    );
+  }
+
+  // render() must maintain the same pairing as the slides rotate, or the
+  // served state is only correct until the first advance.
+  assert(
+    /slides\[i\]\.setAttribute\('tabindex', onStage \? '0' : '-1'\)/.test(html),
+    "the carousel script keeps tabindex in step with the slide's position",
+  );
+  assert(
+    /if \(onStage\) slides\[i\]\.removeAttribute\('aria-hidden'\);/.test(html),
+    'the carousel script clears aria-hidden when a slide comes back on stage',
+  );
+
+  // Slide images must not be native drag sources.
+  //
+  // Chromium starts an image drag on mouse-down-and-move, fires dragstart, and
+  // then delivers no pointerup — so the swipe handler never completes and a
+  // mouse swipe does nothing at all. Session 4 hit this on the wallpaper
+  // button and fixed it there only; it reappeared here. Both halves are
+  // asserted because they cover different browsers: the attribute is
+  // declarative and pre-JS, cancelling dragstart covers browsers that ignore
+  // it. Neither is reachable by a synthetic PointerEvent test — dispatched
+  // events do not start native drag-and-drop — so this is the guard.
+  const draggable = (section.match(/<img[^>]*>/g) ?? []).filter((img) => !img.includes('draggable="false"'));
+  assert(draggable.length === 0, `every slide image is draggable="false" (${draggable.length} are not)`);
+  assert(
+    /viewport\.addEventListener\('dragstart', function \(e\) \{ e\.preventDefault\(\); \}\);/.test(html),
+    'the carousel cancels dragstart, so a mouse swipe cannot be eaten by a native image drag',
+  );
+
+  // The carousel is data-driven: the script reads its slides out of the DOM and
+  // references no image asset, so adding a screenshot never means editing it.
+  //
+  // Comments are stripped first. Matching shot ids against the raw source was
+  // the obvious check and a wrong one — "capture" appears in a comment about
+  // pointer capture, and ids like "queue" or "settings" are ordinary words that
+  // could legitimately be variable names. What actually matters is that no
+  // asset path or filename reaches the script.
+  // Anchored on the script's own first statement, not on its heading comment:
+  // the stylesheet carries a "Screenshots carousel" banner too, and matching
+  // that ran from the <style> block through the generated slide markup — so the
+  // assertion below failed on the <img> tags it was meant to be independent of.
+  const script = stripComments(
+    html.match(/\(function \(\) \{\s*var root = document\.getElementById\('screenshots'\);[\s\S]*?\n\}\)\(\);/)?.[0] ?? '',
+  );
+  assert(script !== '', 'the generated page carries the carousel script');
+  assert(
+    !script.includes('.webp') && !script.includes(SCREENSHOT_DIR),
+    'the carousel script references no image asset (the slide list comes from the DOM)',
   );
 }
 
@@ -873,6 +1013,7 @@ verifyEpisodePatterns();
 verifyLanguageOwnership();
 verifyChangelogRendering();
 verifySiteRendering();
+verifyScreenshotCarousel();
 verifyLinuxIcons();
 verifySubtitleOwnership();
 verifySubtitleModesOffered();
