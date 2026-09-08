@@ -432,6 +432,13 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
   // has them the choice belongs in the main row, not behind a button.
   const languageStreams = hasLanguageStreams(streamOptions?.options.length) ? streamOptions!.options : null;
 
+  // One control per decision. Language streams and an audio-track preference
+  // answer the same question by different mechanisms, so only the one this
+  // source actually supports is offered — showing both is what made three
+  // places compete for the same choice.
+  const showAudioPreference = !languageStreams && audioChoices.length > 1;
+  const hasSubtitleTracks = (trackProbe?.subtitleTracks?.length ?? 0) > 0;
+
   useEffect(() => {
     if (audioChoices.some((choice) => choice.value === audioPreference)) return;
     setAudioPreference('auto');
@@ -442,6 +449,34 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
     if (qualityChoices.some((option) => option.value === quality)) return;
     setQuality('');
   }, [quality, qualityChoices]);
+
+  /**
+   * Switching language switches the whole stream, so the track list has to be
+   * re-read for the new manifest — sub and dub are different files with their
+   * own audio and subtitle tracks.
+   *
+   * This lived inline on the modal, which is why picking a language from
+   * anywhere else could not work. The main row owns the choice now, so the
+   * behaviour lives with the state instead of with one of its call sites.
+   */
+  const handleStreamOptionSelect = useCallback(async (manifestUrl: string) => {
+    setSelectedStreamOption(manifestUrl);
+    if (!window.streamDock?.probeMediaTracks) return;
+    setProbingTracks(true);
+    try {
+      const result = await window.streamDock.probeMediaTracks({ pageUrl: manifestUrl, manifestUrl });
+      if (result?.success) {
+        setTrackProbe(result.data);
+        const defaultSubs = result.data.subtitleTracks.filter((t) => t.isDefault).map((t) => t.id);
+        if (defaultSubs.length > 0) setSelectedSubtitleIds(new Set(defaultSubs));
+        setSelectedAudioId(defaultAudioTrackId(result.data));
+      }
+    } catch (error) {
+      console.error('[StreamDock] probeMediaTracks for stream option error:', error);
+    } finally {
+      setProbingTracks(false);
+    }
+  }, []);
 
   const toggleSubtitleTrack = useCallback((id: string) => {
     setSelectedSubtitleIds((prev) => {
@@ -706,7 +741,6 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
       {showLanguageModal && (trackProbe || streamOptions) && (
         <MediaLanguageSelectionModal
           probe={trackProbe || undefined}
-          streamOptions={streamOptions || undefined}
           selectedAudioId={selectedAudioId}
           selectedSubtitleIds={selectedSubtitleIds}
           subtitleMode={subtitleMode}
@@ -715,7 +749,6 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
           packagingMode={packagingMode}
           resolvedFormat={resolvedYtDlpSummary.format}
           resolvedSubtitleArgs={resolvedYtDlpSummary.subtitleArgs}
-          selectedStreamOption={selectedStreamOption || undefined}
           onAudioSelect={setSelectedAudioId}
           onSubtitleToggle={toggleSubtitleTrack}
           onSubtitleClear={() => {
@@ -726,27 +759,6 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
           onSubtitleModeChange={setSubtitleMode}
           onSubtitleConvertChange={setSubtitleConvert}
           onSubsOnlyChange={setSubsOnly}
-          onStreamOptionSelect={async (manifestUrl: string) => {
-              setSelectedStreamOption(manifestUrl);
-              // Re-probe tracks for the selected manifest URL since different languages
-              // may be on different manifest URLs (separate streams)
-              if (window.streamDock?.probeMediaTracks) {
-                setProbingTracks(true);
-                try {
-                  const result = await window.streamDock.probeMediaTracks({ pageUrl: manifestUrl, manifestUrl });
-                  if (result?.success) {
-                    setTrackProbe(result.data);
-                    const defaultSubs = result.data.subtitleTracks.filter((t) => t.isDefault).map((t) => t.id);
-                    if (defaultSubs.length > 0) setSelectedSubtitleIds(new Set(defaultSubs));
-                    setSelectedAudioId(defaultAudioTrackId(result.data));
-                  }
-                } catch (error) {
-                  console.error('[StreamDock] probeMediaTracks for stream option error:', error);
-                } finally {
-                  setProbingTracks(false);
-                }
-              }
-            }}
           onConfirm={() => {
             setShowLanguageModal(false);
             void start();
@@ -814,7 +826,7 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
                 name="stream-language"
                 aria-label="Language"
                 value={selectedStreamOption ?? ''}
-                onChange={(e) => setSelectedStreamOption(e.target.value || null)}
+                onChange={(e) => { void handleStreamOptionSelect(e.target.value); }}
                 disabled={busy}
                 className="select-field h-8 w-32"
               >
@@ -824,6 +836,39 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
                     {option.languageConfidence === 'inferred' ? '?' : ''}
                   </option>
                 ))}
+              </select>
+            )}
+            {showAudioPreference && (
+              /* Only when the source carries several audio languages in one
+                 manifest — the case `--format-sort lang:` can actually act on. */
+              <select
+                name="audio-preference"
+                aria-label="Audio"
+                value={audioPreference}
+                onChange={(e) => setAudioPreference(e.target.value as AudioPreference)}
+                disabled={busy}
+                className="select-field h-8 w-36"
+              >
+                {audioChoices.map((choice) => (
+                  <option key={choice.value} value={choice.value}>{choice.label}</option>
+                ))}
+              </select>
+            )}
+            {hasSubtitleTracks && (
+              /* Offered only when the source actually has subtitles. It used to
+                 sit in Advanced for every source, including those with none. */
+              <select
+                name="subtitle-mode"
+                aria-label="Subtitles"
+                value={subtitleMode}
+                onChange={(e) => setSubtitleMode(e.target.value as SubtitleMode)}
+                disabled={busy}
+                className="select-field h-8 w-36"
+              >
+                <option value="none">No subtitles</option>
+                <option value="sidecar">Subtitles: file</option>
+                <option value="embed">Subtitles: embedded</option>
+                <option value="both">Subtitles: both</option>
               </select>
             )}
             <select
@@ -858,60 +903,45 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
         </div>
       )}
 
+      {/* One summary of what detection found. It used to offer "Select Stream"
+          here as well, which was a second entry point to a choice the main row
+          already owns — the button was how most people met it, so the row's
+          copy looked redundant instead of primary. This states the finding and
+          points at the control; the dialog is offered only when there is
+          per-track detail the row genuinely cannot hold. */}
       {(probingTracks || trackProbe || probingStreamOptions || streamOptions) && (
-        probingTracks ? (
+        probingTracks || probingStreamOptions ? (
           <div className="card card-pad flex items-center gap-2 text-sm text-text-secondary">
             <Loader2 className="h-4 w-4 animate-spin text-accent" />
-            Detecting available audio and subtitle tracks…
+            {probingStreamOptions ? 'Checking which languages this source offers…' : 'Checking for audio and subtitle tracks…'}
           </div>
-        ) : probingStreamOptions ? (
-          <div className="card card-pad flex items-center gap-2 text-sm text-text-secondary">
-            <Loader2 className="h-4 w-4 animate-spin text-accent" />
-            Detecting language stream options…
-          </div>
-        ) : streamOptions && streamOptions.options.length > 1 ? (
+        ) : (
           <div className="card card-pad flex items-center justify-between gap-2 animate-fade-in">
-            <div className="flex items-center gap-2 text-sm text-text-secondary">
-              <span>{streamOptions.options.length} language streams detected</span>
+            <div className="flex flex-col gap-1 text-sm">
+              <p className="text-text-secondary">
+                {languageStreams
+                  ? `${languageStreams.map((o) => o.language).join(' and ')} available for this source`
+                  : hasSubtitleTracks || (trackProbe?.audioTracks?.length ?? 0) > 1
+                    ? 'Alternate audio or subtitle tracks available'
+                    : 'One audio track, no subtitles offered by this source'}
+              </p>
+              <p className="text-xs text-text-disabled">
+                {languageStreams || showAudioPreference || hasSubtitleTracks
+                  ? 'Choose beside Quality above.'
+                  : 'Nothing to choose — the download proceeds with what the source provides.'}
+              </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowLanguageModal(true)}
-              className="btn-secondary text-sm"
-            >
-              Select Stream
-            </button>
+            {trackProbe && ((trackProbe.audioTracks?.length ?? 0) > 1 || hasSubtitleTracks) && (
+              <button
+                type="button"
+                onClick={() => setShowLanguageModal(true)}
+                className="btn-secondary text-sm"
+              >
+                Track details
+              </button>
+            )}
           </div>
-        ) : trackProbe ? (
-          trackProbe.audioTracks.length > 0 || trackProbe.subtitleTracks.length > 0 ? (
-            <div className="card card-pad flex items-center justify-between gap-2 animate-fade-in">
-              <div className="flex items-center gap-2 text-sm text-text-secondary">
-                <span>Available tracks detected</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowLanguageModal(true)}
-                className="btn-secondary text-sm"
-              >
-                Select Languages
-              </button>
-            </div>
-          ) : (
-            <div className="card card-pad flex items-center justify-between gap-2 animate-fade-in">
-              <div className="flex flex-col gap-1 text-sm">
-                <p className="text-text-secondary">No alternate audio or subtitle tracks detected</p>
-                <p className="text-xs text-text-disabled">Proceeding with default settings</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowLanguageModal(true)}
-                className="btn-secondary text-sm"
-              >
-                View Details
-              </button>
-            </div>
-          )
-        ) : null
+        )
       )}
 
       {(probe || analysis || busy) && (
@@ -1099,50 +1129,33 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
               )}
             </div>
 
+            {/* Advanced holds only what detection cannot decide. Audio and
+                subtitles moved to the main row, where they appear when the
+                source actually offers them — they used to sit here for every
+                source, duplicating the stream picker and the language select
+                and giving three answers to one question. What is left is a
+                connection setting, not a content choice. */}
             <button
               type="button"
               onClick={() => setAdvancedOpen(!advancedOpen)}
               className="mt-3 flex w-full items-center gap-1 text-xs text-text-secondary hover:text-text-primary"
             >
               <ChevronDown className={`h-3.5 w-3.5 transition-transform ${advancedOpen ? 'rotate-180' : ''}`} />
-              Advanced options
+              Connection settings
             </button>
 
             {advancedOpen && (
-              <div className="mt-2 grid grid-cols-2 gap-2 border-t border-border-subtle pt-2">
-                <div>
-                  <label htmlFor="audio-mode" className="field-label">Audio</label>
-                  <select id="audio-mode" value={audioPreference} onChange={(e) => setAudioPreference(e.target.value as AudioPreference)} className="select-field" disabled={audioChoices.length < 2}>
-                    {audioChoices.map((choice) => (
-                      <option key={choice.value} value={choice.value}>{choice.label}</option>
-                    ))}
-                  </select>
-                  <p className="mt-1 text-[11px] leading-tight text-text-disabled">
-                    {languageStreams
-                      ? 'This source serves each language as its own stream — choose it above.'
-                      : audioChoices.length > 1
-                        ? 'Multiple audio languages detected in this source.'
-                        : 'No alternate audio languages detected.'}
-                  </p>
-                </div>
-                <div>
-                  <label htmlFor="subtitle-mode" className="field-label">Subtitles</label>
-                  <select id="subtitle-mode" value={subtitleMode} onChange={(e) => setSubtitleMode(e.target.value as SubtitleMode)} className="select-field">
-                    <option value="none">None</option>
-                    <option value="sidecar">Separate file</option>
-                    <option value="embed">Embed in video</option>
-                    <option value="both">Both</option>
-                  </select>
-                </div>
-                <div className="col-span-2">
-                  <label htmlFor="spoof-agent" className="field-label">Browser impersonation</label>
-                  <select id="spoof-agent" value={impersonate} onChange={(e) => setImpersonate(e.target.value)} className="select-field">
-                    <option value="">Default</option>
-                    <option value="chrome">Chrome</option>
-                    <option value="firefox">Firefox</option>
-                    <option value="safari">Safari</option>
-                  </select>
-                </div>
+              <div className="mt-2 border-t border-border-subtle pt-2">
+                <label htmlFor="spoof-agent" className="field-label">Browser impersonation</label>
+                <select id="spoof-agent" value={impersonate} onChange={(e) => setImpersonate(e.target.value)} className="select-field">
+                  <option value="">Default</option>
+                  <option value="chrome">Chrome</option>
+                  <option value="firefox">Firefox</option>
+                  <option value="safari">Safari</option>
+                </select>
+                <p className="mt-1 text-[11px] leading-tight text-text-disabled">
+                  Only change this if a site refuses the download.
+                </p>
               </div>
             )}
           </div>
