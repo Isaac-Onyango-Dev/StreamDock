@@ -50,6 +50,7 @@ type StartRequest = {
   manifestUrl?: string;
   /** Referer URL for the selected manifest (for sites that require it) */
   manifestReferer?: string;
+  translation?: string;
 };
 
 type Unsubscribe = () => void;

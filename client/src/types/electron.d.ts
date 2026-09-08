@@ -68,6 +68,7 @@ declare global {
           downloadPackaging?: DownloadPackagingMode;
           manifestUrl?: string;
           manifestReferer?: string;
+          translation?: string;
         },
       ) => Promise<DownloadRecord>;
       cancelDownload: (id: string) => Promise<boolean>;

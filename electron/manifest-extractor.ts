@@ -126,6 +126,8 @@ const EXTRACTION_TIMEOUT_MS = 45_000;
 const JS_LAST_RESORT_MS = 5_000;
 /** Ceiling on a single raw fetch, so a silent server cannot stall the queue. */
 const FETCH_TIMEOUT_MS = 20_000;
+/** How long to wait for a page's language switcher to render. */
+const LANGUAGE_WAIT_MS = 8_000;
 
 /**
  * How long to wait after page load before triggering a reload retry
@@ -672,6 +674,43 @@ async function tryApiProbe(pageUrl: string): Promise<ApiProbeResult | null> {
  * keeps this correct for any host instead of hardcoding one embed provider —
  * anikoto has already moved from megaplay to vidtube once.
  */
+/**
+ * Pick a language on a page that serves each one as its own stream.
+ *
+ * anikoto renders `<div class="type" data-type="sub"><label>SUB</label><ul>…`
+ * with the clickable servers inside; the container itself does nothing. The
+ * list is rendered by page JS, so this polls for it rather than assuming it
+ * exists at dom-ready.
+ *
+ * Returns 'clicked' when a server for the wanted language was activated,
+ * 'absent' when the page offers no such language. Never rejects.
+ */
+function languageClickScript(translation: string): string {
+  const selector = `[data-type="${translation}"] li, [data-type="${translation}"] button`;
+  return `
+    new Promise((resolve) => {
+      const started = Date.now();
+      const tick = () => {
+        try {
+          const items = document.querySelectorAll(${JSON.stringify(selector)});
+          if (items.length) {
+            let idx = 0;
+            items.forEach((el, i) => {
+              if (el.classList && el.classList.contains('active')) idx = i;
+            });
+            try { items[idx].click(); } catch (e) { /* not clickable */ }
+            resolve('clicked');
+            return;
+          }
+        } catch (e) { /* selector unusable on this page */ }
+        if (Date.now() - started > ${LANGUAGE_WAIT_MS}) { resolve('absent'); return; }
+        setTimeout(tick, 250);
+      };
+      tick();
+    })
+  `;
+}
+
 function refererForRequest(
   details: { referrer?: string; frame?: { url?: string } | null },
   pageUrl: string,
@@ -687,7 +726,10 @@ function refererForRequest(
   return pageUrl;
 }
 
-export async function extractManifest(pageUrl: string): Promise<ManifestResult | null> {
+export async function extractManifest(
+  pageUrl: string,
+  wantedTranslation?: string,
+): Promise<ManifestResult | null> {
   if (getProbeStrategy(pageUrl) === 'ytdlp') {
     try {
       log.info(`[manifest-extractor] Routing to yt-dlp probe: ${pageUrl}`);
@@ -744,7 +786,7 @@ export async function extractManifest(pageUrl: string): Promise<ManifestResult |
   // Priority 2: Prevent ad popups
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
-  return probeOnce(win, probeSession, pageUrl, preloadPath);
+  return probeOnce(win, probeSession, pageUrl, preloadPath, false, wantedTranslation);
 }
 
 async function probeOnce(
@@ -753,10 +795,19 @@ async function probeOnce(
   pageUrl: string,
   preloadPath?: string,
   isRetry = false,
+  wantedTranslation?: string,
 ): Promise<ManifestResult | null> {
   return new Promise<ManifestResult | null>((resolve) => {
     let settled = false;
     let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // When a language is requested, the manifest the page loads on its own is
+    // the wrong one — anikoto opens on SUB. Manifests are ignored until the
+    // requested server has been clicked, so a dub download does not silently
+    // capture the sub stream. With no language requested this is true from the
+    // start and nothing changes.
+    const wantsLanguage = Boolean(wantedTranslation) && wantedTranslation !== 'unknown';
+    let languageReady = !wantsLanguage;
 
     const finish = (result: ManifestResult | null) => {
       if (settled) return;
@@ -817,6 +868,31 @@ async function probeOnce(
 
     // Spoof user-agent
     win.webContents.setUserAgent(SPOOF_UA);
+
+    if (wantsLanguage) {
+      win.webContents.once('dom-ready', () => {
+        // Bounded like every other await in this file: a hung renderer must not
+        // leave the gate closed forever, or no manifest is ever accepted.
+        let answered = false;
+        const open = (why: string): void => {
+          if (answered) return;
+          answered = true;
+          languageReady = true;
+          log.info(`[manifest-extractor] Language "${wantedTranslation}": ${why}`);
+        };
+        const bail = setTimeout(() => open('selection timed out, taking the default stream'), LANGUAGE_WAIT_MS + 4_000);
+        win.webContents
+          .executeJavaScript(languageClickScript(String(wantedTranslation)))
+          .then((outcome: string) => {
+            clearTimeout(bail);
+            open(outcome === 'clicked' ? 'server selected' : 'not offered by this page, taking the default stream');
+          })
+          .catch(() => {
+            clearTimeout(bail);
+            open('selection failed, taking the default stream');
+          });
+      });
+    }
 
     // Aggressive auto-click: play buttons, player containers, and video elements
     win.webContents.on('dom-ready', () => {
@@ -879,12 +955,23 @@ async function probeOnce(
       try {
         if (settled) { callback({ cancel: true }); return; }
         const match = details.url.match(MANIFEST_PATTERN);
+        if (match && !languageReady) {
+          // The default-language stream, arriving before the switch. Let it
+          // through so the player keeps working, but do not capture it.
+          callback({});
+          return;
+        }
         if (match) {
           const type = match[1].toLowerCase() as ManifestResult['type'];
           log.info(`[manifest-extractor] Found ${type} manifest: ${details.url}`);
           // Cancel the request to avoid letting the player consume it
           callback({ cancel: true });
           finish({ originalUrl: pageUrl, manifestUrl: details.url, type, referer: refererForRequest(details, pageUrl) });
+          return;
+        }
+
+        if (!languageReady && KNOWN_CDNS.some((cdn) => details.url.includes(cdn))) {
+          callback({});
           return;
         }
 
