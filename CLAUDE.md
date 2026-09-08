@@ -1800,8 +1800,139 @@ overwrote the project's `package.json` with `builder-util-runtime`'s; `git
 status` caught it and HEAD restored it exactly. And the first `.gitattributes`
 proof was invalid, as above.
 
+### Session 19 — the site made responsive, and the carousel stopped calculating
+
+No version bump, **nothing released**. Site only; no app code touched. A
+read-only audit first (published at
+https://claude.ai/code/artifact/69ec4646-435e-40bf-b8a7-b6279eedd164), then the
+implementation. Four files: the template, its generated output, `build-site.ts`
+and `verify-engine.ts`.
+
+**The audit measured rather than read.** Playwright across 20 viewports
+(300x568 to 3840x2160), a 10px width sweep and an 11-step height sweep. Ten
+findings, three high. Overflow was measured against the *viewport*, not
+`scrollWidth`, because `body { overflow-x: hidden }` hid it from that check
+entirely — which is how the worst bug survived several rounds of responsive work.
+
+**The reported bug: `--shot-limit` never subtracted the sticky nav.** It took
+`100svh` minus the section's own furniture, but the section renders *under* a
+~75px sticky nav and is anchored with `scroll-margin-top`. So it was reliably
+one nav-height too tall. At 1440 wide it only fitted at a viewport height of
+**864 or more**; on Isaac's 1440x664 the progress dots sat 106px below the fold
+and the caption was cut mid-sentence. Two more defects compounded it: the
+`max(340px, …)` floor **overrode** the height cap once the height term fell
+below it — the protection disabled exactly when needed, so a landscape phone
+overflowed by 135–163px — and `--shot-furniture` was a per-breakpoint constant
+(322/330/370) that did not match the measured furniture (289/275/312).
+
+**The fix stops calculating.** The section is a flex column; label, title,
+caption and progress are `flex: 0 0 auto`, and only the stage gives ground. The
+browser measures the furniture — exactly, at any width, however the caption has
+wrapped — so there is no constant left to drift. `--shots-avail` is
+`100svh - var(--nav-h) - 1rem` and only ever *caps*; the section's natural
+height comes from the slide's width-derived size, so on a roomy screen it takes
+what it needs and no more (45% of a 4K viewport, 67% of 1440p, 85% of 1440x900).
+
+Two details made that possible. **`--nav-h` is a definition, not an estimate**:
+`nav` is built from it and every child is capped at `--nav-line`, so the value
+the carousel subtracts is exactly what the bar occupies. And **the step is a
+percentage** — `translateX(60%)` resolves against the element's own border-box
+width — so with the slide's width derived from its height through
+`aspect-ratio`, the gap between neighbours tracks the slide with no width
+variable at all. That is what removed the last constant. Measured at exactly
+60.0%. The slide constrains **one** dimension only (`height: 100%; width: auto`);
+constraining both is what would squash the frame.
+
+**Result: 18 of 20 viewports show the whole section — label, title, caption and
+progress — without scrolling.** The two that don't are landscape phones
+(740x360, 844x390), where the furniture alone is ~195px of a ~300px usable
+height; the page scrolls and nothing is clipped, which is the honest outcome.
+The floor is 24rem, set from the measured worst case (furniture 195–244px plus
+the stage's 6rem minimum), and verified not to overlap the next section at eight
+extreme-short viewports.
+
+**The nav CTA was clipped below 390px — and again from 424 to 448px.** The row's
+intrinsic width was a fixed 383px, and with `overflow-x: hidden` the Download
+button could not even be scrolled to; at 320px it rendered as "Dow". The second
+band appeared when `.nav-badge` un-hid above its 420px breakpoint and pushed the
+row to 448px — **a band no spot check would find**, since the fix before it was
+verified at 320 and 820. Now fluid throughout, mobile-first (badge and links
+start hidden and are turned *on* by width), with `min-width: 0` as the safety
+net. **A separate 48px was being wasted by the hidden links themselves**:
+`display: none` on the `<a>` leaves four zero-width `<li>` behind and each still
+takes a flex gap. Hiding `li:has(> .text-link)` recovered it, and the wordmark
+stops truncating down to 300px.
+
+**Also fixed:** the hero was a constant 837px at every width ≥1280 whatever the
+viewport height, putting its Download button below the fold on 1440x664 and
+1280x720 — every vertical value is now clamp()'d with a vh term.
+`#requirements` was the one anchor with no scroll margin (session 17 fixed the
+identical bug for `#download`); it is now a single `section[id]` rule so a new
+section cannot miss it. The layout froze at ~1290px — every measurement was
+byte-identical at 1680/1920/2560/3440/3840 — so five content max-widths became
+two shared tokens that line up, nav and footer centre their contents inside
+`--shell-max` via `padding-inline: max(gutter, (100% - max) / 2)` instead of
+stranding them at opposite corners, and type and section padding keep growing.
+`scroll-behavior: smooth` now honours `prefers-reduced-motion`.
+
+**Breakpoints are content-driven and mobile-first.** Six `max-width` queries
+became three `min-width` ones plus one `max-height`, each at a width where the
+content genuinely changes: 26.5rem (the badge fits), 45rem (room for the outer
+slide pair and the arrows), 52rem (the nav links fit), and a short-viewport tier
+that trims the carousel's type. The `req-grid` and both card grids use
+`minmax(min(Nrem, 100%), 1fr)` and collapse on their own — the `min()` is what
+lets a single column go narrower than the track floor, which the download grid
+previously could not. `.card` and `.feature` are **container queries**: a card
+in an auto-fit grid can be 280px or 500px at the same viewport width, so what it
+needs to know is its own size.
+
+**`body { overflow-x: hidden }` is gone.** It never prevented the overflow it
+was hiding — it made the clipped CTA unreachable instead of scrollable. Long
+tokens are handled where they occur (`overflow-wrap: anywhere` on changelog and
+requirements code). **96 widths from 280 to 3840 now measure zero overflow with
+no masking rule in place.**
+
+**Verification**: typecheck, ESLint 0/0, 207 tests, `verify:engine` **268
+checks**, Playwright 12/12, production build. Plus 13 behavioural assertions
+driving the real carousel (autoplay, side-slide click, arrows, a **real** mouse
+swipe, phone peek, reduced motion, served-equals-rendered) and the 20-viewport
+matrix re-run. All four new guards were confirmed red against their bug: the
+missing `--nav-h`, a width-only `--shot-w`, a width-constrained slide, and a
+removed cap.
+
 ## Working agreements for future sessions on this repo
 
+- **Let the browser do the layout arithmetic.** Two carousel regressions came
+  from computing a height in CSS: first width-only, then `100svh` minus a
+  hardcoded furniture constant that never subtracted the sticky nav. A flex
+  column with `flex: 0 0 auto` furniture and a shrinking stage measures the
+  furniture exactly, at every width, and leaves no constant to drift.
+- **A `max()` floor cancels the `min()` cap above it.** `max(340px, min(…,
+  heightTerm))` disables the height protection precisely when the window is too
+  short — which is the only time it was needed. A floor and a cap cannot both
+  be hard limits; decide which one may be violated.
+- **A percentage in `translateX` resolves against the element's own width.**
+  That is how the carousel's step tracks a slide whose width is derived from
+  its height, with no width variable anywhere. Reach for it before adding a
+  custom property that has to be restated at every breakpoint.
+- **Constrain one dimension, never two.** `height: 100%` + `width: auto` +
+  `aspect-ratio` cannot distort. Adding a `max-width` to that re-breaks the
+  frame, because the ratio loses to two definite dimensions.
+- **A reserved height must be a definition, not an estimate.** `--nav-h` is
+  what `nav` is built from and every child is capped to it, so anything
+  subtracting it is exactly right. An estimate of a component's height drifts
+  from it the first time its padding changes.
+- **`display: none` on a link leaves its `<li>` taking a flex gap.** Four
+  hidden nav links were costing 48px of nothing — a sixth of a small phone.
+  Hide the list item (`li:has(> .text-link)`), not the anchor.
+- **`overflow-x: hidden` hides the bug, not the overflow.** It made a clipped
+  Download button unreachable rather than scrollable, and kept it out of every
+  `scrollWidth` check. Remove it, fix what actually overflows, and let a
+  regression show itself.
+- **Mobile-first turns a "hidden below X" rule into "shown above X".** The nav
+  badge was hidden under 420px, so at 421px it reappeared into a row that could
+  not hold it and clipped the CTA — a 424–448px band nobody would look at.
+  Starting hidden and enabling by width cannot produce that shape.
 - **One checkout, two operating systems, two `node_modules`.** A Windows
   install leaves `@esbuild/win32-x64` where Linux needs `@esbuild/linux-x64`;
   every build script dies and `tsc` still passes, because it is pure JS. Run

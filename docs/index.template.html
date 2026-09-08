@@ -45,17 +45,48 @@
   --brand-grad: linear-gradient(120deg, var(--violet) 0%, var(--pink) 55%, var(--amber) 100%);
   --font-display: 'Space Grotesk', system-ui, sans-serif;
   --font-body: 'Inter', system-ui, sans-serif;
+
+  /* ── Layout system ──
+     Five hand-picked content max-widths used to leave the column edges
+     visibly ragged (1020 / 1080 / 780 / 860 / 1240). Two do the same job and
+     line up: --content-max for the grids, --content-narrow for anything whose
+     job is a reading measure. --shell-max is wider again, for the nav and
+     footer, which span the window rather than sit in the column. */
+  --gutter: clamp(1rem, .55rem + 1.4vw, 3rem);
+  --content-max: 78rem;
+  --content-narrow: 56rem;
+  --shell-max: 90rem;
+  --section-y: clamp(3rem, 1.5rem + 3.2vw, 7rem);
+
+  /* The sticky nav's height, as a definition rather than an estimate.
+     `nav` is built from these two values and every child is capped at
+     --nav-line, so --nav-h is exactly what the bar occupies. That matters
+     because the screenshots section subtracts it to work out how much screen
+     it actually gets: the previous version budgeted against the whole
+     viewport and was reliably one nav-height too tall. */
+  --nav-pad-y: clamp(.75rem, .35rem + 1.1vh, 1.15rem);
+  --nav-line: 2.25rem;
+  --nav-h: calc(var(--nav-line) + 2 * var(--nav-pad-y) + 1px);
 }
 
 html { scroll-behavior: smooth; }
+
+/* One rule for every anchor target, rather than a scroll-margin remembered
+   per section. #requirements was the section that got forgotten — it has no
+   top padding, so following the nav link parked its heading underneath the
+   bar. Applied to the element type, a section added later cannot miss it. */
+section[id], footer[id] { scroll-margin-top: calc(var(--nav-h) + 1rem); }
 
 body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-body);
-  min-height: 100vh;
-  overflow-x: hidden;
+  min-height: 100svh;
   line-height: 1.5;
+  /* No overflow-x: hidden. It never prevented the overflow it was hiding —
+     it just made the clipped nav CTA unreachable instead of scrollable, and
+     kept the bug out of every scrollWidth check. Long unbroken strings are
+     handled where they occur instead. */
 }
 
 /* ── Ambient background ── */
@@ -95,7 +126,13 @@ nav {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 48px;
+  gap: clamp(.5rem, 2vw, 1.5rem);
+  min-height: var(--nav-h);
+  /* The padding centres the row inside --shell-max once the window is wider
+     than it, so on an ultrawide the logo and the links stop drifting to
+     opposite ends of the screen. Below that it is just the gutter. */
+  padding-block: var(--nav-pad-y);
+  padding-inline: max(var(--gutter), calc((100% - var(--shell-max)) / 2));
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(18px);
   background: rgba(10, 7, 22, .65);
@@ -104,15 +141,30 @@ nav {
   z-index: 100;
 }
 
-.nav-logo { display: flex; align-items: center; gap: 12px; text-decoration: none; }
-.nav-mark { width: 34px; height: 34px; flex-shrink: 0; border-radius: 10px; }
+/* min-width: 0 is the safety net under the fluid sizing below. The row's
+   intrinsic width was a fixed 383px, so under a 390px window the Download
+   button simply ran off the right edge — and with the old overflow-x: hidden
+   it could not even be scrolled to. Now the row can always compress. */
+.nav-logo {
+  display: flex;
+  align-items: center;
+  gap: clamp(.5rem, 2vw, .75rem);
+  text-decoration: none;
+  min-width: 0;
+  height: var(--nav-line);
+}
+.nav-mark { width: 2.125rem; height: 2.125rem; flex-shrink: 0; border-radius: 10px; }
 
 .nav-wordmark {
   font-family: var(--font-display);
-  font-size: 1.25rem;
+  font-size: clamp(1rem, .8rem + .65vw, 1.25rem);
   font-weight: 700;
   letter-spacing: -.02em;
   color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .nav-wordmark span {
   background: var(--brand-grad);
@@ -121,7 +173,12 @@ nav {
   background-clip: text;
 }
 
+/* Both of these start hidden and are turned on by width further down — the
+   mobile-first direction. The old rules ran the other way (visible, then
+   hidden under 420px / 820px), which is how the badge came back at 421px into
+   a row that could not hold it and clipped the Download button. */
 .nav-badge {
+  display: none;
   background: var(--surface-2);
   border: 1px solid var(--border-strong);
   color: var(--amber-bright);
@@ -131,23 +188,38 @@ nav {
   padding: 3px 10px;
   border-radius: 999px;
   letter-spacing: .03em;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
-.nav-links { display: flex; align-items: center; gap: 28px; list-style: none; }
-.nav-links a.text-link { color: var(--muted); text-decoration: none; font-size: .9rem; font-weight: 600; transition: color .2s; }
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: clamp(.75rem, .2rem + 1.7vw, 1.75rem);
+  list-style: none;
+  flex-shrink: 0;
+}
+/* The list item, not the anchor. Hiding the anchor leaves four zero-width
+   <li> behind, and each still takes a flex gap — 48px of nothing, which is a
+   sixth of a small phone's width and part of why this row would not fit. */
+.nav-links li:has(> .text-link) { display: none; }
+.nav-links a.text-link { color: var(--muted); text-decoration: none; font-size: .9rem; font-weight: 600; transition: color .2s; white-space: nowrap; }
 .nav-links a.text-link:hover { color: var(--pink-bright); }
 
 .nav-cta {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  padding: 9px 18px;
+  height: var(--nav-line);
+  padding-inline: clamp(.75rem, .35rem + 1.3vw, 1.125rem);
   border-radius: 999px;
   background: var(--brand-grad);
   color: #14071E;
   font-weight: 700;
-  font-size: .85rem;
+  font-size: clamp(.78rem, .72rem + .2vw, .85rem);
   text-decoration: none;
+  white-space: nowrap;
   transition: transform .2s ease, box-shadow .2s ease;
 }
 .nav-cta:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(236,72,153,.35); }
@@ -160,13 +232,18 @@ nav {
 .nav-icon-link:hover { color: var(--text); }
 
 /* ── Hero ── */
+/* Every vertical value here carries a vh term, so the hero compresses on a
+   short window instead of staying a constant 837px tall whatever the screen
+   is. It was that constant that pushed the Download button below the fold on
+   an ordinary 1440x664 laptop — the button the whole page exists to offer. */
 .hero {
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
-  padding: 96px 24px 64px;
-  gap: 28px;
+  padding-block: clamp(2rem, 1rem + 4.5vh, 6rem) clamp(2rem, 1rem + 3vh, 4rem);
+  padding-inline: var(--gutter);
+  gap: clamp(.9rem, .35rem + 1.6vh, 1.75rem);
 }
 
 .hero-eyebrow {
@@ -191,7 +268,9 @@ nav {
 }
 
 .hero-mark {
-  width: 104px; height: 104px;
+  width: clamp(3.75rem, 2rem + 6vh, 6.5rem);
+  height: auto;
+  aspect-ratio: 1;
   border-radius: 28px;
   animation: fadeDown .5s .1s ease both, floaty 5s ease-in-out infinite;
   filter: drop-shadow(0 20px 50px rgba(139,92,246,.45));
@@ -199,12 +278,15 @@ nav {
 
 .hero h1 {
   font-family: var(--font-display);
-  font-size: clamp(2.6rem, 6.4vw, 4.6rem);
+  /* The old cap was 4.6rem, reached at 1150px and then never moving again —
+     so the headline was the same size on a laptop and on a 4K panel. */
+  font-size: clamp(1.9rem, 1rem + 3.6vw, 5.25rem);
   font-weight: 800;
   letter-spacing: -.03em;
   line-height: 1.04;
+  text-wrap: balance;
   animation: fadeDown .5s .15s ease both;
-  max-width: 900px;
+  max-width: 18ch;
 }
 
 .hero h1 .grad {
@@ -215,10 +297,11 @@ nav {
 }
 
 .hero-sub {
-  max-width: 600px;
-  font-size: 1.15rem;
+  max-width: 46ch;
+  font-size: clamp(.98rem, .9rem + .3vw, 1.2rem);
   color: var(--muted);
   line-height: 1.65;
+  text-wrap: pretty;
   animation: fadeDown .5s .2s ease both;
 }
 .hero-sub strong { color: var(--text); font-weight: 700; }
@@ -227,7 +310,7 @@ nav {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: clamp(.65rem, .3rem + 1vh, 1rem);
   animation: fadeDown .5s .25s ease both;
 }
 
@@ -236,7 +319,7 @@ nav {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  padding: 17px 32px;
+  padding: clamp(.8rem, .55rem + .8vh, 1.0625rem) clamp(1.25rem, .75rem + 1.6vw, 2rem);
   border-radius: 14px;
   font-size: 1rem;
   font-weight: 700;
@@ -322,24 +405,26 @@ nav {
 .section-title {
   text-align: center;
   font-family: var(--font-display);
-  font-size: clamp(1.7rem, 3.4vw, 2.3rem);
+  font-size: clamp(1.5rem, 1.1rem + 1.5vw, 2.75rem);
   font-weight: 800;
   letter-spacing: -.02em;
-  margin-bottom: 44px;
+  line-height: 1.15;
+  text-wrap: balance;
+  margin-bottom: clamp(1.75rem, 1rem + 2vw, 2.75rem);
 }
 
 /* ── Download cards ── */
-/* Same sticky-nav clearance the screenshots section needs, and for the same
-   reason: 40px of top padding is less than the ~75px nav, so following the
-   Download nav button or a hero platform pill parked "Choose your platform"
-   underneath the bar. Measured at y=40 against a 75px nav before this. */
-.download-section { padding: 40px 24px 88px; scroll-margin-top: 88px; }
+/* Nav clearance now comes from the shared section[id] rule at the top. */
+.download-section { padding: clamp(1.5rem, 3vw, 2.5rem) var(--gutter) var(--section-y); }
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 22px;
-  max-width: 1020px;
+  /* min() inside minmax is what lets a single-column layout go narrower than
+     the track floor. Without it the track stays 280px wide inside a 272px
+     column on a 320px phone, and the grid has no headroom at all. */
+  grid-template-columns: repeat(auto-fit, minmax(min(17.5rem, 100%), 1fr));
+  gap: clamp(1rem, .5rem + 1.2vw, 1.5rem);
+  max-width: var(--content-max);
   margin: 0 auto;
 }
 
@@ -347,7 +432,7 @@ nav {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 22px;
-  padding: 30px 26px;
+  padding: clamp(1.25rem, 1rem + 1vw, 1.875rem) clamp(1.1rem, .9rem + .9vw, 1.625rem);
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -355,6 +440,10 @@ nav {
   animation: fadeUp .5s ease both;
   position: relative;
   overflow: hidden;
+  /* A card in an auto-fit grid can be 280px or 500px wide at the same
+     viewport width, so what it needs to know is its own size, not the
+     window's. Its contents tighten below in @container. */
+  container: dl-card / inline-size;
 }
 .card::before {
   content: '';
@@ -379,9 +468,18 @@ nav {
 .card-icon svg { width: 26px; height: 26px; }
 
 .card-header h3 { font-family: var(--font-display); font-size: 1.2rem; font-weight: 700; letter-spacing: -.01em; }
-.card-header p { font-size: .84rem; color: var(--muted); margin-top: 2px; }
+.card-header p { font-size: .84rem; color: var(--muted); margin-top: 2px; overflow-wrap: break-word; }
 
 .card-meta { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Narrow card, whatever the window is doing. */
+@container dl-card (max-width: 19rem) {
+  .card-header h3 { font-size: 1.08rem; }
+  .card-header p { font-size: .8rem; }
+  .card-icon { width: 46px; height: 46px; border-radius: 13px; }
+  .card-icon svg { width: 22px; height: 22px; }
+  .btn-dl { padding: 12px 16px; font-size: .84rem; }
+}
 .tag { font-size: .72rem; font-weight: 700; padding: 4px 10px; border-radius: 999px; letter-spacing: .03em; }
 .tag-violet { background: rgba(139,92,246,.14); border: 1px solid rgba(139,92,246,.35); color: var(--violet-bright); }
 .tag-pink { background: rgba(236,72,153,.14); border: 1px solid rgba(236,72,153,.35); color: var(--pink-bright); }
@@ -408,8 +506,10 @@ nav {
 
 .download-note {
   text-align: center; color: var(--muted); font-size: .85rem;
-  margin-top: 20px; max-width: 600px; margin-left: auto; margin-right: auto;
+  margin-top: 20px; max-width: 62ch; margin-left: auto; margin-right: auto;
+  text-wrap: pretty; overflow-wrap: break-word;
 }
+.download-note code { overflow-wrap: anywhere; }
 .download-note a { color: var(--pink-bright); }
 
 .all-releases-wrap { text-align: center; margin-top: 26px; }
@@ -423,50 +523,75 @@ nav {
 .btn-ghost:hover { border-color: var(--border-strong); color: var(--text); }
 
 /* ── Screenshots carousel ── */
-/* The nav is sticky and ~71px tall, and this section's top padding is far
-   smaller than the 80px the sections below it carry — so without a scroll
-   margin, following the Screenshots nav link parks the label and half the
-   heading underneath the nav bar. */
-.shots { padding: 16px 24px 28px; scroll-margin-top: 88px; }
+/*
+ * How this is sized, because it is the third attempt and the first two were
+ * both arithmetic:
+ *
+ * v1 sized the slide by width alone — min(58vw, 860px) — so the section was
+ * 961px tall on every screen whatever its height, and overflowed a laptop.
+ * v2 added a height term, but subtracted a hardcoded --shot-furniture from
+ * 100svh: it never subtracted the sticky nav the section renders *under*, so
+ * it was reliably one nav-height too tall, and the constant (322/330/370px)
+ * did not match the furniture it claimed to describe (289/275/312 measured).
+ *
+ * v3 stops calculating. The section is a flex column; the label, title,
+ * caption and progress row are flex:0 0 auto and keep their natural height;
+ * the stage is the only thing that shrinks. So the browser measures the
+ * furniture — exactly, at whatever width, however the caption has wrapped —
+ * and there is no constant left to drift.
+ *
+ * The section's *natural* height comes from the slide's width-derived size,
+ * so on a roomy screen it takes the space it needs and no more. --shots-avail
+ * only ever caps it. svh rather than dvh: dvh changes as a mobile URL bar
+ * hides and would resize the carousel mid-scroll; the vh line is the
+ * fallback beneath it.
+ */
+.shots {
+  --shots-avail: calc(100vh - var(--nav-h) - 1rem);
+  --shots-avail: calc(100svh - var(--nav-h) - 1rem);
 
-/* Local overrides, not edits to the shared rules: every pixel taken off the
-   furniture is a pixel the screenshot can have while the section still fits a
-   viewport. Other sections keep the site's normal rhythm. */
-.shots .section-label { margin-bottom: 8px; }
-.shots .section-title { margin-bottom: 24px; }
+  display: flex;
+  flex-direction: column;
+  /* Capped by the screen it is actually given. The floor keeps the cap from
+     dropping below what the furniture needs on a very short window — there
+     the page scrolls, which is the honest outcome, rather than the section
+     pretending to fit while the caption is cut off.
+     24rem is set from the measured worst case: the furniture runs 195–244px
+     depending on how the caption wraps, plus the stage's 6rem minimum, so
+     ~340px is the point below which something would have to be clipped. */
+  max-height: max(var(--shots-avail), 24rem);
+  padding-block: clamp(.75rem, .25rem + 1.6vh, 2rem);
+  padding-inline: var(--gutter);
+}
+
+/* Only the stage gives ground. */
+.shots > *, .shots-stage > * { flex: 0 0 auto; }
+.shots-stage, .shots-viewport { flex: 0 1 auto; min-height: 0; }
+
+.shots .section-label { margin-bottom: clamp(.35rem, .8vh, .625rem); }
+.shots .section-title { margin-bottom: clamp(.75rem, 1.8vh, 1.5rem); }
 
 /* Everything the pointer can interact with, and the hover target that pauses
    autoplay. The section heading is deliberately outside it: hovering a title
    two hundred pixels above the carousel should not stop it. */
-.shots-stage { max-width: 1240px; margin: 0 auto; }
+.shots-stage {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+}
 
 .shots-viewport {
-  /* Geometry lives in custom properties so the breakpoints below restate three
-     numbers instead of five transform rules. --shot-step is the distance
-     between neighbouring slide centres; the scale and opacity ramps come off
-     the position attribute JS writes.
-     
-     --shot-w was min(58vw, 860px) — width only — so the section was 961px tall
-     on every screen, whatever its height. On a laptop with a bookmarks bar and
-     a sidebar (~664px of viewport) that overflowed by ~300px and pushed the
-     heading and the caption out of sight.
-     
-     --shot-limit is the third term that fixes it: the height left after the
-     section's own furniture, converted back through the aspect ratio into a
-     width. Whichever of the three is smallest wins, so a tall window is capped
-     by width and a short one by height, and the whole section fits either way.
-     svh rather than dvh: dvh changes as a mobile URL bar hides and would
-     resize the carousel mid-scroll. The vh line is the fallback beneath it. */
-  --shot-furniture: 322px;
-  --shot-limit: calc((100vh - var(--shot-furniture)) * 1.5474);
-  --shot-limit: calc((100svh - var(--shot-furniture)) * 1.5474);
-  --shot-w: max(340px, min(50vw, 780px, var(--shot-limit)));
-  --shot-step: calc(var(--shot-w) * .60);
-  --shot-pad: 26px;
-  --shot-side-scale: .78;
-  --shot-side-opacity: .4;
-  --shot-far-scale: .64;
-  --shot-far-opacity: .14;
+  /* The slide's widest permitted size. Everything else about the geometry
+     follows from it, and the steps below are percentages of the slide's own
+     width, so nothing has to be restated when it changes. */
+  --shot-w-max: min(82vw, 34rem);
+  --step: 62%;
+  --shot-side-scale: .9;
+  --shot-side-opacity: .42;
+  --shot-far-scale: .76;
+  --shot-far-opacity: 0;
   --shot-ease: cubic-bezier(.22, .68, .3, 1);
   --shot-speed: .6s;
 
@@ -475,7 +600,7 @@ nav {
      the window edge rather than by an arbitrary inset. The hidden overflow is
      also what keeps the off-centre slides — which reach well past the viewport
      on a phone — from widening the page. */
-  margin: 0 -24px;
+  margin-inline: calc(var(--gutter) * -1);
   /* `hidden` first as the fallback: clipping one axis while leaving the other
      visible needs `clip`, which older Safari lacks. Where it is supported the
      two lines below win, and the centre slide's shadow can spill into the gap
@@ -484,7 +609,11 @@ nav {
   overflow: hidden;
   overflow-x: clip;
   overflow-y: visible;
-  height: calc(var(--shot-w) / 1.5474 + var(--shot-pad));
+  /* Natural height, from the width cap through the frame's aspect ratio.
+     flex-shrink takes it down from here when the window is short; flex-grow
+     is 0, so a tall window does not stretch it. */
+  height: calc(var(--shot-w-max) / (1600 / 1034));
+  min-height: 6rem;
   /* Horizontal drags are the carousel's; vertical ones stay the page's. */
   touch-action: pan-y;
 }
@@ -493,7 +622,11 @@ nav {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: var(--shot-w);
+  /* Height drives, width follows through the aspect ratio — one constrained
+     dimension, so the frame can never be squashed however the stage is
+     shrunk. Constraining the width as well is what would distort it. */
+  height: 100%;
+  width: auto;
   aspect-ratio: 1600 / 1034;
   padding: 0;
   border: 1px solid var(--border);
@@ -532,23 +665,27 @@ nav {
   border-color: var(--border-strong);
   box-shadow: 0 18px 44px rgba(0, 0, 0, .5), 0 0 44px rgba(139, 92, 246, .15);
 }
+/* --step is a percentage, and a percentage in translateX resolves against the
+   element's own border-box width. The slide's width is derived from its
+   height, so the gap between neighbours tracks the slide at every size on its
+   own — which is what removed the last width variable from this component. */
 .shot[data-pos="-1"] {
-  transform: translate(-50%, -50%) translateX(calc(-1 * var(--shot-step))) scale(var(--shot-side-scale));
+  transform: translate(-50%, -50%) translateX(calc(var(--step) * -1)) scale(var(--shot-side-scale));
   opacity: var(--shot-side-opacity);
   z-index: 3;
 }
 .shot[data-pos="1"] {
-  transform: translate(-50%, -50%) translateX(var(--shot-step)) scale(var(--shot-side-scale));
+  transform: translate(-50%, -50%) translateX(var(--step)) scale(var(--shot-side-scale));
   opacity: var(--shot-side-opacity);
   z-index: 3;
 }
 .shot[data-pos="-2"] {
-  transform: translate(-50%, -50%) translateX(calc(-1.72 * var(--shot-step))) scale(var(--shot-far-scale));
+  transform: translate(-50%, -50%) translateX(calc(var(--step) * -1.72)) scale(var(--shot-far-scale));
   opacity: var(--shot-far-opacity);
   z-index: 2;
 }
 .shot[data-pos="2"] {
-  transform: translate(-50%, -50%) translateX(calc(1.72 * var(--shot-step))) scale(var(--shot-far-scale));
+  transform: translate(-50%, -50%) translateX(calc(var(--step) * 1.72)) scale(var(--shot-far-scale));
   opacity: var(--shot-far-opacity);
   z-index: 2;
 }
@@ -566,10 +703,10 @@ nav {
   transition: opacity .3s ease;
 }
 .shot[data-pos="far-left"] {
-  transform: translate(-50%, -50%) translateX(calc(-2.4 * var(--shot-step))) scale(var(--shot-far-scale));
+  transform: translate(-50%, -50%) translateX(calc(var(--step) * -2.4)) scale(var(--shot-far-scale));
 }
 .shot[data-pos="far-right"] {
-  transform: translate(-50%, -50%) translateX(calc(2.4 * var(--shot-step))) scale(var(--shot-far-scale));
+  transform: translate(-50%, -50%) translateX(calc(var(--step) * 2.4)) scale(var(--shot-far-scale));
 }
 
 .shots-nav {
@@ -593,16 +730,19 @@ nav {
 .shots-nav:hover { color: var(--text); border-color: var(--border-strong); transform: translateY(-50%) scale(1.07); }
 .shots-nav:focus-visible { outline: 2px solid var(--pink-bright); outline-offset: 3px; }
 .shots-nav svg { width: 20px; height: 20px; }
-.shots-prev { left: 20px; }
-.shots-next { right: 20px; }
+.shots-prev { left: clamp(.5rem, 1.5vw, 1.5rem); }
+.shots-next { right: clamp(.5rem, 1.5vw, 1.5rem); }
+/* No room for arrows beside the slide until the stage is wide enough to keep
+   them clear of it; swipe and the progress dots cover the same job below. */
+.shots-nav { display: none; }
 
 /* Grid stacking, not absolute positioning: the row sizes itself to the tallest
    caption at whatever the current width is, so switching slides never shifts
    the progress bar below and no min-height has to be guessed per breakpoint. */
 .shots-caption {
   display: grid;
-  max-width: 620px;
-  margin: 18px auto 0;
+  max-width: 58ch;
+  margin: clamp(.75rem, 1.6vh, 1.25rem) auto 0;
   text-align: center;
 }
 .shot-caption {
@@ -612,21 +752,21 @@ nav {
   transition: opacity .3s ease, visibility 0s linear .3s;
 }
 .shot-caption.is-active { opacity: 1; visibility: visible; transition: opacity .3s ease .06s, visibility 0s; }
-.shot-caption h3 { font-family: var(--font-display); font-size: 1.15rem; font-weight: 700; letter-spacing: -.01em; margin-bottom: 7px; }
-.shot-caption p { font-size: .88rem; color: var(--muted); line-height: 1.62; }
+.shot-caption h3 { font-family: var(--font-display); font-size: clamp(1rem, .95rem + .25vw, 1.2rem); font-weight: 700; letter-spacing: -.01em; margin-bottom: clamp(.25rem, .6vh, .45rem); text-wrap: balance; }
+.shot-caption p { font-size: clamp(.82rem, .78rem + .15vw, .92rem); color: var(--muted); line-height: 1.6; text-wrap: pretty; }
 
 .shots-progress {
   display: flex;
   justify-content: center;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
-  margin: 16px auto 0;
-  max-width: 620px;
+  gap: clamp(.25rem, .8vw, .375rem);
+  margin: clamp(.6rem, 1.4vh, 1rem) auto 0;
+  max-width: 58ch;
 }
 
 .shots-seg {
-  padding: 10px 3px;
+  padding: clamp(.45rem, 1vh, .625rem) 3px;
   background: none;
   border: none;
   cursor: pointer;
@@ -636,7 +776,7 @@ nav {
 
 .shots-seg-track {
   display: block;
-  width: 22px;
+  width: clamp(1rem, .8rem + .6vw, 1.375rem);
   height: 4px;
   border-radius: 999px;
   background: var(--surface-3);
@@ -646,7 +786,7 @@ nav {
   transition: width .45s var(--shot-ease), background-color .3s ease;
 }
 .shots-seg:hover .shots-seg-track { background: var(--border-strong); }
-.shots-seg.is-active .shots-seg-track { width: 68px; background: rgba(167, 139, 250, .25); }
+.shots-seg.is-active .shots-seg-track { width: clamp(2.75rem, 1.5rem + 3.5vw, 4.25rem); background: rgba(167, 139, 250, .25); }
 
 .shots-seg-fill {
   display: block;
@@ -668,56 +808,61 @@ nav {
   border: 0;
 }
 
-/* Tablet: the centre still leads, but with the scale gap closed up so the
-   side slides read as screenshots rather than as decoration. */
-@media (max-width: 1100px) {
+/* The base above is the phone: the active shot takes the frame, its immediate
+   neighbours are a sliver at each edge, and the pair beyond them is hidden
+   because there is no room to read them. Swipe drives it.
+ *
+ * The two tiers below are the only widths where this component genuinely has
+ * to change — where there is first room for a second pair of slides, and
+ * where the stage is wide enough to put arrows beside the centre one. The
+ * sizes between them are covered by the fluid expressions, not by more tiers.
+ */
+.shot[data-pos="-2"], .shot[data-pos="2"] { pointer-events: none; }
+
+/* Room for the outer pair and for the arrows. */
+@media (min-width: 45rem) {
   .shots-viewport {
-    /* More furniture than desktop: the caption wraps to more lines in a
-       narrower column, so less height is left for the stage. */
-    --shot-furniture: 330px;
-    --shot-w: max(240px, min(66vw, 600px, var(--shot-limit)));
-    --shot-step: calc(var(--shot-w) * .58);
-    --shot-pad: 22px;
+    --shot-w-max: min(74vw, 40rem);
+    --step: 58%;
     --shot-side-scale: .88;
     --shot-side-opacity: .5;
-    --shot-far-scale: .76;
     --shot-far-opacity: .18;
+  }
+  .shots-nav { display: inline-flex; }
+  .shot[data-pos="-2"], .shot[data-pos="2"] { pointer-events: auto; }
+}
+
+/* Wide enough that the centre slide should lead rather than fill: the side
+   slides step back in scale and the cap grows with the window instead of
+   stopping dead at 780px and leaving a 4K screen showing a ribbon.
+   32vw + 14.8rem is continuous with the tier above at exactly 45rem. */
+@media (min-width: 60rem) {
+  .shots-viewport {
+    --shot-w-max: min(58vw, 32vw + 14.8rem, 60rem);
+    --step: 60%;
+    --shot-side-scale: .78;
+    --shot-side-opacity: .4;
+    --shot-far-scale: .64;
+    --shot-far-opacity: .14;
   }
 }
 
-/* Phone: the active shot takes the frame and its neighbours are reduced to a
-   sliver at each edge — enough to say "there is more", not enough to compete.
-   Swipe replaces the arrows. */
-@media (max-width: 720px) {
-  .shots { padding: 12px 20px 24px; }
-  .shots-viewport {
-    /* The peek at each edge is (half the window - half the centre slide), so
-       it is --shot-w that sets it, not the step: at 86vw it was a 27px sliver
-       that read as a rendering artefact rather than as another screenshot.
-       
-       The height term matters most here, and for landscape: a phone on its
-       side has ~390px of viewport, where 80vw alone would be far taller than
-       the screen. The floor keeps --shot-limit from going negative there. */
-    --shot-furniture: 370px;
-    --shot-w: max(180px, min(80vw, var(--shot-limit)));
-    --shot-step: calc(var(--shot-w) * .62);
-    --shot-pad: 18px;
-    --shot-side-scale: .9;
-    --shot-side-opacity: .42;
-    margin: 0 -20px;
-  }
-  .shots-nav { display: none; }
-  .shot[data-pos="-2"], .shot[data-pos="2"] { opacity: 0; pointer-events: none; }
-  .shots-caption { margin-top: 20px; }
-  .shots-progress { gap: 4px; }
-  .shots-seg { padding: 9px 2px; }
-  .shots-seg-track { width: 16px; }
-  .shots-seg.is-active .shots-seg-track { width: 44px; }
+/* A short window — a phone on its side, or a laptop with a bookmarks bar and
+   a sidebar — has the furniture, not the image, as its binding constraint:
+   title, caption and dots are ~250px before the stage gets anything. Trimming
+   the type here buys the screenshot back the room. */
+@media (max-height: 34rem) {
+  .shots .section-label { font-size: .74rem; }
+  .shots .section-title { font-size: clamp(1.25rem, 1rem + 1vw, 1.6rem); }
+  .shot-caption p { line-height: 1.45; }
 }
 
 /* Motion off: the slides swap without travelling, autoplay never starts (see
    the carousel script), and the active segment simply reads as filled. */
 @media (prefers-reduced-motion: reduce) {
+  /* The carousel honoured this setting carefully while every in-page nav link
+     still animated its scroll past it. */
+  html { scroll-behavior: auto; }
   .shot { transition: opacity .25s ease, border-color .25s ease; }
   .shot[data-pos="-2"], .shot[data-pos="2"],
   .shot[data-pos="far-left"], .shot[data-pos="far-right"] { transition: opacity .25s ease; }
@@ -726,12 +871,12 @@ nav {
 }
 
 /* ── Features ── */
-.features { padding: 80px 24px; }
+.features { padding: var(--section-y) var(--gutter); }
 .features-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 20px;
-  max-width: 1080px;
+  grid-template-columns: repeat(auto-fit, minmax(min(15.5rem, 100%), 1fr));
+  gap: clamp(.875rem, .5rem + 1vw, 1.5rem);
+  max-width: var(--content-max);
   margin: 0 auto;
 }
 .feature {
@@ -739,8 +884,9 @@ nav {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 18px;
-  padding: 26px;
+  padding: clamp(1.125rem, .9rem + .9vw, 1.75rem);
   transition: border-color .2s ease, transform .2s ease;
+  container: feature-card / inline-size;
 }
 .feature:hover { border-color: var(--border-strong); transform: translateY(-3px); }
 .feature-icon {
@@ -751,15 +897,22 @@ nav {
   color: #14071E;
 }
 .feature-icon svg { width: 21px; height: 21px; }
-.feature h4 { font-family: var(--font-display); font-size: 1rem; font-weight: 700; }
-.feature p { font-size: .85rem; color: var(--muted); line-height: 1.6; }
+.feature h4 { font-family: var(--font-display); font-size: 1rem; font-weight: 700; text-wrap: balance; }
+.feature p { font-size: .85rem; color: var(--muted); line-height: 1.6; text-wrap: pretty; overflow-wrap: break-word; }
+
+@container feature-card (max-width: 15rem) {
+  .feature h4 { font-size: .94rem; }
+  .feature p { font-size: .81rem; }
+  .feature-icon { width: 38px; height: 38px; }
+  .feature-icon svg { width: 19px; height: 19px; }
+}
 
 /* ── Changelog ── */
-#changelog { padding: 80px 24px; }
+#changelog { padding: var(--section-y) var(--gutter); }
 .release {
-  max-width: 780px;
+  max-width: var(--content-narrow);
   margin: 0 auto 20px;
-  padding: 26px 28px;
+  padding: clamp(1.125rem, .9rem + 1vw, 1.75rem);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 18px;
@@ -780,7 +933,11 @@ nav {
 .release-date { font-size: .78rem; color: var(--muted-dim); }
 .release h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 4px; color: var(--text); }
 .release ul { list-style: none; display: grid; gap: 9px; margin-top: 10px; }
-.release li { position: relative; padding-left: 20px; font-size: .87rem; color: var(--muted); line-height: 1.6; }
+.release li { position: relative; padding-left: 20px; font-size: .87rem; color: var(--muted); line-height: 1.6; overflow-wrap: break-word; }
+/* Changelog entries quote real yt-dlp templates and flags. Without this an
+   unbreakable token widens the page — which is exactly the kind of overflow
+   the old body { overflow-x: hidden } used to swallow. */
+.release li code, .release code { overflow-wrap: anywhere; }
 .release li::before {
   content: ''; position: absolute; left: 0; top: .55em;
   width: 6px; height: 6px; border-radius: 50%;
@@ -788,22 +945,28 @@ nav {
 }
 
 /* ── Requirements ── */
-.requirements { max-width: 860px; margin: 0 auto 88px; padding: 0 24px; }
-.req-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+/* Top padding, so following the nav link no longer lands the heading at y=0.
+   The shared section[id] scroll-margin covers the anchor; this covers the
+   rhythm against the section above it. */
+.requirements { max-width: var(--content-narrow); margin: 0 auto var(--section-y); padding: clamp(1rem, 2vw, 2rem) var(--gutter) 0; }
+/* Content-driven, so the two-column rule and its 860px breakpoint both go:
+   the grid collapses when a column would be under 17rem, wherever that is. */
+.req-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(17rem, 100%), 1fr)); gap: clamp(.75rem, .5rem + .8vw, 1.25rem); }
 .req-item {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 22px;
+  padding: clamp(1rem, .8rem + .8vw, 1.5rem);
   display: flex;
   gap: 14px;
   align-items: flex-start;
 }
 .req-emoji { flex-shrink: 0; color: var(--pink-bright); display: flex; }
 .req-emoji svg { width: 24px; height: 24px; }
+.req-text { min-width: 0; }
 .req-text h5 { font-size: .92rem; font-weight: 700; margin-bottom: 4px; }
-.req-text p { font-size: .82rem; color: var(--muted); line-height: 1.55; }
-.req-text code { color: var(--pink-bright); font-size: .78rem; }
+.req-text p { font-size: .82rem; color: var(--muted); line-height: 1.55; text-wrap: pretty; overflow-wrap: break-word; }
+.req-text code { color: var(--pink-bright); font-size: .78rem; overflow-wrap: anywhere; }
 /* Dims a platform that cannot be downloaded yet. A class, not an inline
    opacity: the inline one outlived Linux's release and left the shipped
    platform looking greyed out beside an undimmed macOS that is not shipped. */
@@ -812,11 +975,14 @@ nav {
 /* ── Footer ── */
 footer {
   border-top: 1px solid var(--border);
-  padding: 44px 48px;
+  /* Same centring trick as the nav, so the footer's three groups stay a row
+     rather than drifting to the corners of an ultrawide window. */
+  padding-block: clamp(1.75rem, 1rem + 1.6vw, 2.75rem);
+  padding-inline: max(var(--gutter), calc((100% - var(--shell-max)) / 2));
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: clamp(.75rem, 2vw, 1.5rem);
   flex-wrap: wrap;
 }
 .footer-brand { display: flex; align-items: center; gap: 10px; }
@@ -839,38 +1005,31 @@ footer {
 .card:nth-child(2) { animation-delay: .12s; }
 .card:nth-child(3) { animation-delay: .19s; }
 
-/* ── Responsive ── */
-/* A fifth nav item (Screenshots) does not fit beside the CTA at tablet widths
-   with the desktop gap and padding, and the Download button was the thing
-   pushed off the right edge. Tightening the row keeps every link reachable
-   down to where they are hidden altogether at 720px. */
-@media (max-width: 960px) {
-  nav { padding: 16px 26px; }
-  .nav-links { gap: 16px; }
+/* ── Responsive ──
+ *
+ * Mobile-first: everything above is the small-screen layout, and the two
+ * rules below are the only places the page's *structure* has to change.
+ * Sizes in between are handled by the clamp()/min() expressions rather than
+ * by more breakpoints, so there are no untested gaps between tiers — the last
+ * round left the nav CTA clipped from 424px to 448px because it was tuned at
+ * 320 and 820 and never measured in between.
+ *
+ * The nav text links and the badge are the exception: they are content that
+ * either fits or does not, so they get a width. Both thresholds are set from
+ * the row's own measured minimum, with room to spare, rather than from a
+ * device size.
+ */
+@media (min-width: 26.5rem) {
+  .nav-badge { display: inline-block; }
 }
-@media (max-width: 860px) {
-  .req-grid { grid-template-columns: 1fr; }
-}
-/* The nav-links row bottoms out at 781px wide with four text links and the
-   CTA, so below ~800px the Download button was pushed off the right edge —
-   measured, at 736px and 768px, as the only element contributing to
-   scrollWidth. Hiding the text links here rather than at 720px keeps the CTA
-   reachable at every width; the fourth link (Screenshots) is what took the row
-   past what 720px could carry. */
-@media (max-width: 820px) {
-  .nav-links .text-link { display: none; }
+@media (min-width: 52rem) {
+  .nav-links li:has(> .text-link) { display: block; }
 }
 
-@media (max-width: 720px) {
-  nav { padding: 14px 20px; }
-  .hero { padding: 60px 18px 48px; }
-  footer { padding: 32px 20px; flex-direction: column; align-items: flex-start; }
-  .section-title { margin-bottom: 32px; }
-  .release-head { gap: 8px; }
-}
-@media (max-width: 420px) {
-  .nav-badge { display: none; }
-  .hero-mark { width: 84px; height: 84px; }
+/* Stacking the footer is a layout change; below this the three groups no
+   longer sit on one line without crowding. */
+@media (max-width: 34rem) {
+  footer { flex-direction: column; align-items: flex-start; }
 }
 </style>
 </head>
