@@ -1508,17 +1508,19 @@ No version bump, **nothing released**. Site only; no app code touched. The
 screenshots came from `Screenshots/` at the repo root — **untracked, and not
 present in a worktree**, which is worth knowing before hunting for it.
 
-**Nine of the ten shots are on the site**, as a centre-mode autoplay carousel
+**Eight of the ten shots are on the site**, as a centre-mode autoplay carousel
 between the hero and "Choose your platform" (Isaac's call: people should see it
 working before they are asked to pick a platform).
 
 - **`Screenshots/live capture.png` is deliberately not listed.** It is 551x148 —
-  a crop of the clipboard toast, not a window capture — against nine 2544x1644
-  shots in a 3:2 frame. It would be upscaled ~3x. One JSON entry adds it back if
-  a full-window version is ever taken.
-- `unsupported links.png` **is** included, captioned "It tells you when it
-  can't". A visible error block on a landing page is a real trade; it is one
-  entry to drop if Isaac disagrees.
+  a crop of the clipboard toast, not a window capture — against 2544x1644 shots
+  in a 3:2 frame. It would be upscaled ~3x. One JSON entry adds it back if a
+  full-window version is ever taken.
+- **`unsupported links.png` was included and then dropped at Isaac's request.**
+  It was captioned "It tells you when it can't", on the argument that honest
+  failure reporting is a differentiator. His call was that a landing page should
+  not lead with a red ERROR block, and that is the right call for a page whose
+  job is a download. Re-adding it is one entry — ask first.
 
 **The list is data.** `docs/screenshots.json` holds `{id, source, title,
 caption, alt}` per shot and is the only place a screenshot is named.
@@ -1587,11 +1589,14 @@ five conditions `verifyScreenshotCarousel` claims was confirmed red against its
 bug — a deleted .webp, a wrong start position, a truncated caption, a
 caption-count mismatch, and an asset path in the script.
 
-**Found but not fixed, because it is pre-existing and out of scope:**
-`#download`'s section label lands at y=40 under a 75 px sticky nav, so the
-site's own "Download" nav button scrolls to a heading the nav is covering.
-`#screenshots` carries a `scroll-margin-top` for exactly this; `#download` wants
-the same one-liner.
+**A pre-existing anchor bug, found here and then fixed at Isaac's request:**
+`#download`'s section label landed at y=40 under a 75 px sticky nav, so the
+site's own "Download" nav button — and every hero platform pill — scrolled to a
+heading the nav was covering. It has 40 px of top padding where `.features` has
+80 px, which is why only that one section was affected. Both now carry
+`scroll-margin-top: 88px`. All four in-page anchors are measured clear of the
+nav on load and on click (`#screenshots` 112, `#download` 128, `#features` 80,
+`#requirements` 432).
 
 **Review pass — five defects, four of them only findable by driving a real
 browser.** The implementation above was measured rather than re-read: 51
@@ -1632,7 +1637,7 @@ timing, a11y, responsive, real touch), each run against the live page.
 was 1600. Adding a 1200w candidate to `SCREENSHOT_WIDTHS` (one edit; the
 optimizer, the generated srcset and the guard all read that list) gives:
 1x desktop 493→310 KB, 2x tablet 493→310 KB, 1x tablet 196 KB, 2x desktop
-unchanged at 493 KB.
+unchanged at 493 KB. (Measured with nine shots; the set is eight now.)
 
 **Two false results worth recording, both mine.** A hold measured as 3939 ms
 looked like a timing bug and was a partially-elapsed hold — hovering preserves
