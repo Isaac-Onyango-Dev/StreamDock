@@ -87,9 +87,26 @@ export function MediaLanguageSelectionModal({
                                         />
                                         <span className="min-w-0 flex-1 truncate text-text-primary">{option.label}</span>
                                         {option.isDefault && <span className="badge bg-surface-3 text-text-secondary">Default</span>}
-                                        {/* Language/DUB-SUB classification is always populated ('Unknown' when
-                                            undetectable) so this badge is never blank — see stream-options-probe.ts */}
-                                        <span className="badge bg-accent/15 text-accent" title="Detected language">{option.language}</span>
+                                        {/* A language read out of a URL is a guess, and used to be shown in the
+                                            same badge as one the source declared. Inferred values are now visibly
+                                            marked so a guess never reads as a fact — see shared/language.ts */}
+                                        <span
+                                            className={
+                                                option.languageConfidence === 'declared'
+                                                    ? 'badge bg-accent/15 text-accent'
+                                                    : 'badge bg-surface-3 text-text-secondary'
+                                            }
+                                            title={
+                                                option.languageConfidence === 'declared'
+                                                    ? 'Language declared by the source'
+                                                    : option.languageConfidence === 'inferred'
+                                                      ? 'Guessed from the stream URL or button text — this may be wrong'
+                                                      : 'The source exposed no language information'
+                                            }
+                                        >
+                                            {option.language}
+                                            {option.languageConfidence === 'inferred' && '?'}
+                                        </span>
                                         <span className="badge bg-surface-3 text-text-disabled">{option.manifestType.toUpperCase()}</span>
                                     </label>
                                 ))}
