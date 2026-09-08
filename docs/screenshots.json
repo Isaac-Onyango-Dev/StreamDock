@@ -9,13 +9,14 @@
     "captions and the progress segments from it. The carousel script never names an image.",
     "Order here is the order on the page.",
     "",
-    "Two of the ten captures in Screenshots/ are deliberately not listed.",
-    "  live capture.png is a 551x148 crop of the clipboard toast; the frame is 3:2, so it",
-    "  would be upscaled ~3x beside the 2544x1644 shots. Add it if a full-window version",
-    "  is ever captured.",
-    "  unsupported links.png shows an engine error. It was on the page briefly and Isaac",
-    "  asked for it off: a red ERROR block is not what a landing page should lead with.",
-    "  Re-adding it is one entry, but ask first."
+    "Screenshots/ holds exactly the eight sources this file lists, and they are committed,",
+    "so `npm run screenshots:build` needs no argument and reproduces the .webp set byte",
+    "for byte. Two captures were removed rather than left lying unused:",
+    "  live capture.png was a 551x148 crop of the clipboard toast; the frame is 3:2, so it",
+    "  would have been upscaled ~3x beside the 2544x1644 shots. Re-shoot it full-window if",
+    "  the clipboard watcher deserves a slide.",
+    "  unsupported links.png showed an engine error. It was on the page briefly and Isaac",
+    "  asked for it off: a red ERROR block is not what a landing page should lead with."
   ],
   "shots": [
     {
