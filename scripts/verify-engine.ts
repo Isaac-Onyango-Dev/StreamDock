@@ -605,6 +605,46 @@ function verifyNoFabricatedAudioChoices(): void {
   );
 }
 
+
+/**
+ * A stream option must carry the referer the player actually used.
+ *
+ * anikoto's CDN serves its manifest only for `Referer: https://megaplay.buzz/`
+ * — the embed origin — and 403s for the anikoto page URL, which is what every
+ * option used to carry and what the engine handed yt-dlp. yt-dlp then reported
+ * "Got HTTP Error 403 caused by Cloudflare anti-bot challenge", and that
+ * message is why this was recorded for several sessions as a Cloudflare wall
+ * that could not be passed. It was a wrong header.
+ *
+ * Measured against the live CDN: UA + megaplay referer returns 200; the page
+ * URL, the CDN's own origin, the embed host and an unrelated referer all return
+ * 403; and no cookie is involved at any point.
+ */
+function verifyManifestReferer(): void {
+  const probe = stripComments(readProjectFile('electron/stream-options-probe.ts'));
+
+  assert(
+    probe.includes('onBeforeSendHeaders'),
+    'the probe reads the request headers the player sent',
+  );
+  assert(
+    /captured\.referer = referer/.test(probe),
+    'the probe records the referer of each captured manifest',
+  );
+  // Options built from a captured manifest must prefer its referer. The page
+  // URL remains the fallback, and is correct for the yt-dlp branch.
+  assert(
+    (probe.match(/referer: \w+\.referer \|\| pageUrl/g) || []).length >= 3,
+    'stream options carry the captured referer, falling back to the page URL',
+  );
+
+  const engine = stripComments(readProjectFile('electron/download-engine.ts'));
+  assert(
+    engine.includes('manifestReferer'),
+    'the engine passes the manifest referer through to yt-dlp',
+  );
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
@@ -617,5 +657,6 @@ verifySubtitleOwnership();
 verifySubtitleModesOffered();
 verifyNoFabricatedQualities();
 verifyNoFabricatedAudioChoices();
+verifyManifestReferer();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);
