@@ -1160,16 +1160,112 @@ verify:engine 96 checks, Playwright 10/10 with no skips, production build, and
 v1.6.1 published with Windows and Linux assets, both update manifests, and the
 site reading 1.6.1.
 
+### Session 14 — provider recon, episode patterns as data, one language model
+
+No version bump, **nothing released**. Three commits on
+`claude/test-linux-version-1b43c0`. The audit-and-recommend half is published at
+https://claude.ai/code/artifact/1e3136ea-3954-4808-8498-584f840951af
+
+**The reference-project evaluation (handover task 1) answered: don't adopt
+either.** Neither `ani-cli` nor `anipy-cli` supports a single host StreamDock
+targets, nor any of Isaac's four failing samples — grepping both codebases for
+every host StreamDock targets returns nothing. Measured live rather than read off their
+READMEs: `ani-cli`'s *only* backend serves an **"Under Maintenance" page** — the 13.7k-star tool is non-functional today.
+Another of their backends is unreachable and its decoder feed is 404. Only one backend is healthy; its search API was confirmed returning
+real JSON.
+
+Two things from them were worth taking, as designs rather than code (both are
+GPL-3.0, StreamDock is MIT — verified from each repo, not inherited):
+`anipy-cli` contains **no browser automation at all** (requests + BeautifulSoup),
+so this extraction class is headless and therefore CI-testable, which the hidden
+`BrowserWindow` has never been; and they model language as a **tri-state
+sub/dub/raw carried as provider data**, chosen before the episode lookup.
+Their hardest step is one to avoid: that backend's video endpoint needs a rotating
+AES-GCM token whose key lives in a JSON file on the maintainer's own GitHub
+branch — a model that has already failed once, since another backend's equivalent feed
+is the 404 above.
+
+**The real find was incidental, and corrects a recorded diagnosis.** `ani-cli`'s
+README links a Rust port that targets site A. Running StreamDock's
+*own* bundled plugin against Isaac's URL shape showed the catalogue layer
+**works** — it resolves the series, finds the episode, gets a stream server —
+then hands off to `https://embed-b.example/stream/<token>/sub`, while the embed
+extractor only matches `(?:embed-a|embed-c)\.example/stream/s-2/…`.
+New embed host, new path shape, no extractor claims it, generic falls through,
+and a regex returning `None` produces the `'NoneType' object has no attribute
+'group'`. **It is a coverage gap in one pattern, not "markup drift"**, and the
+extractor body is host-agnostic. Not fixed here, and not to be promised as a
+one-liner: resolving the equivalent `embed-a.example` embed by hand returned real
+subtitle tracks but the video sources came back under an encrypted `enc` field,
+and the Rust port has no decryption at all, so it would fail the same way.
+Also found: `api.site-a.example` responds 200 and self-declares
+`"site_domains":["site-a.example","site-a-mirror.example"]`, returning real titles,
+posters, per-language episode counts and a ready-made embed URL per episode,
+with a slug shape matching Isaac's sample URL exactly.
+
+**Episode patterns are data now.** `detectEpisodePattern()` matched two hosts by
+literal regex written into the function. `site-a.example` is in
+`pluginExtractorHosts`, `manifestProbeHosts` and `animeHosts` and uses
+byte-for-byte the same `/watch/<slug>/ep-<n>` shape as `site-a-mirror.example`, but only
+`site-a-mirror.example` was in that function — so the host Isaac actually pastes never
+produced an episode range, silently. Patterns moved to `host-config.json`: each
+names its hosts, a path regex exposing a `series` group, and exactly one of
+`episodeParam` (query string, site B) or `nextPath` (path, site A). Read as
+untrusted like the rest of the config — a pattern that fails to compile is
+skipped rather than killing probing for every other host. Verified against the
+**shipped** config, not only the fallback the tests can reach.
+
+**The language classifier was not two copies — it was four.** The handover
+recorded two (`manifest-parser` vs `stream-options-probe`). The probe alone held
+four: `classifyLanguage`, `normalizeLanguageLabel`, `inferLabelFromManifestUrl`,
+and the yt-dlp branch's label path. Each was slightly different and all fed the
+same badge that also shows genuinely declared languages. Both substring forms
+produced confident wrong answers — `includes('en')` matches *generic*, *screen*,
+*engine* and *segment*, so most CDN paths classified as English, and
+`includes('hub')` returned a language called "Hub", matching *animehub*,
+*github* and *cdn-hub*. `shared/language.ts` is the single model: tri-state
+translation independent of spoken language, plus the field those CLIs do not
+need and StreamDock does — **`confidence`**, so an inferred value is styled and
+marked differently in the picker and a guess never reads as a fact.
+`electron/language-registry.ts` deliberately stays the authority for *declared*
+manifest languages: it handles regional codes (`en-us`, `pt-br`, `zh-hans`) the
+inference model has no business guessing at, and it was never the side that
+lied. The bug was two paths answering one question, not two modules existing.
+
+**MIT `LICENSE` added.** `package.json` and the site footer had claimed MIT
+since the beginning while the repo carried no licence text at all.
+
+**Verification**: typecheck (both projects), ESLint 0/0, **192 Vitest tests**
+(20 new), `verify:engine` **124 checks** (up from 96, two new guards), Playwright
+10/10, production build. Every new test and both new guards were confirmed red
+against the bug before being kept — the seven behavioural language tests were
+run against the restored old classifier, and the episode guard against the old
+host list.
+
+**Still unverified — needs Isaac at the keyboard**: the inferred-language badge
+rendering in the real app, and an site-a.example episode range probed through the
+UI rather than through `detectEpisodePattern` directly.
+
 ## Working agreements for future sessions on this repo
 
+- **Count the copies before you merge them.** The handover recorded two language
+  classifiers; `stream-options-probe.ts` alone held four, and a `verify-engine`
+  guard written against the *symptom* (`includes('en')` appearing anywhere in
+  the file) is what surfaced the third and fourth. Grep for the defect, not for
+  the function name you already know about.
+- **A tool's stars and last-commit date say nothing about whether it works.**
+  `ani-cli` is 13.7k stars, was pushed three days before session 14 looked at
+  it, and is entirely non-functional because its single backend is serving a
+  maintenance page. One curl answered what the README could not.
+- **Check the licence before reading another project for answers.** Verified per
+  repo, not inherited from notes: all three anime CLIs are GPL-3.0 and
+  StreamDock is MIT. Facts about providers are free to use; their code is not.
+  Clone them outside the repo so it cannot happen by accident.
 - **Wiring that exists is not a feature that works.** The plugin system had
   every piece in place — packages present, args passed, files packaged — and had
   never once loaded in any shipped build. Session 13's audit marked it working
   from the code alone; one `-v` run against the real binary disproved it in
   seconds. Run the thing.
-- **Check the licence before reading another project for answers.** The two
-  anime CLIs worth learning from are GPL-3.0 and StreamDock is MIT. Facts about
-  providers are free to use; their code is not.
 - **Test the artifact CI produced, not one you built.** `gh run download` gives
   the exact bytes a user gets. Session 12 verified Linux this way; a local build
   would not have proved the CI job packages real engines.
