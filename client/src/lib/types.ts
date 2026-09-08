@@ -1,3 +1,5 @@
+import type { LanguageConfidence, TranslationType } from '../../../shared/language';
+
 // Role: shared renderer-side TypeScript types for StreamDock.
 
 export type CaptureMode = 'video' | 'stream';
@@ -127,8 +129,12 @@ export interface StreamOption {
   manifestType: 'm3u8' | 'mpd' | 'mp4';
   referer?: string;
   isDefault: boolean;
-  /** DUB/SUB/HUB classification, always populated ('Unknown' when undetectable). */
+  /** Display language, always populated ('Unknown' when undetectable). */
   language: string;
+  /** Dub / sub / raw, carried separately from the spoken language. */
+  translation: TranslationType;
+  /** Whether `language` was declared by the source or guessed from a URL. */
+  languageConfidence: LanguageConfidence;
 }
 
 export interface StreamOptionsProbeResult {

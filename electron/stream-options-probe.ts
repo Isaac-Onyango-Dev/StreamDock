@@ -8,6 +8,12 @@ import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { getProbeStrategy } from './url-router';
 import { probeViaYtDlp } from './manifest-extractor';
+import {
+  classifyLanguageHints,
+  type LanguageClassification,
+  type LanguageConfidence,
+  type TranslationType,
+} from '../shared/language';
 
 export interface StreamOption {
   label: string;
@@ -15,11 +21,16 @@ export interface StreamOption {
   manifestType: 'm3u8' | 'mpd' | 'mp4';
   referer?: string;
   isDefault: boolean;
-  /** DUB/SUB/HUB classification, independent of `label` (which may be a server
-   *  or CDN name like "MegaCloud" rather than a language). Always populated —
-   *  'Unknown' when neither the DOM text nor the manifest URL exposes a
-   *  machine-readable language signal, so the UI never has to leave this blank. */
+  /** Display language, independent of `label` (which may be a server or CDN
+   *  name like "MegaCloud" rather than a language). Always populated —
+   *  'Unknown' when nothing usable was found, so the UI never has to leave
+   *  this blank. */
   language: string;
+  /** Dub / sub / raw, carried separately from the spoken language. */
+  translation: TranslationType;
+  /** Whether `language` was declared by the source or guessed from a URL. The
+   *  UI marks an inferred value so a guess never reads as a fact. */
+  languageConfidence: LanguageConfidence;
 }
 
 export interface StreamOptionsProbeResult {
@@ -31,6 +42,24 @@ export interface StreamOptionsProbeResult {
 }
 
 const MANIFEST_PATTERN = /\.(m3u8|mpd|mp4)(\?|$)/i;
+
+/**
+ * Project a shared classification onto the three StreamOption fields.
+ *
+ * Kept as one spread so a construction site cannot set the label while
+ * forgetting the confidence — which is how the two classifiers drifted apart
+ * in the first place.
+ */
+function toStreamLanguage(
+  classification: LanguageClassification,
+): Pick<StreamOption, 'language' | 'translation' | 'languageConfidence'> {
+  return {
+    language: classification.label,
+    translation: classification.translation,
+    languageConfidence: classification.confidence,
+  };
+}
+
 
 const LANGUAGE_SELECTOR_QUERIES = [
   // Common patterns across anime sites
@@ -68,14 +97,18 @@ if (window.chrome) {
 const EXTRACTION_TIMEOUT_MS = 60_000;
 const POST_LOAD_WAIT_MS = 3000;
 
+/**
+ * Turn a language switcher's button text into a display label.
+ *
+ * The language half of this was a fourth copy of the same substring tests and
+ * delegates to the shared model now. What server serves a stream, and at what
+ * quality, are different facts and stay here.
+ */
 function normalizeLanguageLabel(raw: string): string {
+  const classified = classifyLanguageHints(raw);
+  if (classified.confidence !== 'unknown') return classified.label;
+
   const lower = raw.toLowerCase();
-  if (lower.includes('dub') && lower.includes('en')) return 'English Dub';
-  if (lower.includes('sub') && lower.includes('en')) return 'English Sub';
-  if (lower.includes('raw') || lower.includes('jp')) return 'Japanese Raw';
-  if (lower.includes('dub')) return raw.replace(/dub/gi, 'Dub').trim();
-  if (lower.includes('sub')) return raw.replace(/sub/gi, 'Sub').trim();
-  
   // Common server/quality patterns on anime sites
   if (lower.includes('mega') || lower.includes('cloud')) return 'MegaCloud';
   if (lower.includes('stream') && lower.includes('tape')) return 'StreamTape';
@@ -89,32 +122,18 @@ function normalizeLanguageLabel(raw: string): string {
 }
 
 /**
- * Independent DUB/SUB/HUB language classification, tried against each
- * candidate source string in order (DOM text first, URL/format-id as
- * fallback) until one yields a signal. Always returns a concrete, non-empty
- * value — 'Unknown' is an explicit, deliberate label, never an omission.
+ * A display label for an option whose own button text was never captured.
+ *
+ * The language half of this was a third copy of the substring classifier, with
+ * the same `includes('en')` defect, and it disagreed with the badge beside it.
+ * It delegates now. Which CDN serves a stream is a different fact from what
+ * language it is in, so that half stays here.
  */
-function classifyLanguage(...sources: Array<string | undefined | null>): string {
-  for (const raw of sources) {
-    if (!raw) continue;
-    const lower = raw.toLowerCase();
-    if (lower.includes('dub') && lower.includes('en')) return 'English Dub';
-    if (lower.includes('sub') && lower.includes('en')) return 'English Sub';
-    if (lower.includes('raw') || lower.includes('jp') || lower.includes('japanese')) return 'Japanese Raw';
-    if (lower.includes('dub')) return 'Dub';
-    if (lower.includes('sub')) return 'Sub';
-    if (lower.includes('hub')) return 'Hub';
-  }
-  return 'Unknown';
-}
-
 function inferLabelFromManifestUrl(manifestUrl: string, index: number): string {
+  const classified = classifyLanguageHints(manifestUrl);
+  if (classified.confidence !== 'unknown') return classified.label;
+
   const lower = manifestUrl.toLowerCase();
-  if (lower.includes('dub') && lower.includes('en')) return 'English Dub';
-  if (lower.includes('sub') && lower.includes('en')) return 'English Sub';
-  if (lower.includes('raw') || lower.includes('jp') || lower.includes('japanese')) return 'Japanese Raw';
-  if (lower.includes('dub')) return 'Dub';
-  if (lower.includes('sub')) return 'Sub';
   if (lower.includes('mega') || lower.includes('cloud')) return 'MegaCloud';
   if (lower.includes('streamtape')) return 'StreamTape';
   if (lower.includes('filemoon')) return 'FileMoon';
@@ -194,7 +213,7 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
           manifestType: f.url.includes('mpd') ? 'mpd' : 'm3u8',
           referer: pageUrl,
           isDefault: i === 0,
-          language: classifyLanguage(f.formatId, f.url),
+          ...toStreamLanguage(classifyLanguageHints(f.formatId, f.url)),
         }));
       return { success: options.length > 0, url: pageUrl, options, defaultOption: options[0] };
     } catch (e) {
@@ -253,7 +272,7 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
         manifestType: m.type,
         referer: pageUrl,
         isDefault: idx === 0,
-        language: classifyLanguage(m.url),
+        ...toStreamLanguage(classifyLanguageHints(m.url)),
       }));
       finish({
         success: options.length > 0,
@@ -343,7 +362,7 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
           manifestType: m.type,
           referer: pageUrl,
           isDefault: idx === 0,
-          language: classifyLanguage(m.url),
+          ...toStreamLanguage(classifyLanguageHints(m.url)),
         }));
         finish({
           success: options.length > 0,
@@ -372,7 +391,7 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
           manifestType: first.type,
           referer: pageUrl,
           isDefault: true,
-          language: classifyLanguage(defaultLabel, first.url),
+          ...toStreamLanguage(classifyLanguageHints(defaultLabel, first.url)),
         });
         processedLabels.add(normalizedLabel);
       }
@@ -427,7 +446,7 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
               manifestType: newest.type,
               referer: pageUrl,
               isDefault: false,
-              language: classifyLanguage(option.text, newest.url),
+              ...toStreamLanguage(classifyLanguageHints(option.text, newest.url)),
             });
             processedLabels.add(finalLabel);
             log.info(`[stream-options-probe] Found stream for "${finalLabel}": ${newest.url}`);

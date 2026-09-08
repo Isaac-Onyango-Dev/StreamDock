@@ -26,6 +26,11 @@ function assert(condition: boolean, message: string): void {
   }
 }
 
+/** Strip comments, so a check for code cannot be satisfied — or tripped — by prose about it. */
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+}
+
 function readProjectFile(path: string): string {
   return readFileSync(join(root, path), 'utf-8');
 }
@@ -110,10 +115,20 @@ function verifyEngineWiring(): void {
   );
 }
 
+interface EpisodePatternConfig {
+  hosts: string[];
+  pathPattern: string;
+  episodeParam?: string;
+  nextPath?: string;
+  titlePrefix?: string;
+}
+
 interface HostConfig {
   referenceHosts: string[];
   manifestProbeHosts: string[];
   animeHosts: string[];
+  pluginExtractorHosts: string[];
+  episodePatterns?: EpisodePatternConfig[];
 }
 
 function readHostConfig(): HostConfig {
@@ -426,9 +441,138 @@ function verifyNoFabricatedQualities(): void {
   );
 }
 
+
+/**
+ * Episode patterns must live in the config, and must cover every host that is
+ * routed as an anime source.
+ *
+ * They used to be two literal host regexes inside detectEpisodePattern.
+ * anikototv.to appears in pluginExtractorHosts, manifestProbeHosts and
+ * animeHosts and shares anikoto.cz's URL shape exactly, but was absent from
+ * that function, so pasting the host Isaac actually uses never produced an
+ * episode range. Asserting the shipped config here — the code-level behaviour
+ * is covered by playlist-inspector.test.ts against the fallback config.
+ */
+function verifyEpisodePatterns(): void {
+  const config = readHostConfig();
+  const patterns = config.episodePatterns ?? [];
+
+  assert(patterns.length > 0, 'host-config.json declares episode patterns as data');
+
+  for (const pattern of patterns) {
+    assert(
+      Array.isArray(pattern.hosts) && pattern.hosts.length > 0,
+      `episode pattern "${pattern.pathPattern}" names at least one host`,
+    );
+    // A pattern that compiles nowhere is dead config; catch it at build time
+    // rather than silently skipping the host at runtime.
+    let compiled: RegExp | null = null;
+    try {
+      compiled = new RegExp(pattern.pathPattern, 'i');
+    } catch {
+      compiled = null;
+    }
+    assert(compiled !== null, `episode pattern for ${pattern.hosts?.[0]} is a valid regex`);
+    assert(
+      pattern.pathPattern.includes('(?<series>'),
+      `episode pattern for ${pattern.hosts?.[0]} exposes a series group`,
+    );
+    assert(
+      Boolean(pattern.episodeParam) !== Boolean(pattern.nextPath),
+      `episode pattern for ${pattern.hosts?.[0]} says exactly one way to reach the next episode`,
+    );
+    if (pattern.nextPath) {
+      assert(
+        pattern.pathPattern.includes('(?<episode>'),
+        `path-numbered pattern for ${pattern.hosts?.[0]} exposes an episode group`,
+      );
+      assert(
+        pattern.nextPath.includes('{episode}'),
+        `nextPath for ${pattern.hosts?.[0]} substitutes the episode number`,
+      );
+    }
+  }
+
+  const covered = new Set(patterns.flatMap((pattern) => pattern.hosts ?? []));
+  for (const host of ['anikoto.cz', 'anikototv.to', 'shuttletv.su']) {
+    assert(covered.has(host), `${host} has an episode pattern`);
+  }
+
+  // The regression itself: both anikoto domains are routed identically
+  // everywhere else, so neither may be left out of episode detection.
+  for (const host of ['anikoto.cz', 'anikototv.to']) {
+    assert(
+      config.pluginExtractorHosts.includes(host) === covered.has(host),
+      `${host} is routed and episode-detected consistently`,
+    );
+  }
+
+  // Episode detection must not be reintroduced as literal hosts in code.
+  const inspector = readProjectFile('electron/playlist-inspector.ts');
+  const detector = inspector.slice(
+    inspector.indexOf('export function detectEpisodePattern'),
+    inspector.indexOf('interface SeriesInfo'),
+  );
+  assert(
+    detector.includes('EPISODE_PATTERNS()'),
+    'detectEpisodePattern reads its hosts from config',
+  );
+  for (const host of ['shuttletv.su', 'anikoto.cz', 'anikototv.to']) {
+    assert(
+      !detector.includes(`'${host}'`),
+      `detectEpisodePattern does not hardcode ${host}`,
+    );
+  }
+}
+
+/**
+ * One classifier answers "what language is this, and how do we know?".
+ *
+ * The probe used to guess from URL substrings and always return a label, which
+ * the UI showed in the same badge as a language the manifest had declared — so
+ * a guess drawn from a CDN path was indistinguishable from a fact. The shared
+ * model carries a confidence, and the probe must not grow a private classifier
+ * again.
+ */
+function verifyLanguageOwnership(): void {
+  const probe = stripComments(readProjectFile('electron/stream-options-probe.ts'));
+
+  assert(
+    probe.includes("from '../shared/language'"),
+    'stream-options-probe classifies languages through the shared model',
+  );
+  assert(
+    !/function\s+classifyLanguage\s*\(/.test(probe),
+    'stream-options-probe defines no private language classifier',
+  );
+  // The two substring tests that produced confident wrong answers.
+  assert(
+    !probe.includes("includes('hub')"),
+    'stream-options-probe no longer treats "hub" as a language',
+  );
+  assert(
+    !probe.includes("includes('en')"),
+    'stream-options-probe no longer reads "en" out of arbitrary substrings',
+  );
+
+  const shared = readProjectFile('shared/language.ts');
+  for (const state of ['declared', 'inferred', 'unknown']) {
+    assert(shared.includes(`'${state}'`), `the language model distinguishes ${state} values`);
+  }
+
+  // The UI must actually act on the confidence, or carrying it changes nothing.
+  const modal = readProjectFile('client/src/components/MediaLanguageSelectionModal.tsx');
+  assert(
+    modal.includes('languageConfidence'),
+    'the stream picker distinguishes a declared language from a guess',
+  );
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
+verifyEpisodePatterns();
+verifyLanguageOwnership();
 verifyChangelogRendering();
 verifySiteRendering();
 verifyLinuxIcons();
