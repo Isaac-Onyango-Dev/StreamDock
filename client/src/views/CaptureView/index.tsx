@@ -132,7 +132,19 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
   const [rangeEnd, setRangeEnd] = useState(24);
   const [scheduledAt, setScheduledAt] = useState('');
   const [audioPreference, setAudioPreference] = useState<AudioPreference>('auto');
-  const [subtitleMode, setSubtitleMode] = useState<SubtitleMode>(defaultSubtitleMode);
+  const [subtitleMode, setSubtitleModeState] = useState<SubtitleMode>(defaultSubtitleMode);
+  // Settings load asynchronously, so this component mounts before the stored
+  // default exists — and useState only reads its initial value once. Without
+  // this the saved default could never reach the picker. Once anything has
+  // chosen a mode deliberately, the default stops applying.
+  const [subtitleModeChosen, setSubtitleModeChosen] = useState(false);
+  const setSubtitleMode = useCallback((mode: SubtitleMode) => {
+    setSubtitleModeChosen(true);
+    setSubtitleModeState(mode);
+  }, []);
+  useEffect(() => {
+    if (!subtitleModeChosen) setSubtitleModeState(defaultSubtitleMode);
+  }, [defaultSubtitleMode, subtitleModeChosen]);
   const [impersonate, setImpersonate] = useState('');
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
   const [dragOverWindow, setDragOverWindow] = useState(false);
