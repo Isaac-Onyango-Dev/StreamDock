@@ -91,7 +91,8 @@
       "dist-electron/**/*",
       "assets/**/*",
       "binaries/**/*",
-      "plugins/**/*"
+      "plugins/**/*",
+      "plugins-win/**/*"
     ],
     "asarUnpack": [
       "binaries/**/*"
@@ -114,6 +115,13 @@
       {
         "from": "plugins/",
         "to": "plugins/",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "plugins-win/",
+        "to": "plugins-win/",
         "filter": [
           "**/*"
         ]

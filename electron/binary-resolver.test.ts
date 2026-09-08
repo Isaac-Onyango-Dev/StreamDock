@@ -74,6 +74,43 @@ describe('binary-resolver', () => {
       const dirs = resolvePluginDirs();
       expect(dirs).toEqual([]);
     });
+
+    // Regression: every bundled plugin was inert in every shipped build.
+    // resolvePluginDirs expanded each root into its individual package folders,
+    // on the untested assumption that --plugin-dirs wants a directory directly
+    // containing yt_dlp_plugins/. yt-dlp globs <dir>/*/yt_dlp_plugins itself, so
+    // being handed the package directory it found nothing and said so quietly:
+    //   --plugin-dirs plugins/anikoto -> "Plugin directories: none", 1744 extractors
+    //   --plugin-dirs plugins         -> five packages resolved, 1750 extractors
+    it('hands yt-dlp the root, not each package inside it', async () => {
+      const { existsSync, readdirSync, statSync } = await import('fs');
+      vi.mocked(existsSync).mockImplementation((p) => {
+        const path = String(p);
+        // The roots exist, and each package inside them has a yt_dlp_plugins/.
+        if (path.endsWith('/plugins')) return true;
+        return path.includes('/plugins/') && path.endsWith('yt_dlp_plugins');
+      });
+      vi.mocked(readdirSync).mockReturnValue(['anikoto', 'animepahe'] as never);
+      vi.mocked(statSync).mockReturnValue({ isDirectory: () => true } as never);
+
+      const dirs = resolvePluginDirs();
+
+      expect(dirs.length).toBeGreaterThan(0);
+      for (const dir of dirs) {
+        expect(dir.endsWith('plugins')).toBe(true);
+        expect(dir).not.toContain('anikoto');
+        expect(dir).not.toContain('animepahe');
+      }
+    });
+
+    it('skips a root that holds no plugin package at all', async () => {
+      const { existsSync, readdirSync, statSync } = await import('fs');
+      vi.mocked(existsSync).mockImplementation((p) => String(p).endsWith('/plugins'));
+      vi.mocked(readdirSync).mockReturnValue(['readme.txt'] as never);
+      vi.mocked(statSync).mockReturnValue({ isDirectory: () => false } as never);
+
+      expect(resolvePluginDirs()).toEqual([]);
+    });
   });
 
   describe('buildPluginDirArgs', () => {
