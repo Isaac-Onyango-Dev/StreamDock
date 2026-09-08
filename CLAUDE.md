@@ -1249,8 +1249,121 @@ host list.
 rendering in the real app, and an anikototv.to episode range probed through the
 UI rather than through `detectEpisodePattern` directly.
 
+### Session 15 — the 403 was a wrong header; dub works; one owner per choice
+
+Version 1.6.1 -> **1.7.0**, released. Eleven commits. This session was driven by
+Isaac testing each change in the real app and reporting back, which is why so
+much of what follows corrects things earlier sessions recorded as settled.
+
+**The anikoto 403 was never a Cloudflare wall.** Session 8 recorded it as bot
+management that rejected every `--impersonate` target and concluded it was "not
+StreamDock's to fix". Measured against the live CDN with a fresh token:
+
+  no UA, no referer            -> 403
+  UA only                      -> 403
+  UA + the anikoto page URL    -> 403   <- what the engine was sending
+  UA + https://megaplay.buzz/  -> 200   <- the player's origin
+  UA + vidtube.site / the CDN itself / anything else -> 403
+
+Zero cookies are set for the CDN and plain Node https succeeds with the right
+referer, so there is no challenge and no browser session needed. Stream options
+carried `referer: pageUrl`; the manifest is fetched by the *player*, on a
+different origin. **The misdirection came from yt-dlp**, which reports any 403
+from a Cloudflare-fronted host as `Got HTTP Error 403 caused by Cloudflare
+anti-bot challenge` whatever the cause. Proven end to end: same manifest, old
+referer 403s, captured referer gives 307 fragments and a 213MB 1080p file.
+
+The referer is now **read from the intercepted request** rather than hardcoded,
+in both routes — `stream-options-probe` via `onBeforeSendHeaders`, and
+`manifest-extractor` via `details.referrer` (it cancels the request, so no
+header hook fires). Fixing only the first left batches still failing, which is
+the "two routes into the same branch" shape this file already warns about.
+
+**Dub genuinely works now, and did not before.** `extractManifest` took no
+language argument at all, so every episode resolved to whatever the page loads —
+and anikoto opens on SUB. Choosing Dub gave a whole series in Japanese.
+Measured per episode: `default == sub` on both episodes tested, and dub is a
+different stream (1440x1080 / 1384.6s versus 1920x1080 / 1394.5s, different
+audio). Confirmed by Isaac on episodes 1 and 2.
+
+**Why detection is per-episode and not one pass up front** — the shape
+originally proposed. The CDN token inside a manifest URL was measured good for
+about 90 seconds: 200 at t+0 and t+60, **403 at t+120 and t+180**, with an
+expiry ~90s after minting encoded in the token itself. Resolving 366 links
+before starting would take ~15 minutes and every link would be dead on arrival.
+So the manifest cannot be carried across a batch but the *choice* can. The
+extractor also **ignores manifests until the requested language is selected**,
+or the SUB stream the page loads on its own is captured before the switch.
+
+**Three bugs found by Isaac testing, each hiding the next.**
+1. *An episode range downloaded one episode N times.* The renderer applied the
+   probed `manifestUrl` to every URL in the batch. Five rows, five progress
+   bars, one episode — proven from the files: episodes 1 and 3 byte-identical,
+   and a frame at 10:00 identical across all five.
+2. *A self-inflicted 429.* A "one probe-host download at a time" guard existed,
+   but the engine rewrites `request.url` to the CDN manifest once resolved, and
+   the guard filtered on that field — so running downloads became invisible to
+   their own limiter. All five spawned within 59ms. Tasks now record the URL
+   they were queued for.
+3. *A skipped file reported as a fresh download.* `--no-overwrites` exits 0 with
+   "has already been downloaded"; nothing parsed it, so a 200MB episode
+   "completed" in six seconds and stale files silently masked whether a fix
+   worked at all. Rows read **Already saved** now.
+
+**A timeout that hung inside itself.** A download sat on "starting" forever with
+nothing logged after `Probing …`. The 45s extraction timeout *had* fired — its
+last-resort `win.webContents.executeJavaScript` never settles against a hung
+renderer, so neither `.then` nor `.catch` ran and `finish()` was never called.
+`fetchUrlRaw` on the same path had no timeout at all. Three deadlines now, and
+the engine races `extractManifest` against a ceiling so a third hang of that
+shape cannot stall a serialised queue.
+
+**UI: one owner per choice.** Language, audio and subtitles were each settable
+from two or three screens, and the always-visible copies were often the ones
+that could not work — Advanced offered "Audio: English dub" for sources where
+`--format-sort lang:` cannot act, while the control that works sat behind a
+button. Now: the main row owns every choice the source offers and each appears
+only when detection found it, the dialog owns per-track detail alone, and
+Advanced is "Connection settings" with impersonation only. Before Analyze there
+is nothing but URL and Quality. Audio preference and stream language are
+mutually exclusive, since they answer one question by different mechanisms.
+
+**Also**: episode patterns moved from literal regexes in `detectEpisodePattern`
+into `host-config.json` (which is why `anikototv.to` never produced a range —
+present in every host array, absent from that one function); episode counts read
+from the site's own series API via the `data-id` on the page (One Piece: 1177,
+not 1); the language classifier merged — the handover said two copies, the probe
+alone held **four**, and a guard written against the *symptom* (`includes('en')`
+anywhere in the file) is what surfaced the extra two; and the MIT `LICENSE` the
+repo had always claimed but never carried.
+
+**Verification**: typecheck, ESLint 0/0, 207 Vitest tests, verify:engine **162
+checks** (from 96), Playwright 12/12, production build, `check:binaries`. Every
+new test and guard validated by reintroducing its bug. Plus real downloads
+through the app and through harnesses driving the actual engine in a real
+Electron session.
+
 ## Working agreements for future sessions on this repo
 
+- **An error message names a symptom, not a cause.** yt-dlp reports every 403
+  from a Cloudflare-fronted host as an anti-bot challenge. Four sessions treated
+  that as the diagnosis; the actual cause was a wrong `Referer`, and one matrix
+  of eight requests found it. Test the claim the message makes.
+- **Fix every route into the branch, in the same change.** The referer fix
+  landed on the probe and not the extractor, so single episodes worked and
+  ranges kept failing — the same shape as session 8's folderHint miss. Grep for
+  the pattern, not the call site you happen to be reading.
+- **A timeout that awaits something unbounded is not a timeout.**
+  `executeJavaScript` never settles against a hung renderer, so the 45s deadline
+  hung inside its own last-resort branch and logged nothing. Every rescue path
+  needs a deadline of its own.
+- **Stale output masks the fix under test.** Five "completed" downloads had
+  fetched nothing — `--no-overwrites` skipped them all. Check timestamps and
+  content, not the status badge, before concluding a change worked.
+- **Short-lived tokens rule out pre-resolving a batch.** These manifest URLs die
+  in about 90 seconds. Any design that resolves links for a whole range up front
+  produces links that are already dead; carry the *choice* forward and resolve
+  each item at its turn.
 - **Count the copies before you merge them.** The handover recorded two language
   classifiers; `stream-options-probe.ts` alone held four, and a `verify-engine`
   guard written against the *symptom* (`includes('en')` appearing anywhere in
