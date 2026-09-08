@@ -169,6 +169,12 @@ function extractHost(url: string): string {
   catch { return ''; }
 }
 
+/**
+ * Longest the engine will wait for a manifest before giving up and letting
+ * yt-dlp try the page URL itself. Generous: the extractor retries internally.
+ */
+const MANIFEST_EXTRACTION_CEILING_MS = 120_000;
+
 function matchesProbeHost(host: string): boolean {
   return MANIFEST_PROBE_HOSTS().some((d) => host === d || host.endsWith(`.${d}`));
 }
@@ -731,7 +737,20 @@ export class DownloadEngine {
 
       log.info(`[engine] Attempting manifest extraction BEFORE yt-dlp for ${request.url}`);
       try {
-        const result = await extractManifest(request.url);
+        // Hard ceiling on extraction. Two separate hangs have been found in
+        // that path — a raw fetch with no timeout, and a last-resort
+        // executeJavaScript that never settles against a stuck renderer — and
+        // because the queue is serialised for probe hosts, either one stalls
+        // every remaining episode with the row stuck on "starting". The
+        // extractor has its own timeouts; this exists so a third such hang
+        // cannot take the queue down with it.
+        const result = await Promise.race([
+          extractManifest(request.url),
+          new Promise<null>((resolve) => setTimeout(() => {
+            log.warn(`[engine] Manifest extraction exceeded ${MANIFEST_EXTRACTION_CEILING_MS}ms for ${request.url}`);
+            resolve(null);
+          }, MANIFEST_EXTRACTION_CEILING_MS)),
+        ]);
         if (record.status === 'cancelled' || record.status === 'paused') return;
 
         if (result && result.manifestUrl) {

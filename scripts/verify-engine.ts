@@ -721,6 +721,43 @@ function verifySkippedDownloadsAreLabelled(): void {
   );
 }
 
+
+/**
+ * Nothing in manifest extraction may wait forever.
+ *
+ * A download sat on "starting" indefinitely with nothing logged after
+ * `Probing …`. The 45s timeout had fired, but its last-resort
+ * `executeJavaScript` never settles against a hung renderer — neither `.then`
+ * nor `.catch` runs — so the timeout meant to rescue the extraction hung inside
+ * it. `fetchUrlRaw` had no timeout at all on the same path. Probe-host
+ * downloads run one at a time, so either hang stalls every remaining episode.
+ */
+function verifyExtractionCannotHang(): void {
+  const extractor = stripComments(readProjectFile('electron/manifest-extractor.ts'));
+  assert(
+    extractor.includes('JS_LAST_RESORT_MS'),
+    'the last-resort JS read runs under its own deadline',
+  );
+  assert(
+    extractor.includes('FETCH_TIMEOUT_MS'),
+    'a raw fetch cannot wait forever on a silent server',
+  );
+  assert(
+    /clearTimeout\(deadline\)/.test(extractor),
+    'the fetch deadline is cleared once the request settles',
+  );
+
+  const engine = stripComments(readProjectFile('electron/download-engine.ts'));
+  assert(
+    engine.includes('MANIFEST_EXTRACTION_CEILING_MS'),
+    'the engine caps how long it waits for a manifest',
+  );
+  assert(
+    /Promise\.race\(\[\s*extractManifest\(/.test(engine),
+    'extraction is raced against that ceiling, so a hang cannot stall the queue',
+  );
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
@@ -736,5 +773,6 @@ verifyNoFabricatedAudioChoices();
 verifyManifestReferer();
 verifyBatchManifestIsolation();
 verifySkippedDownloadsAreLabelled();
+verifyExtractionCannotHang();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);
