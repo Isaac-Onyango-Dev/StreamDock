@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectEpisodePattern, parseSeriesInfo, pickThumbnail } from './playlist-inspector';
+import { detectEpisodePattern, parseSeriesApiCount, parseSeriesInfo, pickThumbnail } from './playlist-inspector';
 
 /**
  * Markup shapes taken from the live anikoto.cz series page for Bleach — the
@@ -131,5 +131,63 @@ describe('detectEpisodePattern', () => {
   it('declines an episode number of zero or below', () => {
     expect(detectEpisodePattern('https://shuttletv.su/watch/1368337?e=0')).toBeNull();
     expect(detectEpisodePattern('https://anikototv.to/watch/show-abc/ep-0')).toBeNull();
+  });
+});
+
+/**
+ * Markup copied verbatim from anikototv.to's One Piece episode 1 page.
+ *
+ * The page states no series total anywhere — this is the only "Episode <n>" on
+ * it, and it is the episode you are looking at. The old count pattern allowed a
+ * singular "Episode" with an optional colon, so it matched here and reported
+ * "One Piece has 1 episodes", which both stated a falsehood and collapsed the
+ * episode range to a single item.
+ */
+const EPISODE_PAGE = `
+<div class="detail"> <div class="title">One Piece</div>
+<div class="episode">Episode <span id="report-episode">1</span></div> </div>
+<div class="server" data-id="1642"></div>`;
+
+describe('parseSeriesInfo on an episode page', () => {
+  it('does not read the current episode number as the series total', () => {
+    expect(parseSeriesInfo(EPISODE_PAGE).totalEpisodes).toBeUndefined();
+  });
+
+  it('still reads a real "Episodes:" count from a series page', () => {
+    expect(parseSeriesInfo('<div>Episodes: <span> 366</span></div>').totalEpisodes).toBe(366);
+    expect(parseSeriesInfo('<div>Episodes:<b>1177</b></div>').totalEpisodes).toBe(1177);
+  });
+});
+
+/**
+ * Response shape from anikoto's own series API, which the episode page points
+ * at via `data-id`. Counts here are the real ones measured for One Piece
+ * (series 1642) on 2026-09-08.
+ */
+describe('parseSeriesApiCount', () => {
+  it('prefers the listed episodes, which are the ones that actually exist', () => {
+    const body = JSON.stringify({
+      data: { anime: { is_sub: 1177, is_dub: 1155, episodes: '' }, episodes: Array.from({ length: 1177 }, (_, i) => ({ number: i + 1 })) },
+    });
+    expect(parseSeriesApiCount(body)).toBe(1177);
+  });
+
+  it('falls back to the highest per-language count when no list is present', () => {
+    const body = JSON.stringify({ data: { anime: { is_sub: 1177, is_dub: 1155, episodes: '' } } });
+    expect(parseSeriesApiCount(body)).toBe(1177);
+  });
+
+  it('returns undefined rather than throwing on anything unusable', () => {
+    expect(parseSeriesApiCount('not json')).toBeUndefined();
+    expect(parseSeriesApiCount('{}')).toBeUndefined();
+    expect(parseSeriesApiCount(JSON.stringify({ data: { anime: {} } }))).toBeUndefined();
+    expect(parseSeriesApiCount(JSON.stringify({ data: { anime: { is_sub: 0 } } }))).toBeUndefined();
+  });
+});
+
+describe('the anikoto series-id lookup is configured', () => {
+  it('extracts the series id the episode page carries', () => {
+    // The pattern lives in host-config.json; this asserts the shape it targets.
+    expect(EPISODE_PAGE.match(/data-id="(\d{1,10})"/i)?.[1]).toBe('1642');
   });
 });

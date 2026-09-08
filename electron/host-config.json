@@ -82,7 +82,9 @@
         "anikototv.to"
       ],
       "pathPattern": "^/watch/(?<series>[^/]+)/ep-(?<episode>\\d+)$",
-      "nextPath": "/watch/{series}/ep-{episode}"
+      "nextPath": "/watch/{series}/ep-{episode}",
+      "seriesIdPattern": "data-id=\"(\\d{1,10})\"",
+      "seriesApi": "https://anikotoapi.site/series/{id}"
     }
   ]
 }

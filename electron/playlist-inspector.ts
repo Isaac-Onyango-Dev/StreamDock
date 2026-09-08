@@ -73,6 +73,10 @@ export interface EpisodePattern {
   title: string;
   currentEpisode: number;
   createUrl: (episode: number) => string;
+  /** Regex pulling the series id out of the page HTML, from host config. */
+  seriesIdPattern?: string;
+  /** Series endpoint with `{id}` substituted, from host config. */
+  seriesApi?: string;
 }
 
 function hostFromUrl(url: string): string {
@@ -154,6 +158,8 @@ export function detectEpisodePattern(rawUrl: string): EpisodePattern | null {
     return {
       title,
       currentEpisode: episode,
+      seriesIdPattern: config.seriesIdPattern,
+      seriesApi: config.seriesApi,
       createUrl: (nextEpisode) => {
         if (config.episodeParam) {
           const next = new URL(rawUrl);
@@ -235,8 +241,15 @@ export function parseSeriesInfo(html: string): SeriesInfo {
   const info: SeriesInfo = {};
 
   // "Episodes: <span> 366</span>" and the common structured-data variants.
+  //
+  // The plural and the colon are both required. The previous pattern allowed
+  // `Episodes?` with an optional colon, so on an *episode* page it matched
+  //   Episode <span id="report-episode">1</span>
+  // and read the current episode number as the series total — anikototv.to
+  // reported "One Piece has 1 episodes", which is both false and silently
+  // collapses the episode range to a single item.
   const totalMatch =
-    html.match(/Episodes?\s*:?\s*<\/?[a-z][^>]*>\s*(\d{1,5})\s*</i) ||
+    html.match(/Episodes\s*:\s*(?:<\/?[a-z][^>]*>\s*)*(\d{1,5})\s*</i) ||
     html.match(/"numberOfEpisodes"\s*:\s*"?(\d{1,5})"?/i) ||
     html.match(/\b(?:total_?episodes|episodeCount)\b["'\s:=]+(\d{1,5})/i);
   if (totalMatch) {
@@ -274,11 +287,70 @@ function decodeEntities(value: string): string {
  * Guessing a longer list is what put episodes 367..999 of a 366-episode show
  * in front of the user.
  */
+
+/**
+ * Read a real episode count from the site's own series API.
+ *
+ * Some episode pages state no count at all — anikototv.to's states only the
+ * episode you are looking at, which the old parser misread as the series
+ * total. The page does carry the series id, and the site publishes a JSON API
+ * keyed on it, so the count can be read as data instead of scraped.
+ *
+ * Best-effort by design: any failure returns undefined and the caller falls
+ * back to listing only the pasted episode. A probe must never fail because a
+ * count lookup did.
+ */
+export function parseSeriesApiCount(body: string): number | undefined {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+
+  const data = (payload as { data?: Record<string, unknown> })?.data;
+  if (!data) return undefined;
+
+  // A listed episode array is the most trustworthy answer: it is the episodes
+  // that actually exist, not a number the site claims.
+  const episodes = data.episodes;
+  if (Array.isArray(episodes) && episodes.length > 0) return episodes.length;
+
+  // Otherwise fall back to the per-language counts the series carries.
+  const anime = data.anime as Record<string, unknown> | undefined;
+  const counts = [anime?.is_sub, anime?.is_dub, anime?.episodes]
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0 && value <= 10_000);
+
+  return counts.length > 0 ? Math.max(...counts) : undefined;
+}
+
+async function resolveTotalFromSeriesApi(
+  html: string,
+  pattern: EpisodePattern,
+): Promise<number | undefined> {
+  if (!pattern.seriesIdPattern || !pattern.seriesApi) return undefined;
+
+  let idMatch: RegExpMatchArray | null;
+  try {
+    idMatch = html.match(new RegExp(pattern.seriesIdPattern, 'i'));
+  } catch {
+    return undefined;
+  }
+
+  const seriesId = idMatch?.[1];
+  if (!seriesId) return undefined;
+
+  const body = await fetchPage(pattern.seriesApi.replace('{id}', encodeURIComponent(seriesId)));
+  return body ? parseSeriesApiCount(body) : undefined;
+}
+
 async function episodeRangeProbe(url: string, pattern: EpisodePattern): Promise<PlaylistProbe> {
   const html = await fetchPage(url);
   const series = html ? parseSeriesInfo(html) : {};
   const seriesTitle = series.title || pattern.title;
-  const total = series.totalEpisodes;
+  // Prefer a count the page states; otherwise ask the site's own series API.
+  const total = series.totalEpisodes ?? (html ? await resolveTotalFromSeriesApi(html, pattern) : undefined);
 
   const notes: string[] = [];
   let episodes: number[];

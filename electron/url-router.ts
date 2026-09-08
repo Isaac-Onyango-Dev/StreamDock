@@ -33,6 +33,11 @@ export interface EpisodePatternConfig {
   episodeParam?: string;
   nextPath?: string;
   titlePrefix?: string;
+  /** Regex with one capture group pulling the series id out of the page HTML. */
+  seriesIdPattern?: string;
+  /** Endpoint returning the series, with `{id}` substituted. Used to read a
+   *  real episode count when the page itself states none. */
+  seriesApi?: string;
 }
 
 interface HostConfig {
@@ -74,7 +79,7 @@ function loadHostConfig(): HostConfig {
       ytDlpSupportedHosts: ['youtube.com', 'youtu.be', 'vimeo.com', 'tiktok.com', 'instagram.com', 'twitter.com', 'x.com', 'twitch.tv'],
       episodePatterns: [
         { hosts: ['shuttletv.su'], pathPattern: '^/watch/(?<series>[^/]+)', episodeParam: 'e', titlePrefix: 'ShuttleTV' },
-        { hosts: ['anikoto.cz', 'anikototv.to'], pathPattern: '^/watch/(?<series>[^/]+)/ep-(?<episode>\\d+)$', nextPath: '/watch/{series}/ep-{episode}' },
+        { hosts: ['anikoto.cz', 'anikototv.to'], pathPattern: '^/watch/(?<series>[^/]+)/ep-(?<episode>\\d+)$', nextPath: '/watch/{series}/ep-{episode}', seriesIdPattern: 'data-id="(\\d{1,10})"', seriesApi: 'https://anikotoapi.site/series/{id}' },
       ],
     };
     return configCache;
