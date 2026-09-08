@@ -36,17 +36,17 @@ fast without re-deriving it. Update it as work continues — don't let it go sta
   `views/SettingsView` are the three tabs.
 - Build: esbuild bundles `electron/main.ts`/`preload.ts` → `dist-electron/*.cjs`;
   Vite builds the renderer → `dist/client/`; electron-builder packages.
-- Tests: Vitest (`*.test.ts`/`*.test.tsx`, jsdom/happy-dom) + Playwright e2e
+- Tests: Vitest (`*.test.ts`/`*.test.tsx`, happy-dom) + Playwright e2e
   (`tests/e2e/`). The e2e specs load the renderer over HTTP and assert on the
   DOM, so they are browser tests: no Electron, no binaries, no display needed.
   Session 7 corrected a long-standing claim to the contrary.
 
 Key scripts: `npm run typecheck` (two tsconfig projects — renderer and
-electron, run both), `npm run lint` region is actually just `eslint .`
-(flat config, `eslint.config.js`, zero-warning gate), `npm test` (Vitest),
-`npm run build:app` (production build without packaging), `npm run
-verify:engine` (a pure static/unit check — no binaries, no network),
-`npx playwright test` (e2e).
+electron, run both), `npm run lint` (`eslint .` — flat config,
+`eslint.config.js`, zero-warning gate in CI, and it covers `scripts/` since
+session 16), `npm test` (Vitest), `npm run build:app` (production build without
+packaging), `npm run verify:engine` (a pure static/unit check — no binaries, no
+network), `npx playwright test` (e2e).
 
 **Diagnosing a real user-reported failure? Start here:**
 `%APPDATA%/streamdock/streamdock.log` is `electron-log`'s output from Isaac's
@@ -1343,8 +1343,194 @@ new test and guard validated by reintroducing its bug. Plus real downloads
 through the app and through harnesses driving the actual engine in a real
 Electron session.
 
+### Session 16 — repo audit, then the cleanup it justified
+
+No version bump, **nothing released**. A full read-only audit first
+(published at https://claude.ai/code/artifact/765663e6-8ee5-4ef6-9488-fa6934bac63b),
+then only the removals that audit had traced to evidence. The full pipeline was
+run before *and* after, and was green both times: 207 tests, 162 engine checks,
+Playwright 12/12, ESLint 0/0, typecheck, production build.
+
+**Removed, each traced to zero references before deletion:**
+
+- Both `*.tsbuildinfo` files — tracked TypeScript incremental state, 124KB
+  carrying **311 `node_modules/` path references**, re-committed across 17
+  commits including the v1.7.0 release commit. Untracked, and `*.tsbuildinfo`
+  ignored. Flagged twice in HANDOVER and deferred twice.
+- `info.json` — a UTF-16LE `yt-dlp --dump-json` dump of an anikoto episode. The
+  UTF-16 encoding is a PowerShell redirect signature; it was swept into the
+  wallpaper commit `9b47c04`.
+- `icons-cards.png`, `icons-pills.png`, `icons-reqs.png` — 106KB of screenshots
+  from `4a37b64`'s visual verification of the site, committed at the repo root.
+- `plan.md` — the pre-implementation plan, which **contradicted shipped
+  behaviour**: it specified the `Season N/Episode NN` naming session 8 abolished,
+  and named `everythingmoe.com` as a site to research when `verify:engine` now
+  guards against its reintroduction. Recoverable from git (`git show 73c7129:plan.md`).
+- `.vscode/settings.json` — tracked and empty (`{}`).
+- `assets/logo.svg` — referenced by nothing but `plan.md`.
+- Six unused dependencies: `class-variance-authority`, `clsx`, `tailwind-merge`
+  and `react-error-boundary` (all **runtime**, so they shipped inside the app —
+  the shadcn/ui trio without shadcn, plus an error-boundary package while
+  `main.tsx` hand-rolls its own class), and dev-only `jsdom` (Vitest is
+  configured for happy-dom) and `source-map`.
+- Dead code: `playComplete()`/`playError()` in `client/src/lib/audio.ts` (never
+  called; `playDiscovery`/`playPop` are), `getLanguageFlag()` plus its orphaned
+  `LANGUAGE_FLAGS` table in `language-registry.ts` (the live flag table is the
+  renderer's), `resolvePackagingMode()` in `media-track-probe.ts` — a
+  **byte-identical duplicate** of the renderer's tested `computePackagingMode` —
+  and its now-unused local `DownloadPackagingMode`, and two `console.log` calls
+  dumping full probe payloads on the success path in shipped renderer code.
+
+**`scripts/download-plugins.ts` was repaired rather than deleted, because it
+would have reintroduced a fixed user-facing bug.** Unchanged since the initial
+commit, it wrote ChromeCookieUnlock into `plugins/` — undoing session 13's
+`plugins-win/` split, which exists because that package imports `windll` at
+module level and prints an ImportError traceback into the stderr users see. It
+had **no mention of `plugins-win` at all**, listed `anime-media-fetcher` (not
+vendored here), and `rmSync`s each vendored plugin before replacing it with
+upstream HEAD. It now routes per-package to the correct root and reproduces
+exactly the committed set. Its `branch` field was always dead data — the loop
+tries `master` then `main` regardless.
+
+**Then running it found two more things that reading it had not.** It was run
+against a scratch directory (`process.cwd()` decides where it writes, so this is
+safe and needs no flag) rather than in the repo, because running it in place
+rewrites vendored code by design.
+
+1. *It had never worked on Linux or macOS at all — every package failed.* It
+   extracted with a bare `tar -xf` on a GitHub **zip**, and GNU tar cannot read a
+   zip ("This does not look like a tar archive"). The failure was swallowed by
+   the loop's catch and surfaced only as "FAILED to install … from any branch",
+   which reads like a network problem. This is the same trap session 4 hit in
+   `download-binaries.ts`; that fix was never carried across. `extractZip()` now
+   uses Windows' bsdtar (`System32\tar.exe`) there and `unzip` elsewhere. Note
+   `download-binaries.ts` is *not* affected — it only ever hands tar a `.zip` on
+   Windows and a `.tar.xz` on Linux — though its comment claiming one invocation
+   covers both formats is optimistic.
+2. *`Tons-7/yt-dlp-aniwatchtv-kaido` is gone* — 404 on the repo page, the API and
+   both branch archives. **`plugins/aniwatchtv-kaido/` is now the only surviving
+   copy** of the aniwatch, kaido and megacloud extractors. Its entry carries
+   `repo: null` and is skipped with an explanation, so the vendored copy is never
+   deleted and the skip is not mistaken for a bug.
+
+Verified end to end: four packages refresh, ChromeCookieUnlock lands in
+`plugins-win/`, the rest in `plugins/`, and the resulting layout matches the
+committed one exactly apart from the deliberately-skipped package.
+
+**Config fixes, each verified by running the thing:**
+
+- `vite.config.ts` had `publicDir: 'assets'` — the same folder electron-builder
+  takes *installer* icons from, so every build copied `icon.ico`, `icon.png` and
+  the eight Linux sizes (~965KB) into `dist/client/` and from there into the
+  asar. The renderer requests none of them; it draws its mark as inline SVG.
+  Set to `false`; **`dist/client` went from ~1.2MB to 288KB**. Safe because
+  `main.ts` resolves icons from `process.resourcesPath` / `app.getAppPath()`,
+  never from `dist/client` — checked before changing it.
+- ESLint no longer ignores `scripts/**`. **All 14 scripts had gone unlinted**,
+  which is part of how `download-plugins.ts` drifted; it held two of the three
+  warnings this surfaced. Added a real `lint` script so CI and humans run one
+  command, and dropped `--ext .ts,.tsx` from CI, which is a no-op under flat
+  config (verified: identical result with and without).
+- Coverage excluded `electron/**` while **10 of 15 test files test it**. Now
+  included — which immediately exposed that the suites themselves and the
+  Playwright specs were being measured too, distorting the total in opposite
+  directions. With all three fixed the number is honest and interpretable for
+  the first time: shared 97.7%, client/src/lib 34.9%, electron 14.8%.
+- `.gitignore` gained `*.tsbuildinfo`, `coverage/`, `.claude/`,
+  `RELEASE_NOTES.md`, `.env*` and `.vscode/`. `.claude/` matters most: HANDOVER
+  said `launch.json` "must stay that way", but nothing enforced it, and that
+  directory also holds **entire git worktree checkouts**.
+- CI: dropped the `develop` branch trigger (no such branch on origin), removed
+  `npm run build:app` from the E2E job (the specs run against Vite from source,
+  so `dist/` was never consumed), and fixed the Playwright artifact — it
+  uploaded `test-results/` under the name `playwright-report`, so the HTML
+  report the name promised was never in it.
+
+**One import was left alone after investigation.** `release-notes.ts` imported
+`entryForVersion` and used an inline `.find()` instead. Swapping to the helper
+looked like obvious de-duplication — but `entryForVersion` falls back to
+`entries[0]`, which for release notes would silently attach the *previous*
+version's notes to a new release. The inline exact match is deliberate; only the
+dead import was removed, and the reason is now a comment.
+
+**The pipeline pass came next, and the run history settled two things reading
+could not.**
+
+- *The release window session 9 closed had reopened, and it is not theoretical —
+  it happened on v1.7.0.* `deploy-site.yml` no longer triggers on `package.json`,
+  but its push paths still listed `CHANGELOG.md`, and a release commit edits
+  both. On the real v1.7.0 push both workflows started at 15:13:08: Deploy Site
+  finished at **15:13:37** publishing "1.7.0" to the site, while Build & Release
+  did not publish the installer until **15:17:03**. For 3m26s the site
+  advertised a version whose installer did not exist and the download button
+  served v1.6.1. Fixed by dropping that path; the `workflow_run` trigger already
+  covers releases and waits for the installers (it is the 15:17:06 run).
+- *Codecov had never once worked.* Its step reported `Token required - not valid
+  tokenless upload` three times per run **and** `not_found_files:
+  ["coverage/lcov.info"]` — no `CODECOV_TOKEN` is configured, and vitest's
+  reporters are `text/json/html`, so the lcov file it uploads was never
+  generated either. `fail_ci_if_error: false` hid both, on every run, forever.
+  Removed, with the two things needed to re-enable it written where the step was.
+
+Also: **a release could publish without passing anything.** `build` depended
+only on `check`, so nothing stopped a commit with a failing typecheck, lint or
+test from being packaged and published — ci.yml runs on the same commit but in a
+separate workflow whose result release.yml never observed. There is now a
+`quality` job (the same gate ci.yml requires before packaging) that `build`
+depends on.
+
+Rounding it out: **concurrency groups** on all three workflows (deploy-site
+pushes to main, so two overlapping runs raced on the same branch; release runs
+raced to create the same tag — both queue rather than cancel, while CI cancels
+superseded runs); **timeouts** on every job, which previously inherited the
+6-hour default; **artifact globs** instead of `path: release/`, measured by
+packaging locally — `release/` is 913 MB for Linux because electron-builder also
+leaves the 647 MB unpacked app there, so every push to main uploaded that, per
+platform (now 267 MB, still the AppImage this repo tests with); **action
+versions**, all six of which GitHub reports as targeting the deprecated Node 20
+runtime — bumped to the majors that target Node 24 only after reading each
+release note, which is why checkout stops at v5 rather than the current v7
+(v7 changes `workflow_run` checkout behaviour, and `deploy-site.yml` runs on
+`workflow_run`); and **least-privilege permissions** in release.yml, where
+`build` runs npm installs and downloaded engine binaries and no longer holds a
+repo-write token — only `publish` does.
+
+The duplicate packaging is gone too: a release commit was packaged by both
+workflows, so ci.yml now asks "will release.yml package this commit?" by
+mirroring release.yml's own decision exactly (package.json changed **and**
+`v<version>` untagged) and skips Windows/Linux when the answer is yes. macOS is
+never gated, because release.yml never builds it.
+
+
 ## Working agreements for future sessions on this repo
 
+- **An ignore rule enforces what documentation can only request.** HANDOVER said
+  `.claude/launch.json` "must stay untracked"; nothing stopped anyone adding it,
+  and the same directory holds whole worktree checkouts. If a note asks a human
+  to remember something git can enforce, make git enforce it.
+- **A helper that looks like the duplicate you are about to merge may differ in
+  its fallback.** `release-notes.ts` imported `entryForVersion` and used an
+  inline `.find()` instead. The helper falls back to the newest entry — merging
+  them would have attached the *previous* release's notes to a new release.
+  Read the branch you are deleting, not just the signature.
+- **Excluding code from a report is how a number stops meaning anything.**
+  Coverage excluded `electron/**` while two thirds of the suites tested it, and
+  counted the test files themselves. Three exclusions fixed, and the figure went
+  from decorative to interpretable — a lower honest number beats a flattering one.
+- **Code nothing lints will drift.** All 14 files in `scripts/` were outside the
+  ESLint scope, including the ones that decide whether a release ships working
+  engines. That is where `download-plugins.ts` quietly went out of step with a
+  layout change and would have reintroduced a fixed user-facing bug.
+- **A script with no caller is a script nobody has run.** Reading
+  `download-plugins.ts` found the wrong plugin root; *running* it found that it
+  had never worked on Linux at all (GNU tar cannot open a zip) and that one
+  upstream repo has been deleted, leaving our vendored copy the only one. A
+  script that writes to the repo can be run safely against a scratch `cwd`.
+- **Carry a fix across every script that shares the bug.** Session 4 fixed bare
+  `tar` in `download-binaries.ts`; `download-plugins.ts` had the same line, was
+  never touched, and stayed broken until session 16 ran it. Same shape as the
+  referer fix landing on the probe but not the extractor — grep for the pattern,
+  not the file you were already reading.
 - **An error message names a symptom, not a cause.** yt-dlp reports every 403
   from a Cloudflare-fronted host as an anti-bot challenge. Four sessions treated
   that as the diagnosis; the actual cause was a wrong `Referer`, and one matrix

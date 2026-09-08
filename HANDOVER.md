@@ -34,10 +34,12 @@ the single biggest open item across the last several sessions.
   match a "Contribute" button and a "360p720p1080p" quality row. Those are
   dropped because the declared `data-type` options win, but a site without
   `data-type` would still surface them.
-- **`tsbuildinfo` files are committed** and churn on every build. They belong in
-  `.gitignore`.
-- **`.claude/launch.json` is untracked and must stay that way** — it holds an
-  absolute Linux path to a user-local Node. Isaac dual-boots.
+- ~~**`tsbuildinfo` files are committed**~~ — fixed in session 16: `*.tsbuildinfo`
+  is ignored and both files are untracked.
+- **`.claude/launch.json` must stay untracked** — it holds an absolute Linux path
+  to a user-local Node. Isaac dual-boots. Session 16 added `.claude/` to
+  `.gitignore`, so this is now enforced rather than merely asked for; that
+  directory also holds git worktrees, which must never be committed either.
 
 ---
 
@@ -158,10 +160,17 @@ above.
    a Next.js app serving nothing useful in its HTML — it needs the browser path.
    Adding a host is now a **config edit**, so the cost here is the extraction,
    not the routing.
-5. **`tsbuildinfo` files are committed.** `tsconfig.electron.tsbuildinfo` and
-   `tsconfig.renderer.tsbuildinfo` are tracked build artifacts that churn on
-   every build. They belong in `.gitignore`. Left alone this session because it
-   was unrelated to the work.
+5. ~~**The release-window collision**~~ — fixed in session 16, after confirming
+   it happened for real on v1.7.0 (Deploy Site published "1.7.0" to the site at
+   15:13:37; the installer did not exist until 15:17:03). `CHANGELOG.md` is no
+   longer a push path for `deploy-site.yml`.
+
+   **What to watch on the next release**, since none of it could be verified
+   without an actual run: that Deploy Site fires *once*, from `workflow_run`
+   after Build & Release succeeds — not twice; that ci.yml's
+   "Packaged by the release workflow?" job reports `handled=true` and its Build
+   Windows/Build Linux jobs show as skipped while Build macOS still runs; and
+   that release.yml's new `quality` job passes before anything is packaged.
 
 **What still cannot be tested headlessly, and is exactly what hosts 4 depends
 on:** the hidden `BrowserWindow` manifest extractor. It needs a real Electron
