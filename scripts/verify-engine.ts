@@ -408,34 +408,59 @@ function verifyScreenshotCarousel(): void {
     'the carousel script clears aria-hidden when a slide comes back on stage',
   );
 
-  // The carousel must be sized by viewport *height* as well as width.
+  // The carousel must be sized by the height it is actually given, not by the
+  // width alone and not by the whole viewport.
   //
-  // It was `min(58vw, 860px)` — width only — so the section was 961px tall on
-  // every screen whatever its height. On a laptop with a bookmarks bar and a
-  // sidebar (~664px of viewport) it overflowed by ~300px and pushed the heading
-  // and the caption out of sight, which is what a user actually reported. The
-  // earlier checks all passed because they only ever asked about *horizontal*
-  // overflow.
+  // Two regressions have shipped from this one component:
+  //  - v1 sized it `min(58vw, 860px)` — width only — so the section was 961px
+  //    tall on every screen whatever its height, and overflowed a laptop.
+  //  - v2 added a height term but subtracted only a hardcoded furniture
+  //    constant from 100svh. It never subtracted the sticky nav the section
+  //    renders *under*, so it was reliably one nav-height too tall: on a
+  //    1440x664 window the progress dots sat 106px below the fold.
   //
   // Asserted structurally, because whether a section fits a viewport is a
-  // rendered-layout fact this static script cannot evaluate: every breakpoint's
-  // --shot-w must consult --shot-limit, and --shot-limit must come from a
-  // viewport-height unit. A regression to width-only sizing brings the bug back
-  // wholesale, and that is the shape this catches.
-  const limitDecls = [...html.matchAll(/--shot-limit:\s*calc\(\(100(v|sv)h\s*-/g)];
+  // rendered-layout fact this static script cannot evaluate. The three
+  // conditions below are what make the rendered outcome possible at all, and
+  // each corresponds to a bug that actually shipped.
+  const availDecls = [...html.matchAll(/--shots-avail:\s*calc\(100(v|sv)h\s*-\s*var\(--nav-h\)/g)];
   assert(
-    limitDecls.length >= 2,
-    `--shot-limit is derived from the viewport height, with an svh line and a vh fallback (found ${limitDecls.length})`,
+    availDecls.length >= 2,
+    'the screenshots section budgets 100svh minus --nav-h, with a vh fallback ' +
+      `(found ${availDecls.length} such declarations)`,
   );
 
-  const widthDecls = [...html.matchAll(/--shot-w:\s*([^;]+);/g)].map((m) => m[1]);
-  assert(widthDecls.length === 3, `--shot-w is declared once per breakpoint (found ${widthDecls.length})`);
-  const widthOnly = widthDecls.filter((decl) => !decl.includes('var(--shot-limit)'));
   assert(
-    widthOnly.length === 0,
-    `every --shot-w consults --shot-limit, so a short window shrinks the carousel${
-      widthOnly.length ? ` (width-only: "${widthOnly[0].trim()}")` : ''
-    }`,
+    /--nav-h:\s*calc\(/.test(html) && /min-height:\s*var\(--nav-h\)/.test(html),
+    '--nav-h is a definition the nav is actually built from, not an estimate of it',
+  );
+
+  assert(
+    /\.shots\s*\{[^}]*max-height:\s*max\(var\(--shots-avail\)/s.test(html),
+    'the screenshots section is capped by --shots-avail, so it cannot exceed the screen it is given',
+  );
+
+  // The furniture must be measured by the browser, not declared. The names
+  // below belong to the two superseded mechanisms; any one reappearing means
+  // the arithmetic is back, and with it the drift between the constant and the
+  // furniture it claims to describe (322px declared, 289px measured).
+  //
+  // Checked against the stylesheet with its comments removed, because the
+  // comment explaining why those names are gone necessarily contains them —
+  // a guard that can match prose is not guarding code.
+  const css = html.replace(/\/\*[\s\S]*?\*\//g, '').replace(/<!--[\s\S]*?-->/g, '');
+  for (const dead of ['--shot-furniture', '--shot-limit', '--shot-w:']) {
+    assert(
+      !css.includes(dead),
+      `the carousel no longer sizes itself with ${dead.replace(/:$/, '')} — the flex column measures the furniture instead`,
+    );
+  }
+
+  // One constrained dimension only. Constraining both is what squashes the
+  // frame, and the requirement is that a screenshot is never distorted.
+  assert(
+    /\.shot\s*\{[^}]*height:\s*100%;[^}]*width:\s*auto;[^}]*aspect-ratio:\s*1600\s*\/\s*1034/s.test(html),
+    'a slide takes its height from the stage and derives its width, so the frame cannot be squashed',
   );
 
   // Slide images must not be native drag sources.

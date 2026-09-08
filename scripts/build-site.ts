@@ -100,14 +100,29 @@ function buildChangelogHtml(maxEntries = 3): string {
 
 /**
  * Widths the browser is told the centre slide will occupy, mirroring the
- * carousel's `--shot-w` at each breakpoint.
+ * carousel's `--shot-w-max` at each of its two tiers.
  *
- * Written out as plain media conditions rather than the stylesheet's
- * `min(58vw, 860px)`: `sizes` is parsed before any layout exists, and the
- * explicit ladder is understood everywhere. The last two entries are that
- * `min()` spelled out — 58vw until it reaches 860px at a 1483px viewport.
+ * Written out as plain media conditions rather than the stylesheet's own
+ * `min()` calls: `sizes` is parsed before any layout exists, so each `min()`
+ * has to be spelled out as the width at which it changes hands.
+ *
+ *  - under 45rem  : min(82vw, 34rem) — 82vw until it reaches 544px at 663px
+ *  - 45rem–60rem  : min(74vw, 40rem) — 74vw until it reaches 640px at 865px
+ *  - 60rem and up : min(58vw, 32vw + 14.8rem, 60rem) — the middle term binds
+ *                   throughout, until it reaches the 960px cap at 2259px
+ *
+ * This is an upper bound: on a short window the slide is smaller than the
+ * figure here, because the stage shrinks to fit the screen. Overstating it
+ * costs a larger candidate; understating it would ship a blurry one.
  */
-const SCREENSHOT_SIZES = '(max-width: 720px) 86vw, (max-width: 1100px) 72vw, (max-width: 1483px) 58vw, 860px';
+const SCREENSHOT_SIZES = [
+  '(max-width: 663px) 82vw',
+  '(max-width: 719px) 544px',
+  '(max-width: 864px) 74vw',
+  '(max-width: 959px) 640px',
+  '(max-width: 2259px) calc(32vw + 237px)',
+  '960px',
+].join(', ');
 
 /** Native pixel size of every generated asset; see optimize-screenshots.ts. */
 const SCREENSHOT_ASPECT = { width: 1600, height: 1034 };
