@@ -136,6 +136,15 @@ interface ActiveTask {
   speedSamples: string[];
   /** Temp cookies.txt written by manifest-extractor; deleted after download finishes. */
   cookiesFile?: string;
+  /**
+   * The page URL this download was queued for, before any manifest rewrite.
+   *
+   * `request.url` is replaced with the CDN manifest once one is resolved, which
+   * made running probe-host downloads invisible to the concurrency guard below
+   * — the limit of one at a time silently stopped applying and five yt-dlp
+   * processes hammered the same CDN until it answered 429.
+   */
+  originalUrl: string;
 }
 
 /** Known video CDN hosts whose manifest URLs need a specific referer. */
@@ -346,7 +355,7 @@ export class DownloadEngine {
     // Non-probe-host downloads (YouTube, etc.) use the full maxConcurrent slots.
     const effectiveConcurrent = isProbeHost ? 1 : this.maxConcurrent;
     const probeHostActiveCount = isProbeHost
-      ? Array.from(this.tasks.values()).filter((t) => matchesProbeHost(extractHost(t.request.url))).length
+      ? Array.from(this.tasks.values()).filter((t) => matchesProbeHost(extractHost(t.originalUrl))).length
       : 0;
     const canSpawn = isProbeHost
       ? probeHostActiveCount < effectiveConcurrent
@@ -678,6 +687,7 @@ export class DownloadEngine {
       monitor,
       startedAt: Date.now(),
       speedSamples: [],
+      originalUrl: request.url,
     };
 
     this.tasks.set(id, task);
@@ -1119,6 +1129,9 @@ export class DownloadEngine {
         const newTask: ActiveTask = {
           process: child,
           record,
+          // A manifest retry keeps the page URL it was queued for, so the
+          // concurrency guard still recognises it as a probe-host download.
+          originalUrl: this.tasks.get(id)?.originalUrl ?? retryRequest.url,
           request: retryRequest,
           stderr: '',
           manifestAttempted: true,
