@@ -1036,6 +1036,18 @@ installer is not published yet; the download button still serves the previous
 release). Transient and self-correcting, but the two guards are pulling against
 each other and it should be resolved deliberately.
 
+**Shipping a platform is more than publishing its asset.** Three separate bits
+of site copy still described a Windows-only release after v1.6.0 went out: the
+Linux download card ("Coming Soon" / "Not yet available"), the section heading
+("well — Windows first"), and — the one Isaac caught by eye — an inline
+`style="opacity:.5;"` on the Linux System Requirements entry, which left the
+newly shipped platform looking greyed out beside an undimmed macOS that is
+*not* shipped. Each was a separate place where availability had been written
+down by hand. The hero button and the requirements dimming are now both derived
+from the download cards, and `verifySiteRendering()` asserts a platform is
+dimmed exactly when its card is `is-disabled` — validated by re-dimming Linux
+and watching it fail.
+
 **Environment note:** this Ubuntu box had no node/npm. A user-local Node 20
 (`~/.local/node-v20.18.1-linux-x64`, no sudo) plus `npm ci` completed in **one
 minute** — the install timeouts CLAUDE.md records are a Windows/AV problem, not
