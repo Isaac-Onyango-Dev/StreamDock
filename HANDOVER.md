@@ -13,7 +13,7 @@ v1.7.0 is published. Dubbed downloads work, including across an episode range,
 and every content choice has a single home in the UI. Isaac confirmed dub on
 episodes 1 and 2 of Bleach through the real app.
 
-Baseline: **207 tests, 162 engine checks, Playwright 12/12, ESLint 0/0.**
+Baseline: **207 tests, 272 engine checks, Playwright 12/12, ESLint 0/0.**
 
 Anikoto is now genuinely working end to end — series listing, real episode
 counts, per-episode language selection, and downloads that complete. That was
@@ -191,6 +191,10 @@ command lines and verbatim stderr and has settled several bugs in one grep.
 - **No engine binaries in a fresh worktree** (`binaries/` is gitignored, and the
   main checkout holds Windows `.exe`s). `npm run download:binaries` fetches the
   Linux set; session 14 grabbed `yt-dlp_linux` alone (40MB) for a quick test.
+- **The screenshot sources live at `Screenshots/` in the main checkout** (capital
+  S), are untracked, and therefore **do not exist inside a worktree**. Point
+  `npm run screenshots:build -- <path>` at them. Only the generated `.webp`
+  files under `docs/assets/screenshots/` are committed.
 - `gh` is installed and authenticated as `Isaac-Onyango-Dev`.
 - Reference clones live in the session scratchpad, outside the repo, on purpose.
 
@@ -205,7 +209,12 @@ npm run typecheck && npx eslint . && npm test && npm run verify:engine
 npx playwright test && npm run build:app
 ```
 
-Baseline: **207 tests, 162 engine checks, Playwright 12/12, ESLint 0/0.**
+Baseline: **207 tests, 272 engine checks, Playwright 12/12, ESLint 0/0.**
+
+The site has its own manual step now: `npm run screenshots:build` re-encodes
+`Screenshots/` into `docs/assets/screenshots/`. It is not part of any build and
+CI never runs it — like `icons:build`, it needs a browser and it needs source
+files that are not committed.
 
 ---
 
@@ -221,3 +230,6 @@ Baseline: **207 tests, 162 engine checks, Playwright 12/12, ESLint 0/0.**
   is what surfaced the extra two.
 - **Stars and recent commits say nothing about whether a tool works.** One curl
   beat two READMEs.
+- **A guard that can match prose is not guarding code.** Session 17's first
+  carousel guard tripped on a word inside a comment, then passed wrongly because
+  its regex anchored on a string that also appears in the stylesheet.
