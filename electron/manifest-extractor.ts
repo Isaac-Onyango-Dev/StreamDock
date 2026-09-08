@@ -639,6 +639,36 @@ async function tryApiProbe(pageUrl: string): Promise<ApiProbeResult | null> {
  *
  * Returns `null` if no manifest is discovered before the timeout.
  */
+/**
+ * The referer the manifest's CDN will expect.
+ *
+ * Every interception site used to return the page URL the user pasted, and the
+ * engine handed that to yt-dlp. The manifest is requested by the *player*,
+ * which lives on a different origin, and anikoto's CDN serves it only to that
+ * origin — the page URL gets a flat 403. Measured against the live CDN:
+ * `Referer: https://megaplay.buzz/` returns 200 while the anikoto page URL, the
+ * CDN's own origin and an unrelated referer all return 403.
+ *
+ * Chromium's default referrer policy sends the bare origin cross-origin, which
+ * is exactly the form the CDN wants. Reading it from the intercepted request
+ * keeps this correct for any host instead of hardcoding one embed provider —
+ * anikoto has already moved from megaplay to vidtube once.
+ */
+function refererForRequest(
+  details: { referrer?: string; frame?: { url?: string } | null },
+  pageUrl: string,
+): string {
+  const referrer = details.referrer?.trim();
+  if (referrer) return referrer;
+  try {
+    const frameUrl = details.frame?.url;
+    if (frameUrl) return new URL(frameUrl).origin + '/';
+  } catch {
+    // Frame already navigated or destroyed — fall through to the page URL.
+  }
+  return pageUrl;
+}
+
 export async function extractManifest(pageUrl: string): Promise<ManifestResult | null> {
   if (getProbeStrategy(pageUrl) === 'ytdlp') {
     try {
@@ -821,14 +851,14 @@ async function probeOnce(
           log.info(`[manifest-extractor] Found ${type} manifest: ${details.url}`);
           // Cancel the request to avoid letting the player consume it
           callback({ cancel: true });
-          finish({ originalUrl: pageUrl, manifestUrl: details.url, type, referer: pageUrl });
+          finish({ originalUrl: pageUrl, manifestUrl: details.url, type, referer: refererForRequest(details, pageUrl) });
           return;
         }
 
         if (KNOWN_CDNS.some((cdn) => details.url.includes(cdn)) && (MANIFEST_PATTERN.test(details.url) || details.url.includes('/hls/'))) {
           log.info(`[manifest-extractor] Found CDN manifest: ${details.url}`);
           callback({ cancel: true });
-          finish({ originalUrl: pageUrl, manifestUrl: details.url, type: 'm3u8', referer: pageUrl });
+          finish({ originalUrl: pageUrl, manifestUrl: details.url, type: 'm3u8', referer: refererForRequest(details, pageUrl) });
           return;
         }
 

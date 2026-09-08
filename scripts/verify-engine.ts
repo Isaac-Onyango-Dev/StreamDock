@@ -643,6 +643,18 @@ function verifyManifestReferer(): void {
     engine.includes('manifestReferer'),
     'the engine passes the manifest referer through to yt-dlp',
   );
+
+  // The engine's own per-episode extractor is a second route to the same CDN,
+  // and it had the same defect. A batch takes this path, not the probe's.
+  const extractor = stripComments(readProjectFile('electron/manifest-extractor.ts'));
+  assert(
+    extractor.includes('function refererForRequest'),
+    'the extractor derives the referer from the intercepted request',
+  );
+  assert(
+    !/finish\(\{[^}]*referer: pageUrl \}\)/.test(extractor),
+    'no manifest interception returns the page URL as the referer',
+  );
 }
 
 
