@@ -2,7 +2,7 @@
 import { spawn } from 'child_process';
 import { get as httpsGet } from 'https';
 import { buildPluginDirArgs, resolveBinary, resolveYtDlpCommand } from './binary-resolver';
-import { ANIME_HOSTS, MANIFEST_PROBE_HOSTS, PLUGIN_EXTRACTOR_HOSTS, REFERENCE_HOSTS } from './url-router';
+import { ANIME_HOSTS, EPISODE_PATTERNS, MANIFEST_PROBE_HOSTS, PLUGIN_EXTRACTOR_HOSTS, REFERENCE_HOSTS } from './url-router';
 
 export type ProbeSupport = 'direct' | 'playlist' | 'episode-range' | 'manifest-probe' | 'unknown';
 
@@ -69,7 +69,7 @@ const PAGE_FETCH_TIMEOUT_MS = 15_000;
  */
 const PREVIEW_LIMIT = 200;
 
-interface EpisodePattern {
+export interface EpisodePattern {
   title: string;
   currentEpisode: number;
   createUrl: (episode: number) => string;
@@ -121,35 +121,50 @@ function cleanSeries(value: string): string {
     .join(' ');
 }
 
-function detectEpisodePattern(rawUrl: string): EpisodePattern | null {
+export function detectEpisodePattern(rawUrl: string): EpisodePattern | null {
   const parsed = new URL(rawUrl);
   const host = hostFromUrl(rawUrl);
-  const path = parsed.pathname;
 
-  if (matchesHost(host, ['shuttletv.su']) && path.startsWith('/watch/')) {
-    const episode = Number(parsed.searchParams.get('e'));
-    if (Number.isFinite(episode) && episode > 0) {
-      const title = `ShuttleTV ${path.split('/').filter(Boolean).at(-1) || 'show'}`;
-      return {
-        title,
-        currentEpisode: episode,
-        createUrl: (nextEpisode) => {
-          const next = new URL(rawUrl);
-          next.searchParams.set('e', String(nextEpisode));
-          return next.toString();
-        },
-      };
+  for (const config of EPISODE_PATTERNS()) {
+    if (!matchesHost(host, config.hosts ?? [])) continue;
+    // A host must say where its episode number lives; without either field
+    // there is no way to walk to the next episode.
+    if (!config.episodeParam && !config.nextPath) continue;
+
+    let pathMatch: RegExpMatchArray | null = null;
+    try {
+      pathMatch = parsed.pathname.match(new RegExp(config.pathPattern, 'i'));
+    } catch {
+      // One malformed pattern in the config must not stop every other host
+      // from being probed.
+      continue;
     }
-  }
 
-  const anikotoMatch = path.match(/^\/watch\/([^/]+)\/ep-(\d+)$/i);
-  if (matchesHost(host, ['anikoto.cz']) && anikotoMatch) {
-    const series = cleanSeries(anikotoMatch[1]);
-    const episode = Number(anikotoMatch[2]);
+    const series = pathMatch?.groups?.series;
+    if (!series) continue;
+
+    const episode = config.episodeParam
+      ? Number(parsed.searchParams.get(config.episodeParam))
+      : Number(pathMatch?.groups?.episode);
+    if (!Number.isFinite(episode) || episode <= 0) continue;
+
+    const name = cleanSeries(series);
+    const title = config.titlePrefix ? `${config.titlePrefix} ${name}` : name;
+
     return {
-      title: series,
+      title,
       currentEpisode: episode,
-      createUrl: (nextEpisode) => `${parsed.origin}/watch/${anikotoMatch[1]}/ep-${nextEpisode}`,
+      createUrl: (nextEpisode) => {
+        if (config.episodeParam) {
+          const next = new URL(rawUrl);
+          next.searchParams.set(config.episodeParam, String(nextEpisode));
+          return next.toString();
+        }
+        const path = (config.nextPath ?? '')
+          .replace(/\{series\}/g, series)
+          .replace(/\{episode\}/g, String(nextEpisode));
+        return `${parsed.origin}${path}`;
+      },
     };
   }
 

@@ -66,5 +66,23 @@
     "twitter.com",
     "x.com",
     "twitch.tv"
+  ],
+  "episodePatterns": [
+    {
+      "hosts": [
+        "shuttletv.su"
+      ],
+      "pathPattern": "^/watch/(?<series>[^/]+)",
+      "episodeParam": "e",
+      "titlePrefix": "ShuttleTV"
+    },
+    {
+      "hosts": [
+        "anikoto.cz",
+        "anikototv.to"
+      ],
+      "pathPattern": "^/watch/(?<series>[^/]+)/ep-(?<episode>\\d+)$",
+      "nextPath": "/watch/{series}/ep-{episode}"
+    }
   ]
 }

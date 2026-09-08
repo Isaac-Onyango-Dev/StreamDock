@@ -13,6 +13,28 @@ export interface UrlAnalysis {
   reason: string;
 }
 
+/**
+ * How a host numbers its episodes, expressed as data rather than code.
+ *
+ * `pathPattern` is matched against the URL path and must expose a `series`
+ * named group; it may also expose an `episode` group. Exactly one of
+ * `episodeParam` (the episode number lives in a query parameter) or `nextPath`
+ * (it lives in the path, and this template rebuilds it) says where the number
+ * is and how to walk to the next one.
+ *
+ * Hosts used to be matched by literal regex inside playlist-inspector, which is
+ * why anikototv.to never resolved: it is listed in every host array here and
+ * shares anikoto.cz's URL shape exactly, but only anikoto.cz was written into
+ * that function.
+ */
+export interface EpisodePatternConfig {
+  hosts: string[];
+  pathPattern: string;
+  episodeParam?: string;
+  nextPath?: string;
+  titlePrefix?: string;
+}
+
 interface HostConfig {
   streamHosts: string[];
   referenceHosts: string[];
@@ -20,6 +42,7 @@ interface HostConfig {
   manifestProbeHosts: string[];
   animeHosts: string[];
   ytDlpSupportedHosts: string[];
+  episodePatterns?: EpisodePatternConfig[];
 }
 
 let configCache: HostConfig | null = null;
@@ -49,6 +72,10 @@ function loadHostConfig(): HostConfig {
       manifestProbeHosts: ['anikoto.cz', 'anidap.se', 'animedao.watch', 'anikototv.to', 'shuttletv.su', 'gojoora.com', 'gojoora.net', 'movies-central.com', 'supernova.to', 'hianime.to', 'hianime.com', 'hianime.re', 'aniwatch.to', 'aniwatch.com', 'fmovies.to', 'fmovies.ps', 'fmovies.wtf'],
       animeHosts: ['anikoto.cz', 'anidap.se', 'animedao.watch', 'anikototv.to', 'animepahe.com', 'animepahe.pw', 'animepahe.org', 'aniwatchtv.to', 'kaido.to', 'hianime.to', 'hianime.com', 'hianime.re', 'aniwatch.to', 'aniwatch.com', 'gojoora.com', 'gojoora.net'],
       ytDlpSupportedHosts: ['youtube.com', 'youtu.be', 'vimeo.com', 'tiktok.com', 'instagram.com', 'twitter.com', 'x.com', 'twitch.tv'],
+      episodePatterns: [
+        { hosts: ['shuttletv.su'], pathPattern: '^/watch/(?<series>[^/]+)', episodeParam: 'e', titlePrefix: 'ShuttleTV' },
+        { hosts: ['anikoto.cz', 'anikototv.to'], pathPattern: '^/watch/(?<series>[^/]+)/ep-(?<episode>\\d+)$', nextPath: '/watch/{series}/ep-{episode}' },
+      ],
     };
     return configCache;
   }
@@ -60,6 +87,7 @@ export const PLUGIN_EXTRACTOR_HOSTS = () => loadHostConfig().pluginExtractorHost
 export const MANIFEST_PROBE_HOSTS = () => loadHostConfig().manifestProbeHosts;
 export const ANIME_HOSTS = () => loadHostConfig().animeHosts;
 export const YTDLP_SUPPORTED_HOSTS = () => loadHostConfig().ytDlpSupportedHosts;
+export const EPISODE_PATTERNS = (): EpisodePatternConfig[] => loadHostConfig().episodePatterns ?? [];
 
 function matchesHost(host: string, domains: string[]): boolean {
   return domains.some((domain) => host === domain || host.endsWith(`.${domain}`));

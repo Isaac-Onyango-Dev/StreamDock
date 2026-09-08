@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseSeriesInfo, pickThumbnail } from './playlist-inspector';
+import { detectEpisodePattern, parseSeriesInfo, pickThumbnail } from './playlist-inspector';
 
 /**
  * Markup shapes taken from the live anikoto.cz series page for Bleach — the
@@ -81,5 +81,55 @@ describe('pickThumbnail', () => {
     expect(pickThumbnail(null)).toBeUndefined();
     expect(pickThumbnail({})).toBeUndefined();
     expect(pickThumbnail({ thumbnails: [] })).toBeUndefined();
+  });
+});
+
+/**
+ * Episode patterns used to be two literal host regexes inside
+ * detectEpisodePattern. anikototv.to is listed in every host array in
+ * host-config.json and uses byte-for-byte the same URL shape as anikoto.cz,
+ * but only anikoto.cz was written into that function — so the host Isaac
+ * actually pastes never produced an episode range. The patterns are data now.
+ *
+ * These run against the hardcoded fallback config, because `electron` is mocked
+ * in tests and the real host-config.json cannot be read; verify-engine asserts
+ * the shipped file separately.
+ */
+describe('detectEpisodePattern', () => {
+  it('resolves anikototv.to — the host that silently never matched', () => {
+    const pattern = detectEpisodePattern('https://anikototv.to/watch/one-piece-odmau/ep-7');
+    expect(pattern).not.toBeNull();
+    expect(pattern?.currentEpisode).toBe(7);
+    expect(pattern?.title).toBe('One Piece Odmau');
+    expect(pattern?.createUrl(8)).toBe('https://anikototv.to/watch/one-piece-odmau/ep-8');
+  });
+
+  it('still resolves anikoto.cz', () => {
+    const pattern = detectEpisodePattern('https://anikoto.cz/watch/bleach-yaa9n/ep-366');
+    expect(pattern?.currentEpisode).toBe(366);
+    expect(pattern?.createUrl(2)).toBe('https://anikoto.cz/watch/bleach-yaa9n/ep-2');
+  });
+
+  it('reads shuttletv episodes from the query parameter', () => {
+    const pattern = detectEpisodePattern('https://shuttletv.su/watch/1368337?e=4');
+    expect(pattern?.currentEpisode).toBe(4);
+    expect(pattern?.title).toBe('ShuttleTV 1368337');
+    expect(pattern?.createUrl(5)).toBe('https://shuttletv.su/watch/1368337?e=5');
+  });
+
+  it('declines a shuttletv URL with no episode parameter', () => {
+    // The exact sample URL from the handover: it is in manifestProbeHosts but
+    // carries no ?e=, so it is a single page and not an episode range.
+    expect(detectEpisodePattern('https://shuttletv.su/watch/1368337')).toBeNull();
+  });
+
+  it('declines hosts with no configured pattern', () => {
+    expect(detectEpisodePattern('https://youtube.com/watch?v=abc')).toBeNull();
+    expect(detectEpisodePattern('https://reanime.to/watch/something/ep-1')).toBeNull();
+  });
+
+  it('declines an episode number of zero or below', () => {
+    expect(detectEpisodePattern('https://shuttletv.su/watch/1368337?e=0')).toBeNull();
+    expect(detectEpisodePattern('https://anikototv.to/watch/show-abc/ep-0')).toBeNull();
   });
 });
