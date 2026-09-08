@@ -4,6 +4,47 @@ All notable changes to StreamDock are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.1] - 2026-09-08
+
+### Fixed
+- **Bundled plugins now actually load.** StreamDock ships yt-dlp extractors for
+  anikoto, animepahe, aniwatch and kaido, plus a PO-token provider — and none of
+  them had ever been reachable in a shipped build. The plugin path resolver
+  handed yt-dlp each individual package folder, when yt-dlp expects the folder
+  that *holds* the packages and finds them itself. Given the wrong level it
+  loaded nothing and reported it only in verbose output, so every URL relying on
+  those extractors fell through to the generic one and failed as an unsupported
+  link.
+- The Chrome cookie-unlock plugin no longer breaks other plugins on Linux and
+  macOS. It reaches Windows-only system calls as soon as it is imported, so once
+  plugin loading started working it printed an import failure on every single
+  download. It is now offered only on Windows, where it can run.
+- **Subtitles are a choice again.** A global "embed subtitles" setting was
+  applied after the per-download subtitle picker had already decided, and it
+  defaulted to on — so choosing **None** still embedded a subtitle track, and
+  choosing a separate file produced an embedded track *and* the file. One place
+  now decides, and the setting became that picker's starting value rather than
+  an override.
+- The subtitle picker offers all four real behaviours: none, a separate file
+  beside the video, a track inside the video, or both. Subtitles are never
+  burned permanently into the picture.
+- A saved subtitle preference now reaches the picker. Settings load after the
+  capture screen appears, so a stored default of "None" was replaced by the
+  built-in one every launch.
+- **The quality menu no longer invents resolutions.** It fell back to a fixed
+  1080p/720p/480p/360p list whenever it had not detected any — which was before
+  you press Analyze, for every playlist, and for every episode range. You could
+  pick 1080p for a source that never offered it. It now lists only what the
+  source actually reports, and just "Best quality" when it reports nothing.
+- Quality options read "up to 1080p", because that is what they do: a chosen
+  quality is a ceiling, so each item in a playlist downloads at its own best
+  within it rather than being skipped or forced.
+
+### Changed
+- The website no longer advertises automatic season and episode renaming, which
+  was deliberately removed in 1.5.0, or suggest that plugins can be installed
+  from inside the app. Both described behaviour the application does not have.
+
 ## [1.6.0] - 2026-09-08
 
 ### Added
