@@ -94,8 +94,13 @@ if (window.chrome) {
 }
 `;
 
-const EXTRACTION_TIMEOUT_MS = 60_000;
+// Budget: page load plus one OPTION_MANIFEST_WAIT_MS per language option.
+// Four options at ten seconds each did not fit in the old 60s ceiling, so
+// the probe was cut off mid-way through clicking them.
+const EXTRACTION_TIMEOUT_MS = 90_000;
 const POST_LOAD_WAIT_MS = 3000;
+/** How long to wait for a language switch to produce its own manifest. */
+const OPTION_MANIFEST_WAIT_MS = 10_000;
 
 /**
  * Turn a language switcher's button text into a display label.
@@ -426,8 +431,19 @@ export async function probeStreamOptions(pageUrl: string): Promise<StreamOptions
           continue;
         }
 
-        // Wait for new network requests
-        await new Promise(r => setTimeout(r, 1500));
+        // Wait for the new manifest, rather than hoping it lands in a fixed
+        // window. Measured on anikototv.to: the initial manifest appears about
+        // ten seconds after the page loads, so the old flat 1500ms wait expired
+        // long before a language switch could produce anything. Every click
+        // then looked like it had changed nothing, the probe returned the one
+        // manifest it started with, and the UI reported no language streams at
+        // all — while the log showed it had found and clicked SUB and DUB.
+        // Polling costs nothing when the manifest arrives quickly.
+        const deadline = Date.now() + OPTION_MANIFEST_WAIT_MS;
+        while (Date.now() < deadline && !settled) {
+          if (capturedManifests.size > beforeCount) break;
+          await new Promise(r => setTimeout(r, 250));
+        }
 
         // Check for new manifests
         const afterCount = capturedManifests.size;
