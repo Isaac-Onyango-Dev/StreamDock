@@ -1,39 +1,47 @@
 # Handover — next session
 
-Written at the end of session 14 (2026-09-08), against `4b948a7`, on branch
-`claude/test-linux-version-1b43c0`. Version **1.6.1** — deliberately not bumped,
-nothing released.
+Written at the end of session 15 (2026-09-08). Version **1.7.0**, released.
 
 `CLAUDE.md` is the long history and the working agreements — read it first.
 This file is only what the *next* session should pick up, and why.
 
 ---
 
-## 0. State of the branch
+## 0. Where things stand
 
-Three commits, none merged to main:
+v1.7.0 is published. Dubbed downloads work, including across an episode range,
+and every content choice has a single home in the UI. Isaac confirmed dub on
+episodes 1 and 2 of Series Y through the real app.
 
-| Commit | What |
-| --- | --- |
-| `fcc2d65` | MIT `LICENSE` — the repo had claimed MIT since the beginning and carried no licence text |
-| `7524730` | Episode patterns moved into `host-config.json`; `site-a.example` resolves for the first time |
-| `4b948a7` | One language model in `shared/language.ts`; an inferred language is now visibly a guess |
+Baseline: **207 tests, 162 engine checks, Playwright 12/12, ESLint 0/0.**
 
-Pipeline is green: typecheck, ESLint 0/0, **192 tests**, `verify:engine`
-**124 checks**, Playwright 10/10, production build.
-
-**Two things still need Isaac at a keyboard** (no desktop automation for the
-Electron window here): the inferred-language badge rendering in the real app,
-and an `site-a.example` episode range probed through the UI rather than through
-`detectEpisodePattern()` directly.
-
-Merging to main triggers nothing on its own — releasing is a `package.json`
-version change on main, which also requires `npm run sync:docs` in the same
-commit or `verify:engine` fails on the changelog check.
+Site A is now genuinely working end to end — series listing, real episode
+counts, per-episode language selection, and downloads that complete. That was
+the single biggest open item across the last several sessions.
 
 ---
 
-## 1. The reference-project question is answered — don't reopen it
+## 1. Known limits, worth knowing before picking work
+
+- **Only site A is proven.** `site-c.example`, `site-d.example` and `site-e.example`
+  are still absent from `host-config.json`; `site-e.example` did not resolve at
+  all from this network. `site-b.example` is a Next.js app whose HTML carries
+  nothing useful — it needs the browser path.
+- **The dub is verified as a distinct stream, not by ear.** The site labels the
+  server `data-type="dub"` and it is a different encode with different audio.
+  Nobody has confirmed the spoken language by listening.
+- **The language switcher's selectors are still broad.** On site A they also
+  match a "Contribute" button and a "360p720p1080p" quality row. Those are
+  dropped because the declared `data-type` options win, but a site without
+  `data-type` would still surface them.
+- **`tsbuildinfo` files are committed** and churn on every build. They belong in
+  `.gitignore`.
+- **`.claude/launch.json` is untracked and must stay that way** — it holds an
+  absolute Linux path to a user-local Node. Isaac dual-boots.
+
+---
+
+## 2. The reference-project question is answered — don't reopen it
 
 Session 14 evaluated `anipy-cli` and `ani-cli` as the previous handover asked.
 Full write-up:
@@ -48,13 +56,18 @@ Do not spend another session re-surveying them.
 
 ---
 
-## 2. First task: settle the site A embed question
+## 3. The site A embed question — now moot, kept for the record
 
-This is the highest-value open item and it is a **single measurement**, not a
-project.
+**No longer worth doing.** Session 15 made site A work through the hidden
+BrowserWindow extractor instead — the 403 that made this look necessary was a
+wrong `Referer`, not a broken plugin. The bundled yt-dlp plugin is still stale
+for this host, and that no longer matters because nothing depends on it.
 
-StreamDock's bundled plugin already works as far as the embed. Confirmed by
-running it:
+Kept here only so a future session does not rediscover it and assume it is the
+way in. The analysis below is accurate; it is just not the cheapest route any
+more.
+
+StreamDock's bundled plugin works as far as the embed. Confirmed by running it:
 
 ```
 [site-a] MTF1d: Downloading stream server          ← catalogue layer works
@@ -87,11 +100,13 @@ hand — fetch the embed page, pull `data-id`, then
   intro/outro markers, so this is the likelier outcome. the Rust port has no
   decryption at all and fails the same way.
 
-Do not promise this as a one-liner before taking that measurement.
+If someone does pick this up, do not promise it as a one-liner before taking
+that measurement — and weigh it against the fact that the browser path already
+works.
 
 ---
 
-## 3. The cleaner site A route: it has a JSON API
+## 4. The site A JSON API (already used for episode counts)
 
 `api.site-a.example` responds 200 and **self-declares the domains it serves**:
 
@@ -113,12 +128,15 @@ this API. That would give site A real titles, thumbnails, honest episode counts
 and genuine sub/dub availability **with no markup scraping and no browser** —
 several open items at once, and testable in CI.
 
-Weigh it as a third-party dependency before building it; that is Isaac's call,
-not an engineering default.
+Session 15 already uses this for episode counts — the `data-id` on an episode
+page keys `/series/{id}`, which is how Series X reports 1177 episodes instead
+of 1. The remaining unused parts are titles, posters and per-language counts.
+It is site A's own backend, not a third party: it self-declares the domains
+above.
 
 ---
 
-## 4. Still open, in rough value order
+## 5. Still open, in rough value order
 
 1. **Per-item quality detection for playlists.** `qualityOptions` is only
    populated when the probe resolved a single item, so a playlist reports none.
@@ -152,7 +170,7 @@ command lines and verbatim stderr and has settled several bugs in one grep.
 
 ---
 
-## 5. Environment notes
+## 6. Environment notes
 
 - **Isaac dual-boots Ubuntu 26.04** and may be on either OS. Sessions 13 and 14
   ran entirely from Linux.
@@ -167,7 +185,7 @@ command lines and verbatim stderr and has settled several bugs in one grep.
 
 ---
 
-## 6. Pipeline
+## 7. Pipeline
 
 Run all of it before calling anything done:
 
@@ -176,11 +194,11 @@ npm run typecheck && npx eslint . && npm test && npm run verify:engine
 npx playwright test && npm run build:app
 ```
 
-Baseline: **192 tests, 124 engine checks, Playwright 10/10, ESLint 0/0.**
+Baseline: **207 tests, 162 engine checks, Playwright 12/12, ESLint 0/0.**
 
 ---
 
-## 7. Habits this repo earned the hard way
+## 8. Habits this repo earned the hard way
 
 - **A regression test that has never failed against its bug is not a test yet.**
   Revert the fix, watch it go red, restore. Every fix in session 14 was
