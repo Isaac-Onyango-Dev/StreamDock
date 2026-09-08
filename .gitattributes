@@ -1,0 +1,24 @@
+# Line endings: LF in the repository, LF in the working tree, on every platform.
+#
+# This repo lives on a drive shared between a Windows boot and a Linux boot, and
+# both write to the same checkout. Without this file, git on Windows (where
+# core.autocrlf defaults to true) rewrote every tracked text file to CRLF on
+# checkout, and git on Linux then reported all 25 of them as modified. The
+# giveaway was the diff stat: 9097 insertions and 9097 deletions, exactly equal,
+# which is a line-ending change rather than an edit. It blocked `git pull
+# --ff-only` on the Linux side until the whole tree was reset.
+#
+# `eol=lf` rather than a bare `text=auto`: `text=auto` alone normalises what is
+# *stored* but still checks out CRLF on Windows, so a checkout shared between
+# the two boots would keep flip-flopping. Pinning the working-tree ending is
+# what makes the shared drive stable.
+* text=auto eol=lf
+
+# Declared rather than left to git's NUL-byte heuristic. These are the only
+# binary types tracked here, verified against `git ls-files`. Auto-detection
+# does get them right today, but a file that happened to carry no NUL byte in
+# its first 8000 bytes would be treated as text and corrupted by normalisation.
+# Add new binary types here when they are introduced.
+*.png  binary
+*.ico  binary
+*.webp binary
