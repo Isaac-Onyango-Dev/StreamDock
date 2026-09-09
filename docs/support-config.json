@@ -1,0 +1,77 @@
+{
+  "_comment": [
+    "Everything the Support page shows, in one place. scripts/build-site.ts reads this",
+    "file and generates docs/support.html from docs/support.template.html — no donation",
+    "value is written in the HTML, so changing an address is an edit here and a re-run of",
+    "`npm run build:site`.",
+    "",
+    "EVERY payable value below is a placeholder. Replace each REPLACE_ME with the real",
+    "thing before publishing; the build prints a warning listing any that are still unset,",
+    "and the page renders them as a visible 'Not set yet' with the copy button disabled",
+    "rather than as a payable value.",
+    "",
+    "mpesa.country and mpesa.internationalNote are NOT placeholders — they are the real",
+    "copy for the callout under the M-Pesa cards, which tells someone outside Kenya how to",
+    "send to an M-Pesa wallet through Wise or Western Union.",
+    "",
+    "cryptoEnabled gates the whole Crypto section. False renders the heading with the",
+    "cards blurred behind a \"coming soon\" overlay, and the addresses are replaced with a",
+    "masked value before they ever reach the HTML — a CSS blur hides nothing from View",
+    "Source, so the flag must not depend on one. Flip it to true once the addresses and",
+    "QR images are real, and the section renders normally with no other change.",
+    "",
+    "Crypto QR images are NOT generated — drop a .webp at each entry's qrImage path",
+    "(docs/assets/qr/). Until the file exists the card shows a labelled placeholder frame.",
+    "",
+    "Share captions: captions[0] goes to X, captions[1] to WhatsApp. Facebook and",
+    "LinkedIn strip caller-supplied text from their share intents and render the target",
+    "page's own og: tags instead, so they receive the URL only — that is their behaviour,",
+    "not an omission here."
+  ],
+  "share": {
+    "url": "https://isaac-onyango-dev.github.io/StreamDock/",
+    "captions": [
+      "StreamDock pulls video from thousands of sites and captures live streams in real time — one free, open-source desktop app. Powered by yt-dlp and ffmpeg.",
+      "Found a good one: StreamDock, a free open-source desktop app for downloading video and capturing live streams from thousands of sites. Windows and Linux."
+    ]
+  },
+  "mpesa": {
+    "personalNumber": "+254 742 028905",
+    "paybillNumber": "522522",
+    "paybillAccount": "1355572916",
+    "accountName": "ISAAC ONYANGO OUMA",
+    "country": "Kenya",
+    "internationalNote": "Outside Kenya? Use Wise, Western Union, or a similar transfer service — you only need my country (Kenya) and phone number above, no signup required on your end. Select Kenya as the destination and mobile wallet / M-Pesa as the delivery method."
+  },
+  "cryptoEnabled": false,
+  "crypto": [
+    {
+      "coin": "BTC",
+      "name": "Bitcoin",
+      "network": "Bitcoin",
+      "address": "REPLACE_ME",
+      "qrImage": "assets/qr/btc.webp"
+    },
+    {
+      "coin": "ETH",
+      "name": "Ethereum",
+      "network": "ERC20",
+      "address": "REPLACE_ME",
+      "qrImage": "assets/qr/eth.webp"
+    },
+    {
+      "coin": "USDT",
+      "name": "Tether",
+      "network": "TRC20",
+      "address": "REPLACE_ME",
+      "qrImage": "assets/qr/usdt.webp"
+    },
+    {
+      "coin": "SOL",
+      "name": "Solana",
+      "network": "Solana",
+      "address": "REPLACE_ME",
+      "qrImage": "assets/qr/sol.webp"
+    }
+  ]
+}

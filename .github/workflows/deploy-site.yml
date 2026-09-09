@@ -22,6 +22,8 @@ on:
     branches: [main]
     paths:
       - 'docs/index.template.html'
+      - 'docs/support.template.html'
+      - 'docs/support-config.json'
       - 'docs/assets/**'
       - 'docs/404.html'
       - 'docs/robots.txt'
@@ -60,7 +62,7 @@ permissions:
 
 jobs:
   build-and-deploy:
-    name: Build and sync docs/index.html
+    name: Build and sync the generated site pages
     runs-on: ubuntu-latest
     timeout-minutes: 15
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
@@ -90,10 +92,16 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- docs/index.html README.md; then
+          # Every generated page has to be listed twice here: once in the
+          # diff that decides whether there is anything to commit, and once in
+          # the add. Miss either and that page silently stops being published
+          # while the workflow still reports success — build:site regenerates
+          # it in the runner, the step says "already in sync", and the stale
+          # copy stays on main.
+          if git diff --quiet -- docs/index.html docs/support.html README.md; then
             echo "Site and README already in sync."
           else
-            git add docs/index.html README.md
+            git add docs/index.html docs/support.html README.md
             git commit -m "chore: sync site and README to $(node -p "require('./package.json').version") [skip ci]"
             git push origin HEAD:main
           fi
