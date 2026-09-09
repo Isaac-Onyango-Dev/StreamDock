@@ -24,6 +24,11 @@ on:
       - 'docs/index.template.html'
       - 'docs/support.template.html'
       - 'docs/support-config.json'
+      # The carousel's data, not just its images. 'docs/assets/**' below covers
+      # the encoded .webp files but not the JSON that names and captions them,
+      # so editing a caption used to leave the published page stale with no
+      # workflow to notice.
+      - 'docs/screenshots.json'
       - 'docs/assets/**'
       - 'docs/404.html'
       - 'docs/robots.txt'
@@ -46,6 +51,7 @@ on:
       - 'scripts/build-site.ts'
       - 'scripts/sync-readme.ts'
       - 'scripts/lib/changelog.ts'
+      - 'scripts/lib/screenshots.ts'
       - 'scripts/generate-tokens.ts'
       - 'design/tokens.json'
   workflow_dispatch:
@@ -72,16 +78,57 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
+      # A paths: filter cannot say "content changed AND the version did not" —
+      # GitHub accepts paths or paths-ignore, never both. So a single commit
+      # that bumps the version *and* edits a template matches this workflow's
+      # push filter and release.yml's package.json filter at the same time, and
+      # both start together: the site would publish the new version number
+      # while `releases/latest` still served the previous installer. That is
+      # the same 3m26s window measured on v1.7.0 that removing the CHANGELOG.md
+      # path closed, reachable through a second door. It is not hypothetical —
+      # 97429a9 bumped 1.0.2 -> 1.1.0 and edited docs/index.template.html in
+      # one commit.
+      #
+      # The tag is the signal. release.yml creates v<version> only once the
+      # installers are uploaded, so "no tag yet" means a release is mid-flight
+      # and the workflow_run trigger will publish the site when it lands.
+      # ls-remote rather than a local lookup: checkout is shallow and fetches
+      # no tags, so `git tag` here would report nothing and skip every run.
+      #
+      # Only gates `push`. workflow_run is the release path itself, and
+      # workflow_dispatch stays the manual escape hatch — for a changelog fix,
+      # or to force a sync when a release failed and left its version untagged.
+      - name: Check no release is mid-flight
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" != "push" ]; then
+            echo "Event is ${{ github.event_name }} — not gated."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          version=$(node -p "require('./package.json').version")
+          if [ -n "$(git ls-remote --tags origin "refs/tags/v$version")" ]; then
+            echo "v$version is tagged — its installers exist, publishing the site."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "v$version has no tag yet, so a release is still building."
+            echo "Skipping: the workflow_run trigger publishes the site once it finishes."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup Node.js
+        if: steps.gate.outputs.run == 'true'
         uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: 'npm'
 
       - name: Install dependencies
+        if: steps.gate.outputs.run == 'true'
         run: npm ci
 
       - name: Build site and sync README
+        if: steps.gate.outputs.run == 'true'
         # No RELEASE_TAG override: package.json is the source of truth, and the
         # release workflow is now triggered by a push to main rather than by a
         # tag, so workflow_run.head_branch is "main" — passing it here rendered
@@ -89,6 +136,7 @@ jobs:
         run: npm run sync:docs
 
       - name: Commit and push if changed
+        if: steps.gate.outputs.run == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
