@@ -424,12 +424,124 @@ nav {
 .intl-meta { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
 
 /* ── Crypto ── */
+/* Two columns by two rows for the four coins, rather than the auto-fit track
+   this used to be — auto-fit put three across at 1280 and left the fourth
+   alone on a ragged second row. Mobile-first: one column, and the second is
+   turned on at the width where two 20rem cards and their gap genuinely fit
+   inside the section's gutters, which is ~46rem. */
 .crypto-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr));
+  grid-template-columns: 1fr;
   gap: clamp(1rem, .5rem + 1.2vw, 1.5rem);
   margin-top: clamp(1.5rem, 1rem + 1.5vw, 2.25rem);
 }
+@media (min-width: 46rem) {
+  .crypto-grid { grid-template-columns: repeat(2, 1fr); }
+}
+/* ── Crypto: Binance Pay ──
+   Its own block above the wallet cards, and outside .crypto-shell, so the
+   coming-soon blur applied to those never touches it. */
+.crypto-lead { margin-top: clamp(1.5rem, 1rem + 1.5vw, 2.25rem); }
+.binance-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(1.25rem, 1rem + 1vw, 2rem);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 22px;
+  padding: clamp(1.25rem, 1rem + 1vw, 1.875rem) clamp(1.1rem, .9rem + .9vw, 1.625rem);
+  position: relative;
+  overflow: hidden;
+}
+.binance-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 3px;
+  background: var(--brand-grad);
+}
+.binance-body { min-width: 0; width: 100%; text-align: center; }
+.binance-body h3 {
+  font-family: var(--font-display);
+  font-size: clamp(1.05rem, .95rem + .5vw, 1.3rem);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+.binance-lede {
+  margin: .5rem 0 1.125rem;
+  font-size: .88rem;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+/* Centred by constraining the field and letting auto margins do it — not with
+   align-items: center on the column, which shrinks .pay-value to its content
+   and then leaves the value's 12rem flex-basis wider than the row, wrapping
+   the Copy button onto a line of its own. */
+.binance-body .pay-field { max-width: 22rem; margin-inline: auto; }
+
+/* White ground and quiet zone live on the wrapper, never on the <img>. With
+   the global `box-sizing: border-box`, padding on the image itself would eat
+   into its content box and render the QR smaller than its own pixels — the one
+   thing the explicit width/height are there to prevent. */
+.binance-qr-wrap {
+  flex-shrink: 0;
+  background: #fff;
+  padding: 12px;
+  border-radius: 16px;
+  line-height: 0;
+}
+/* The width/height attributes are the rendered size, so the QR draws 1:1 and
+   is never resampled by the browser. max-width is an overflow guard only: it
+   engages below roughly 320px, where 1:1 cannot fit the screen at all and the
+   alternative is a page that scrolls sideways. */
+.binance-qr {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.binance-qr-missing {
+  width: 234px; height: 234px;
+  max-width: 100%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface-2);
+  border: 1px dashed var(--border-strong);
+  border-radius: 14px;
+  color: var(--muted-dim);
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  text-align: center;
+  line-height: 1.4;
+}
+
+/* Side by side once there is room. This block has to sit *after* the
+   .binance-* rules above: a media query carries no extra specificity, so the
+   same selector declared later in the file would simply win and the card would
+   stay stacked at every width. */
+@media (min-width: 46rem) {
+  .binance-card { flex-direction: row; justify-content: space-between; }
+  .binance-body { text-align: left; }
+  .binance-body .pay-field { margin-inline: 0; }
+}
+
+/* ── Crypto: the wallet-address half ── */
+.crypto-alt { margin-top: clamp(2rem, 1.5rem + 1.5vw, 3rem); }
+.crypto-subhead {
+  font-family: var(--font-display);
+  font-size: clamp(1rem, .92rem + .4vw, 1.2rem);
+  font-weight: 700;
+  letter-spacing: -.01em;
+  text-align: center;
+}
+.crypto-subnote {
+  margin-top: .375rem;
+  text-align: center;
+  font-size: .85rem;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+
 /* ── Crypto: coming-soon state ──
    The grid is blurred and inert; the overlay sits above it, unblurred, and is
    the only thing here a screen reader is given (the grid is aria-hidden). The
