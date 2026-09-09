@@ -10,7 +10,7 @@ import { readProjectFile } from './changelog';
 export interface ShotEntry {
   /** Basename of the generated web assets, and the slide's stable id. */
   id: string;
-  /** Filename inside the (uncommitted) source screenshots folder. */
+  /** Filename inside the committed `Screenshots/` folder at the repo root. */
   source: string;
   /** Caption heading. */
   title: string;

@@ -131,17 +131,53 @@ never advertise a version the button cannot deliver.
 ## Development
 
 ```bash
-npm install
+npm ci
 npm run download:binaries   # yt-dlp + ffmpeg into binaries/
 npm run download:plugins    # yt-dlp extractor plugins into plugins/
 npm run dev
 ```
 
+`npm ci` rather than `npm install`: it installs exactly what `package-lock.json`
+pins and never rewrites it, which is what you want unless you are deliberately
+changing a dependency.
+
+### Node version
+
+**Node 20.19.0 or newer** (`package.json` declares it in `engines`). The floor is
+not arbitrary: `npm run build` runs electron-builder, which reaches ESM-only code
+from CommonJS and therefore needs `require(esm)` — added in Node 20.19. On 20.18
+packaging dies with `ERR_REQUIRE_ESM` **while typecheck, lint, tests and e2e all
+pass**, so the version is worth checking before you conclude the build is broken.
+CI runs 20.20.2.
+
+### If you work on more than one operating system
+
+`node_modules` is operating-system specific, and this repo is routinely checked
+out on a drive shared between a Windows and a Linux boot. **Run `npm ci` after
+every OS switch.** One install cannot serve both, and there is no configuration
+that makes it.
+
+Skipping it fails differently depending on which way you switched, which is why
+it is worth recognising on sight:
+
+- **Linux install, now on Windows.** npm writes `node_modules/.bin` as symlinks
+  on Linux and as `.cmd` wrappers on Windows, so *nothing* resolves — every
+  command reports `'tsc' is not recognized as an internal or external command`.
+- **Windows install, now on Linux.** The wrong native binaries are present
+  (`@esbuild/win32-x64` where `@esbuild/linux-x64` is needed), so `tsx`, `vite`
+  and every build script fail — but `npm run typecheck` keeps passing, because
+  `tsc` is pure JavaScript. A green typecheck is not evidence the toolchain works.
+
+Line endings are already handled: `.gitattributes` pins `* text=auto eol=lf`, so
+a Windows checkout will not rewrite the tree to CRLF and strand the other boot
+with a working tree full of phantom modifications. Don't remove that file, and
+don't "fix" `core.autocrlf` to compensate — the attribute is the enforcement.
+
 ## Before opening a PR
 
 ```bash
 npm run typecheck       # both tsconfig projects
-npx eslint .            # zero-warning gate
+npm run lint            # zero-warning gate
 npm test                # Vitest
 npm run verify:engine   # static/unit checks, no binaries or network
 npx playwright test     # e2e (browser only, no Electron needed)
