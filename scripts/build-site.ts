@@ -262,8 +262,13 @@ interface SupportConfig {
     internationalNote: string;
   };
   /**
-   * Gates the whole Crypto section. False keeps the heading and shows the cards
-   * blurred behind a "coming soon" overlay.
+   * Binance Pay: one Pay ID and a QR, deliberately outside `cryptoEnabled`.
+   * It needs no address and no network, so it is live as soon as the Pay ID is.
+   */
+  binancePay: { payId: string; qrImage: string };
+  /**
+   * Gates the wallet-address cards only. False keeps their heading and shows
+   * them blurred behind a "coming soon" overlay.
    */
   cryptoEnabled: boolean;
   crypto: CryptoEntry[];
@@ -360,6 +365,120 @@ function renderAccountNameField(name: string): string {
           <span class="pay-field-label">Account name</span>
 ${renderCopyField(name, 'Account name')}
         </div>`;
+}
+
+/**
+ * Intrinsic pixel size of an image, read from its own header.
+ *
+ * The Binance Pay QR is required to render at native size — no CSS scaling in
+ * either direction — and the only way to write correct width/height attributes
+ * is to measure the file rather than assume a number. Doing it at build time
+ * also means replacing the image needs no edit anywhere: the next build picks
+ * up whatever the new file measures.
+ *
+ * PNG, JPEG and WebP are decoded from their headers directly. Pulling in an
+ * image library for twenty lines of header parsing would be the first runtime
+ * dependency this site has ever needed.
+ */
+function imageSize(absPath: string): { width: number; height: number } | null {
+  let buf: Buffer;
+  try {
+    buf = readFileSync(absPath);
+  } catch {
+    return null;
+  }
+
+  // PNG: 8-byte signature, then IHDR carries width and height big-endian.
+  if (buf.length >= 24 && buf.toString('ascii', 1, 4) === 'PNG') {
+    return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+  }
+
+  // JPEG: walk the marker chain to a Start Of Frame, which carries the size.
+  // C4/C8/CC share the SOF range but are Huffman/arithmetic tables, not frames.
+  if (buf.length >= 4 && buf[0] === 0xff && buf[1] === 0xd8) {
+    let i = 2;
+    while (i + 9 < buf.length) {
+      if (buf[i] !== 0xff) { i++; continue; }
+      const marker = buf[i + 1];
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        return { height: buf.readUInt16BE(i + 5), width: buf.readUInt16BE(i + 7) };
+      }
+      i += 2 + buf.readUInt16BE(i + 2);
+    }
+    return null;
+  }
+
+  // WebP: three container variants, each storing the size differently.
+  if (buf.length >= 30 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') {
+    const chunk = buf.toString('ascii', 12, 16);
+    if (chunk === 'VP8 ') {
+      return { width: buf.readUInt16LE(26) & 0x3fff, height: buf.readUInt16LE(28) & 0x3fff };
+    }
+    if (chunk === 'VP8L') {
+      const bits = buf.readUInt32LE(21);
+      return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 };
+    }
+    if (chunk === 'VP8X') {
+      const read24 = (at: number) => buf[at] | (buf[at + 1] << 8) | (buf[at + 2] << 16);
+      return { width: read24(24) + 1, height: read24(27) + 1 };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Asset paths in support-config.json are relative to docs/, because that is the
+ * directory the site is served from. A "docs/" prefix is accepted and stripped:
+ * written literally into an src it resolves to /StreamDock/docs/... and 404s,
+ * and it is an easy thing to write when editing the file from the repo root.
+ */
+function docsRelative(path: string): string {
+  return path.replace(/^\.?\/*docs\//, '');
+}
+
+/**
+ * The Binance Pay block: an explanation, the Pay ID with a copy button, and the
+ * QR rendered inline at its own size.
+ *
+ * Unlike the four coin cards this is not gated by `cryptoEnabled` — it is a
+ * payment route that works the moment the Pay ID is real, and it carries no
+ * network for anyone to mismatch. An unset Pay ID renders the block in the same
+ * inert "Not set yet" state every other payable value on this page uses.
+ */
+function buildBinancePayHtml(binance: SupportConfig['binancePay']): string {
+  const src = docsRelative(binance.qrImage);
+  const size = imageSize(join(docsDir, src));
+
+  // Native size or nothing. Guessing width/height would be the one thing this
+  // block must not do: a wrong pair scales the QR, which is what the explicit
+  // dimensions exist to prevent. With no file yet, the frame stands in.
+  const qr = size
+    ? `        <img class="binance-qr" src="${escapeAttr(src)}"
+             width="${size.width}" height="${size.height}"
+             decoding="async" draggable="false"
+             alt="Binance Pay QR code for StreamDock" />`
+    : `        <div class="binance-qr-missing" role="img" aria-label="Binance Pay QR code, not added yet">
+          <span>QR<br />pending</span>
+        </div>`;
+
+  return `      <div class="binance-card">
+        <div class="binance-body">
+          <h3>Have Binance? This is the easiest way</h3>
+          <p class="binance-lede">
+            Scan with the Binance app, then choose whichever coin you want to send from
+            your own balance — no network to match, instant, and fee-free. Requires a
+            Binance account on your end.
+          </p>
+          <div class="pay-field">
+            <span class="pay-field-label">Binance Pay ID</span>
+${renderCopyField(binance.payId, 'Binance Pay ID')}
+          </div>
+        </div>
+        <div class="binance-qr-wrap">
+${qr}
+        </div>
+      </div>`;
 }
 
 /**
@@ -503,39 +622,58 @@ ${renderCopyField(entry.address, `${entry.coin} address`)}
  */
 function buildCryptoSection(config: SupportConfig): { intro: string; body: string } {
   const cards = buildCryptoCardsHtml(config.crypto, config.cryptoEnabled);
+  const binanceLive = !isUnset(config.binancePay.payId);
 
-  if (config.cryptoEnabled) {
-    return {
-      intro:
-        'Scan the code or copy the address. Check the network on every card before you ' +
-        'send — coins sent on the wrong chain are not recoverable by anyone, including me.',
-      body: `    <div class="crypto-shell">
-      <div class="crypto-grid">
+  // The wallet-address half, in whichever state cryptoEnabled selects. When it
+  // is off the grid is aria-hidden, because a blurred card is not content: a
+  // screen reader would otherwise announce four coins and four "Not set yet"
+  // address fields nobody can see or use. The overlay sits outside it and is
+  // the one thing announced.
+  const walletShell = config.cryptoEnabled
+    ? `      <div class="crypto-shell">
+        <div class="crypto-grid">
 ${cards}
-      </div>
-    </div>`,
-    };
-  }
+        </div>
+      </div>`
+    : `      <div class="crypto-shell is-disabled">
+        <div class="crypto-grid" aria-hidden="true">
+${cards}
+        </div>
+        <div class="crypto-soon">
+          <span class="crypto-soon-badge">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
+            Coming soon
+          </span>
+          <p class="crypto-soon-text">Crypto support coming soon</p>
+        </div>
+      </div>`;
 
-  // aria-hidden on the grid, because a blurred card is not content: a screen
-  // reader would otherwise announce four coins and four "Not set yet" address
-  // fields that nobody can see or use. The overlay carries the real message and
-  // stays outside it, so it is the one thing announced here.
-  return {
-    intro: 'Not quite ready — the wallets are being set up. M-Pesa above works today.',
-    body: `    <div class="crypto-shell is-disabled">
-      <div class="crypto-grid" aria-hidden="true">
-${cards}
-      </div>
-      <div class="crypto-soon">
-        <span class="crypto-soon-badge">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
-          Coming soon
-        </span>
-        <p class="crypto-soon-text">Crypto support coming soon</p>
-      </div>
-    </div>`,
-  };
+  const walletBlurb = config.cryptoEnabled
+    ? 'Check the network on every card before you send — coins sent on the wrong chain are not recoverable by anyone, including me.'
+    : 'Direct wallet addresses are still being set up.';
+
+  const body = `    <div class="crypto-lead">
+${buildBinancePayHtml(config.binancePay)}
+    </div>
+
+    <div class="crypto-alt">
+      <h3 class="crypto-subhead">Using another wallet or exchange?</h3>
+      <p class="crypto-subnote">${escapeHtml(walletBlurb)}</p>
+${walletShell}
+    </div>`;
+
+  // The intro covers both halves, so it has to describe whichever of the four
+  // combinations is actually on the page.
+  const intro =
+    binanceLive && config.cryptoEnabled
+      ? 'Two ways to send: through Binance Pay, or straight to a wallet address.'
+      : binanceLive
+        ? 'Binance Pay works today. Direct wallet addresses are coming soon.'
+        : config.cryptoEnabled
+          ? 'Scan the code or copy the address for the coin you want to send.'
+          : 'Not quite ready — the wallets are being set up. M-Pesa above works today.';
+
+  return { intro, body };
 }
 
 function buildSupportPage(version: string, colors: BrandTokens['colors']): void {
@@ -573,6 +711,7 @@ function buildSupportPage(version: string, colors: BrandTokens['colors']): void 
     // Listed even though the row is optional: left as the placeholder it
     // disappears from the page silently, which is worth one line of warning.
     isUnset(config.mpesa.accountName) && 'mpesa.accountName (row omitted)',
+    isUnset(config.binancePay.payId) && 'binancePay.payId',
     // Only while the section is live. With cryptoEnabled false the addresses
     // are *meant* to be unset, so listing them would be noise that trains
     // whoever runs this to ignore the warning line.

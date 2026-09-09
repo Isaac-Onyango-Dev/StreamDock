@@ -14,6 +14,15 @@
     "copy for the callout under the M-Pesa cards, which tells someone outside Kenya how to",
     "send to an M-Pesa wallet through Wise or Western Union.",
     "",
+    "binancePay is independent of cryptoEnabled. It is a payment method that works as",
+    "soon as the Pay ID is real, whereas the four on-chain coins below it are still",
+    "staged — so an unset payId hides only the Binance block, and cryptoEnabled only",
+    "ever covers the wallet-address cards.",
+    "",
+    "binancePay.qrImage is a path relative to docs/, like every other asset reference",
+    "here. A leading \"docs/\" is stripped by the build, because that form resolves to",
+    "/StreamDock/docs/... on the published site and 404s.",
+    "",
     "cryptoEnabled gates the whole Crypto section. False renders the heading with the",
     "cards blurred behind a \"coming soon\" overlay, and the addresses are replaced with a",
     "masked value before they ever reach the HTML — a CSS blur hides nothing from View",
@@ -42,6 +51,10 @@
     "accountName": "ISAAC ONYANGO OUMA",
     "country": "Kenya",
     "internationalNote": "Outside Kenya? Use Wise, Western Union, or a similar transfer service — you only need my country (Kenya) and phone number above, no signup required on your end. Select Kenya as the destination and mobile wallet / M-Pesa as the delivery method."
+  },
+  "binancePay": {
+    "payId": "iz_c254",
+    "qrImage": "assets/qr/binance-pay-qr.png"
   },
   "cryptoEnabled": false,
   "crypto": [
