@@ -55,7 +55,7 @@ actual runs — full yt-dlp spawn command lines, verbatim stderr, timestamps.
 
 ## Where things stand (as of this session)
 
-Thirteen work sessions have happened against this repo so far.
+Twenty work sessions have happened against this repo so far.
 
 **Correcting a claim this file carried for three sessions:** sessions 5 and 6
 were *not* unpushed. Verified in session 9 — `HEAD == origin/main` and

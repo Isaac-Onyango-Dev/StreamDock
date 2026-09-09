@@ -1,41 +1,91 @@
 # Handover — next session
 
-Written at the end of session 18 (2026-09-09). Version **1.7.0**, released.
+Written at the end of session 20 (2026-09-09). Version **1.7.0**, released.
 
 `CLAUDE.md` is the long history and the working agreements — read it first.
 This file is only what the *next* session should pick up, and why.
 
 ---
 
-## 0a. FIRST, IF YOU JUST BOOTED INTO WINDOWS
+## 0a. FIRST, IF YOU SWITCHED OPERATING SYSTEM
 
-The repo is on a drive both operating systems write to. Two things follow, and
-the first one will stop you dead:
+The repo is on a drive both operating systems write to. One command follows
+from that, and skipping it will stop you dead:
 
 ```
 npm ci
 ```
 
-**`node_modules` is currently a Linux install.** It holds
-`@esbuild/linux-x64`; Windows needs `@esbuild/win32-x64`. Without this, `tsx`,
-`vite`, every build script and `verify:engine` fail — while `npm run typecheck`
-keeps passing, because `tsc` is pure JS. A green typecheck is not evidence the
-toolchain works. One `npm ci` per OS switch, every time. There is no arrangement
-that serves both.
+**`node_modules` is currently a WINDOWS install** (session 20 regenerated it).
+It holds `@esbuild/win32-x64`, so **the next Linux boot must run `npm ci`
+before anything else.** The reverse was true when session 18 wrote this file;
+the direction flips every time the OS does. One `npm ci` per OS switch, every
+time. There is no arrangement that serves both.
+
+**The failure is worse than a wrong native binary, and worth recognising fast.**
+A Linux `npm ci` writes `node_modules/.bin` as symlinks, not the `.cmd` wrappers
+Windows needs — session 20 found 58 entries and **zero `.cmd` shims**. So nothing
+resolves at all:
+
+```
+'tsc' is not recognized as an internal or external command
+'tsx' is not recognized as an internal or external command
+```
+
+`typecheck`, `lint`, `test`, `verify:engine`, `build` and every `scripts/` entry
+point are dead until `npm ci` runs. Note that on the *Linux* side the same
+mistake presents differently — there `tsc` keeps passing, because it is pure JS.
+**A green typecheck is not evidence the toolchain works, on either OS.**
 
 **Node must be 20.19.0 or newer.** `npm run build` (electron-builder 26.15.3)
 needs `require(esm)`, which landed in Node 20.19. CI uses v20.20.2. The Linux
-side is on 20.18.1 and therefore *cannot* package locally; check what Windows
-has before assuming. Anything on the 20 line at 20.19+ is fine — this is not a
-Node 22 requirement.
+side is on 20.18.1 and therefore *cannot* package locally; **this Windows box is
+on v24.19.0** and packages fine. Anything at 20.19+ works — this is not a Node
+22 requirement.
 
-**Line endings are handled now** (`.gitattributes`, `* text=auto eol=lf`, added
-session 18). Git on Windows will no longer rewrite the tree to CRLF, so
-`git pull` will not be blocked by 30 phantom "modified" files the way it was.
-Nothing to do; just don't remove that file.
+**`package.json` now declares `engines.node: ">=20.19.0"`** (session 20). It
+encodes the one proven constraint — electron-builder needs `require(esm)` — so
+the Ubuntu box's Node 20.18.1 now earns an `EBADENGINE` warning that explains
+why packaging fails there. It is a warning, not a gate: there is no `.npmrc` and
+`engine-strict` is false, so CI is unaffected.
+
+**The `engines` floor and CI's `node-version: '20'` pin (eight places across
+ci.yml and release.yml) must be revisited together — not separately — once the
+Electron 41.10.7 bump lands** (item 0 in section 5). That bump requires
+`>=22.12.0`, which moves the floor, the CI pin, and the toolchain that builds
+real installers all at once. Changing the pin on its own decides half of a
+question whose other half is a security upgrade. Local Node here is v24.19.0, a
+major ahead of CI; everything passes on both today.
+
+**npm 11 prints an `allow-scripts` warning** naming `electron`, `esbuild` and
+`electron-winstaller`. It is advisory in 11.17.0, not a block: session 20 checked
+that `node_modules/electron/dist` really is created during the install and that
+`npx electron --version` returns v41.7.1. If npm later makes blocking the
+default, a fresh `npm ci` would silently skip Electron's 213 MB download and
+`npm run dev` would fail with no obvious cause — an install that *looks* clean
+and an app that will not start.
+
+**Until that is addressed properly, sanity-check it after any `npm ci`:**
+
+```
+ls node_modules/electron/dist/electron.exe   # or .../dist/electron on Linux
+npx electron --version                       # expect v41.7.1
+```
+
+If the directory is missing, the postinstall was skipped rather than failed —
+`npm approve-scripts` is the escape hatch, and nothing else about the install
+will look wrong.
+
+**Line endings are handled** (`.gitattributes`, `* text=auto eol=lf`, added
+session 18). Session 20 confirmed it holds under real Windows use: this machine
+has `core.autocrlf=true` — the exact setting behind session 18's 9097/9097
+incident — and after a full install plus every file-writing generator, **139 of
+139 tracked text files were still LF and 0 files were modified.** The attribute
+overrides autocrlf, so do not "fix" the git config; the file is the enforcement,
+and changing the config would only hide whether it still works.
 
 Everything is pushed. `main` is the only branch, local and remote, and the
-working tree was clean at the end of session 18.
+working tree was clean at the end of session 20.
 
 ---
 
@@ -46,9 +96,15 @@ v1.7.0 is published, and the site now carries a screenshots carousel (sessions
 including across an episode range, and every content choice has a single home in
 the UI. Isaac confirmed dub on episodes 1 and 2 of Bleach through the real app.
 
-Sessions 17-18 were site and infrastructure only — **no app code changed**.
+**Sessions 17-20 were site, infrastructure and environment only — no app code
+changed.** Session 19 made the whole site responsive and stopped the carousel
+calculating its own height (it is a flex column now, so the browser measures the
+furniture); session 20 repaired the Windows toolchain. The last change to
+`electron/` or `client/src/` was session 15.
 
-Baseline: **207 tests, 264 engine checks, Playwright 12/12, ESLint 0/0.**
+Baseline: **207 tests, 268 engine checks, Playwright 12/12, ESLint 0/0.**
+Confirmed green on Windows (Node v24.19.0) at the end of session 20, from a
+fresh `npm ci`, including a real electron-builder package.
 
 Anikoto is now genuinely working end to end — series listing, real episode
 counts, per-episode language selection, and downloads that complete. That was
@@ -210,7 +266,12 @@ above.
    a Next.js app serving nothing useful in its HTML — it needs the browser path.
    Adding a host is now a **config edit**, so the cost here is the extraction,
    not the routing.
-5. ~~**The release-window collision**~~ — fixed in session 16, after confirming
+5. ~~**`CONTRIBUTING.md` never mentions `npm ci` or the OS switch**~~ — fixed in
+   session 20. Its Development section now leads with `npm ci`, states the Node
+   20.19 floor and why it exists, and describes both directions of the OS-switch
+   failure, so a contributor who never reads this file or `CLAUDE.md` still
+   learns it.
+6. ~~**The release-window collision**~~ — fixed in session 16, after confirming
    it happened for real on v1.7.0 (Deploy Site published "1.7.0" to the site at
    15:13:37; the installer did not exist until 15:17:03). `CHANGELOG.md` is no
    longer a push path for `deploy-site.yml`.
@@ -234,10 +295,18 @@ command lines and verbatim stderr and has settled several bugs in one grep.
 ## 6. Environment notes
 
 - **Isaac dual-boots Ubuntu 26.04** and may be on either OS. Sessions 13 and 14
-  ran entirely from Linux.
+  ran entirely from Linux; session 20 ran from Windows.
+- **The Windows box** is Windows 10 Pro on **Node v24.19.0 / npm 11.17.0**, with
+  the repo at `D:\PROJECTS\StreamDock`. `binaries/` holds the Windows engine
+  set (yt-dlp 2026.08.19, ffmpeg/ffprobe N-126435) and `check:binaries` passes
+  there.
+- **The npm-install timeouts `CLAUDE.md` records did not reproduce in session
+  20.** Two full `npm ci` runs completed in ~2 minutes each, 740 packages, no
+  `ENOTEMPTY` and no AV stall. Treat that note as historical rather than a
+  standing property of this machine — but it is still the first thing to suspect
+  if an install hangs.
 - **No system node/npm on the Ubuntu box.** A user-local Node 20 lives at
-  `~/.local/node-v20.18.1-linux-x64` — prepend it to `PATH`. The install
-  timeouts `CLAUDE.md` records are a Windows/AV problem, not a project one.
+  `~/.local/node-v20.18.1-linux-x64` — prepend it to `PATH`.
   **That Node is 20.18.1, below the 20.19 floor `npm run build` now needs**, so
   packaging cannot be run from it; everything else (typecheck, lint, tests,
   verify:engine, build:app, e2e) works fine. CI is on v20.20.2.
@@ -246,7 +315,12 @@ command lines and verbatim stderr and has settled several bugs in one grep.
   Linux set; session 14 grabbed `yt-dlp_linux` alone (40MB) for a quick test.
 - **The screenshot sources are committed** at `Screenshots/` (capital S) as of
   session 18 — the eight the site uses. `npm run screenshots:build` needs no
-  argument and reproduces `docs/assets/screenshots/` byte for byte.
+  argument and reproduces `docs/assets/screenshots/` byte for byte — **verified
+  on Windows too** in session 20 (all 24 WebP files re-encoded through Chromium,
+  zero diff), as was `npm run sync:docs`. The generators are genuinely
+  platform-neutral: nothing in the tree uses `os.EOL`, every write passes
+  explicit `'utf-8'`, and the source path is spelled `join(repoRoot,
+  'Screenshots')` with the capital S that case-sensitive Linux requires.
 - `gh` is installed and authenticated as `Isaac-Onyango-Dev`.
 - Reference clones live in the session scratchpad, outside the repo, on purpose.
 
@@ -257,11 +331,16 @@ command lines and verbatim stderr and has settled several bugs in one grep.
 Run all of it before calling anything done:
 
 ```
-npm run typecheck && npx eslint . && npm test && npm run verify:engine
+npm ci
+npm run typecheck && npm run lint && npm test && npm run verify:engine
 npx playwright test && npm run build:app
 ```
 
-Baseline: **207 tests, 264 engine checks, Playwright 12/12, ESLint 0/0.**
+`npm ci` leads only when you have just switched OS — see section 0a. Use
+`npm run lint`, not a bare `npx eslint .`: session 16 added the script so CI and
+humans run the same one command.
+
+Baseline: **207 tests, 268 engine checks, Playwright 12/12, ESLint 0/0.**
 
 The site has its own manual step: `npm run screenshots:build` re-encodes
 `Screenshots/` into `docs/assets/screenshots/`. It is not part of any build and
@@ -275,10 +354,21 @@ and e2e while `electron-builder` itself was fatally broken on the local Node:
 npm run build:app && npx electron-builder --linux dir --publish never
 ```
 
+Regenerating `node_modules` for a different OS counts as a dependency change.
+Session 20 therefore ran the **full** Windows package —
+`npm run build -- --publish never`, the same command and flag release.yml uses —
+and it produced a real NSIS installer. Node 24 packages fine; the
+`ERR_REQUIRE_ESM` failure session 18 hit was specific to Node 20.18.
+
 ---
 
 ## 8. Habits this repo earned the hard way
 
+- **A Linux `npm ci` leaves a Windows checkout with no `.bin` shims at all.**
+  Not just the wrong native binary — npm writes `node_modules/.bin` as symlinks
+  on Linux and `.cmd` wrappers on Windows, so after an OS switch *every* tool
+  reports "'tsc' is not recognized" rather than failing at build time. Session 20
+  measured 58 entries and 0 `.cmd` files; `npm ci` produced 57 `.cmd` shims.
 - **A regression test that has never failed against its bug is not a test yet.**
   Revert the fix, watch it go red, restore. Every fix in session 14 was
   validated this way, including both new `verify-engine` guards.
