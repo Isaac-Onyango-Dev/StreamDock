@@ -1061,6 +1061,119 @@ function verifySingleOwnerPerChoice(): void {
   );
 }
 
+/**
+ * The update flow updates the app, in place, visibly — and never routes anyone
+ * to GitHub.
+ *
+ * All three halves of this had failed at once. The mechanism was real
+ * (`downloadUpdate` + `quitAndInstall`), but the minutes it took had no user
+ * interface whatsoever: the consent dialog closed and a 300MB installer
+ * transferred in silence, with `download-progress` written only to the log
+ * file. Meanwhile a GitHub releases page was offered from four places, one of
+ * them ("View Release Notes") sitting next to the install button on the success
+ * path rather than being any kind of fallback.
+ *
+ * Asserted structurally because whether a progress bar is visible on a real
+ * release is not something a static script can evaluate — but a regression to a
+ * dialog-only flow, or to a releases-page fallback, brings the whole bug back.
+ */
+function verifyUpdateFlow(): void {
+  const updater = stripComments(readProjectFile('electron/app-updater.ts'));
+  const shared = stripComments(readProjectFile('shared/update-state.ts'));
+  const banner = stripComments(readProjectFile('client/src/components/UpdateBanner.tsx'));
+  const app = stripComments(readProjectFile('client/src/App.tsx'));
+
+  // 1. The mechanism is a real in-place update, not a link to a download page.
+  assert(
+    updater.includes('autoUpdater.downloadUpdate()'),
+    'the updater downloads the installer itself',
+  );
+  assert(
+    updater.includes('autoUpdater.quitAndInstall('),
+    'the updater installs in place by restarting into the installer',
+  );
+
+  // 2. Availability is decided by electron-updater's own semver comparison.
+  // A string inequality reported an update in either direction, so a build
+  // running ahead of the published release offered itself a downgrade.
+  assert(
+    updater.includes('result?.isUpdateAvailable'),
+    'availability comes from isUpdateAvailable, not a string comparison of versions',
+  );
+
+  // 3. Nothing in the flow names GitHub. Checked across every file in it, not
+  // just the updater, because the constant could be reintroduced anywhere.
+  for (const [name, source] of [
+    ['electron/app-updater.ts', updater],
+    ['shared/update-state.ts', shared],
+    ['client/src/components/UpdateBanner.tsx', banner],
+  ] as const) {
+    assert(!source.includes('github.com'), `${name} sends nobody to github.com`);
+    assert(!/\/releases|\/tags/.test(source), `${name} names no releases or tags page`);
+  }
+
+  // 4. The one external destination is the project site, and it is the only
+  // thing the updater is allowed to open.
+  assert(
+    shared.includes("UPDATE_FALLBACK_URL = 'https://isaac-onyango-dev.github.io/StreamDock/'"),
+    'the fallback destination is the project site',
+  );
+  const opens = updater.match(/shell\.openExternal\(([^)]*)\)/g) ?? [];
+  assert(opens.length > 0, 'the updater does have a fallback that leaves the app');
+  for (const call of opens) {
+    assert(
+      call.includes('UPDATE_FALLBACK_URL'),
+      `shell.openExternal opens only the shared fallback URL, not ${call}`,
+    );
+  }
+
+  // 5. The fallback fires on failure only — never as a success path. If the
+  // site URL is reachable from a non-error phase, requirement 3 is broken.
+  assert(
+    /failToFallback/.test(updater) && !/phase: 'available'[\s\S]{0,200}openExternal/.test(updater),
+    'leaving the app happens only through the failure path',
+  );
+
+  // 6. A download reports progress into the renderer, not only into the log.
+  // This is the half that was missing entirely.
+  const progressHandler = updater.match(/on\('download-progress'[\s\S]*?\n {2}\}\);/)?.[0] ?? '';
+  assert(
+    progressHandler.includes('publish({'),
+    "the 'download-progress' handler publishes state to the renderer",
+  );
+  assert(
+    progressHandler.includes('percent'),
+    "the 'download-progress' handler carries a percentage",
+  );
+  assert(
+    !updater.includes('dialog.showMessageBox'),
+    'the updater owns no dialogs of its own — the renderer is the single update surface',
+  );
+
+  // 7. And the renderer actually draws that progress.
+  assert(
+    banner.includes("state.phase === 'downloading'"),
+    'the banner has a branch for the downloading phase',
+  );
+  assert(
+    /style=\{\{ width: `\$\{percent\}%` \}\}/.test(banner),
+    'the banner renders a progress bar whose width follows the reported percentage',
+  );
+  assert(
+    banner.includes('formatBytes(state.transferred)'),
+    'the banner also spells out bytes transferred, so a slow connection still looks alive',
+  );
+
+  // 8. The banner is mounted. A component nothing renders is not a fix.
+  assert(
+    /<UpdateBanner[\s/>]/.test(app),
+    'App.tsx renders the update banner',
+  );
+  for (const handler of ['onCheck', 'onDownload', 'onInstall', 'onDismiss']) {
+    assert(app.includes(`${handler}={`), `App.tsx wires the banner's ${handler}`);
+  }
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
@@ -1080,5 +1193,6 @@ verifySkippedDownloadsAreLabelled();
 verifyExtractionCannotHang();
 verifyLanguageCarriesAcrossBatch();
 verifySingleOwnerPerChoice();
+verifyUpdateFlow();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);

@@ -9,6 +9,7 @@ import type {
   StreamOptionsProbeResult,
   UrlAnalysis,
 } from '../lib/types';
+import type { UpdateState } from '../../../shared/update-state';
 
 export {};
 
@@ -16,6 +17,13 @@ declare global {
   interface Window {
     streamDock?: {
       getVersion: () => Promise<string>;
+      // Application update. The renderer owns the visible flow; these drive it.
+      getUpdateState: () => Promise<UpdateState>;
+      checkForAppUpdate: () => Promise<UpdateState>;
+      downloadAppUpdate: () => Promise<UpdateState>;
+      installAppUpdate: () => Promise<UpdateState>;
+      dismissAppUpdate: () => Promise<UpdateState>;
+      onAppUpdateState: (callback: (next: UpdateState) => void) => () => void;
       getSettings: () => Promise<Settings>;
       updateSettings: (updates: Partial<Settings>) => Promise<Settings>;
       pluginsList: () => Promise<Array<{ name: string; path: string }>>;
