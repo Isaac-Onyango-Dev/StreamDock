@@ -13,7 +13,15 @@ import { probeMediaTracks } from './media-track-probe';
 import { probeStreamOptions } from './stream-options-probe';
 import { getBinaryStatus, resolveUpdatableYtDlpCommand, resolveYtDlpCommand, resolvePluginDirs } from './binary-resolver';
 import { toUserError } from './error-translator';
-import { checkForUpdatesInteractive, checkForUpdatesOnLaunch } from './app-updater';
+import {
+  checkForUpdates,
+  checkForUpdatesOnLaunch,
+  dismissUpdate,
+  downloadUpdate,
+  getUpdateState,
+  initAppUpdater,
+  installUpdate,
+} from './app-updater';
 import { checkYtDlpVersion } from './version-checker';
 import { installCrashReporter } from './crash-reporter';
 
@@ -175,6 +183,15 @@ function createWindow(): void {
 function setupIpc(): void {
   // ── App ────────────────────────────────────────────────────────────────────
   ipcMain.handle(IPC.APP_GET_VERSION, () => app.getVersion());
+
+  // Application update. The renderer draws the whole flow (see
+  // components/UpdateBanner.tsx); these only drive it. Each resolves to the
+  // resulting state so a caller can await an outcome without subscribing first.
+  ipcMain.handle(IPC.UPDATE_GET_STATE, () => getUpdateState());
+  ipcMain.handle(IPC.UPDATE_CHECK, () => checkForUpdates(true));
+  ipcMain.handle(IPC.UPDATE_DOWNLOAD, () => downloadUpdate());
+  ipcMain.handle(IPC.UPDATE_INSTALL, () => installUpdate());
+  ipcMain.handle(IPC.UPDATE_DISMISS, () => dismissUpdate());
 
   // ── Settings ───────────────────────────────────────────────────────────────
   ipcMain.handle(IPC.SETTINGS_GET, () => persistence.getSettings());
@@ -574,7 +591,10 @@ function buildAppMenu(): void {
       label: 'Help',
       submenu: [
         { label: 'About StreamDock', click: showAboutDialog },
-        { label: 'Check for Updates\u2026', click: () => void checkForUpdatesInteractive(mainWindow) },
+        // Routes into the same in-app banner the launch check uses rather than
+        // a native dialog: one update surface, so progress cannot go missing
+        // from one of them the way it did when the download had no UI at all.
+        { label: 'Check for Updates\u2026', click: () => void checkForUpdates(true) },
         { type: 'separator' },
         { label: 'Open Logs Folder', click: () => shell.openPath(app.getPath('userData')) },
         { type: 'separator' },
@@ -608,9 +628,28 @@ function buildAppMenu(): void {
 }
 
 // ── App close handling (GOAL 6): prompt if downloads are active ──────────────
-function setupBeforeQuit(): void {
-  let isQuitting = false;
+//
+// Module-scoped rather than local to setupBeforeQuit() because the updater also
+// needs to set it: `quitAndInstall` spawns the installer and *then* quits, so if
+// this handler intercepted that quit to ask about active downloads, answering
+// "Keep Downloading" would leave an installer running against a live app.
+let isQuitting = false;
 
+/**
+ * Shut down cleanly ahead of an update install.
+ *
+ * `engine.shutdown()` pauses every running download and saves the queue, so they
+ * resume after the restart rather than being lost — which is what lets the quit
+ * go through unprompted.
+ */
+function prepareQuitForUpdate(): void {
+  if (isQuitting) return;
+  log.info('[updater] pausing downloads and quitting to install');
+  engine.shutdown();
+  isQuitting = true;
+}
+
+function setupBeforeQuit(): void {
   app.on('before-quit', async (e) => {
     if (isQuitting) return;
 
@@ -667,9 +706,12 @@ app.whenReady().then(async () => {
   // prevent the window from ever appearing.
   createWindow();
 
-  // Update check runs after the window exists so its dialog has a parent, and
-  // is fire-and-forget: a GitHub outage must never delay or block startup.
-  checkForUpdatesOnLaunch(mainWindow);
+  // The updater reports into the renderer, so it is wired after the window is
+  // created. The window is read through a getter rather than captured, so a
+  // reload or a re-created window still receives state. Fire-and-forget: a
+  // GitHub outage must never delay or block startup.
+  initAppUpdater({ window: () => mainWindow, prepareForQuit: prepareQuitForUpdate });
+  checkForUpdatesOnLaunch();
 
   // Wallpaper cache dir + custom protocol handler. Deliberately isolated in its
   // own try/catch and run AFTER createWindow(): previously this block ran FIRST,

@@ -3,12 +3,14 @@ import { AppChrome } from './components/AppChrome';
 import { TransferView } from './views/TransferView';
 import { ErrorBanner } from './components/ErrorBanner';
 import { VersionWarningBanner } from './components/VersionWarningBanner';
+import { UpdateBanner } from './components/UpdateBanner';
 import { SettingsView } from './views/SettingsView';
 import { CaptureView } from './views/CaptureView';
 import { OverlayBus } from './components/OverlayBus';
 import type { CaptureMode, EngineStatus, Settings, Tab } from './lib/types';
 import { downloadStore } from './store/DownloadStore';
 import { useDownloadRecords, useActiveCount } from './store/useDownloadStore';
+import { IDLE_UPDATE_STATE, type UpdateState } from '../../shared/update-state';
 
 const fallbackSettings: Settings = {
   downloadDir: '',
@@ -22,6 +24,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [versionWarning, setVersionWarning] = useState<string | null>(null);
   const [updatingEngine, setUpdatingEngine] = useState(false);
+  const [updateState, setUpdateState] = useState<UpdateState>(IDLE_UPDATE_STATE);
   /**
    * A URL pushed into the capture field from outside it (clipboard watcher,
    * Edit > Paste). Carries a sequence number so copying the *same* URL twice
@@ -90,6 +93,21 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = window.streamDock?.onEngineVersionWarning?.((warning) => {
       setVersionWarning(warning);
+    });
+    return () => unsubscribe?.();
+  }, []);
+
+  /**
+   * The application update flow.
+   *
+   * Subscribing happens before asking for the current state, so a phase
+   * published in the gap between the two is not missed — the launch check fires
+   * on its own eight seconds in and does not wait for this component.
+   */
+  useEffect(() => {
+    const unsubscribe = window.streamDock?.onAppUpdateState?.(setUpdateState);
+    void window.streamDock?.getUpdateState?.().then((current) => {
+      if (current) setUpdateState(current);
     });
     return () => unsubscribe?.();
   }, []);
@@ -169,6 +187,13 @@ export default function App() {
           }`}
         >
           <div className={`page-shell ${currentTab === 'transfers' ? 'min-h-0 flex-1' : ''}`}>
+            <UpdateBanner
+              state={updateState}
+              onCheck={() => void window.streamDock?.checkForAppUpdate?.()}
+              onDownload={() => void window.streamDock?.downloadAppUpdate?.()}
+              onInstall={() => void window.streamDock?.installAppUpdate?.()}
+              onDismiss={() => void window.streamDock?.dismissAppUpdate?.()}
+            />
             {versionWarning && (
               <VersionWarningBanner
                 message={versionWarning}

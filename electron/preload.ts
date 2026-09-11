@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { IPC } from './ipc-channels';
 import type { DownloadRecord } from './download-engine';
 import type { CaptureMode, UrlAnalysis } from './url-router';
+import type { UpdateState } from '../shared/update-state';
 
 type PluginInfo = { name: string; path: string };
 
@@ -69,6 +70,16 @@ const api = {
   onEngineVersionWarning: (callback: (warning: string) => void): Unsubscribe =>
     on<string>(IPC.APP_ENGINE_VERSION_WARNING, callback),
   markOnboarded: () => ipcRenderer.invoke(IPC.APP_MARK_ONBOARDED) as Promise<void>,
+
+  // Application update. Every one of these resolves to the resulting state, so
+  // a caller that would rather await than subscribe still sees the outcome.
+  getUpdateState: () => ipcRenderer.invoke(IPC.UPDATE_GET_STATE) as Promise<UpdateState>,
+  checkForAppUpdate: () => ipcRenderer.invoke(IPC.UPDATE_CHECK) as Promise<UpdateState>,
+  downloadAppUpdate: () => ipcRenderer.invoke(IPC.UPDATE_DOWNLOAD) as Promise<UpdateState>,
+  installAppUpdate: () => ipcRenderer.invoke(IPC.UPDATE_INSTALL) as Promise<UpdateState>,
+  dismissAppUpdate: () => ipcRenderer.invoke(IPC.UPDATE_DISMISS) as Promise<UpdateState>,
+  onAppUpdateState: (callback: (next: UpdateState) => void): Unsubscribe =>
+    on<UpdateState>(IPC.EVENT_UPDATE_STATE, callback),
 
   // Window controls
   minimizeWindow: () => ipcRenderer.invoke(IPC.WINDOW_MINIMIZE),

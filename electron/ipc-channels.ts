@@ -6,6 +6,15 @@ export const IPC = {
   APP_ENGINE_VERSION_WARNING:   'app:engine-version-warning',
   APP_MARK_ONBOARDED:           'app:mark-onboarded',
 
+  // Application update (electron-updater). The renderer owns the whole visible
+  // surface — the main process only drives the phase and publishes it back, so
+  // a silent download cannot happen the way it used to.
+  UPDATE_GET_STATE: 'update:get-state',
+  UPDATE_CHECK:     'update:check',
+  UPDATE_DOWNLOAD:  'update:download',
+  UPDATE_INSTALL:   'update:install',
+  UPDATE_DISMISS:   'update:dismiss',
+
   // Window controls (renderer → main)
   WINDOW_MINIMIZE:          'window:minimize',
   WINDOW_MAXIMIZE_RESTORE:  'window:maximize-restore',
@@ -60,6 +69,7 @@ export const IPC = {
   EVENT_STALL:              'event:stall',
   EVENT_NETWORK_STATUS:     'event:network-status',
   EVENT_QUEUE_CHANGED:      'event:queue-changed',
+  EVENT_UPDATE_STATE:       'event:update-state',
 
   // Engine management
   ENGINE_CLEAR_RECORDS: 'engine:clear-records',
