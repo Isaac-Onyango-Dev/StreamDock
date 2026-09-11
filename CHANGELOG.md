@@ -4,6 +4,41 @@ All notable changes to StreamDock are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.8.0] - 2026-09-11
+
+### Added
+- **An update now shows you that it is updating.** Installing a new version used
+  to give no sign at all that anything was happening: the prompt closed and a
+  300 MB installer downloaded in complete silence, sometimes for several
+  minutes. There is now a banner in the app with a progress bar, a percentage,
+  and how much has transferred so far.
+- Update progress, readiness and failure all appear in the app itself rather
+  than in system dialogs, so there is one place to look.
+
+### Changed
+- **Updates never send you to GitHub any more.** A failed update used to offer a
+  releases listing, which asks you to pick the right file out of a list that
+  also contains files no person needs. If an update genuinely cannot install
+  itself, StreamDock now opens the StreamDock download page instead, and says
+  so before it does.
+- The "View Release Notes" button is gone from the update prompt. It sat beside
+  the install button and led out of the app on what was otherwise a working
+  path.
+- A failed update now explains what went wrong and offers to try again, instead
+  of quietly sending you somewhere else.
+
+### Fixed
+- **Installing an update no longer risks running the installer over a live
+  app.** If a download was in progress, confirming the restart raised the usual
+  "downloads are active" question, and answering "keep downloading" left the
+  installer running against the app it was replacing. Installing now pauses
+  downloads and saves them first, so they resume after the restart.
+- StreamDock no longer offers itself an older version as an update. Versions
+  were compared as text rather than as version numbers, so any difference in
+  either direction counted as an update being available.
+- A failed update check at startup no longer has anything to say. Opening the
+  app without a connection reported a failure nobody had asked for.
+
 ## [1.7.0] - 2026-09-08
 
 ### Added
