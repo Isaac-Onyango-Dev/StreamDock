@@ -4,13 +4,13 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>StreamDock — Grab Any Stream, Instantly</title>
-<meta name="description" content="StreamDock v1.7.0 — download videos and capture live streams from thousands of sites with one bold, fast desktop app. Powered by yt-dlp and ffmpeg." />
+<meta name="description" content="StreamDock v1.8.0 — download videos and capture live streams from thousands of sites with one bold, fast desktop app. Powered by yt-dlp and ffmpeg." />
 <link rel="canonical" href="https://isaac-onyango-dev.github.io/StreamDock/" />
 
 <meta property="og:type" content="website" />
 <meta property="og:url" content="https://isaac-onyango-dev.github.io/StreamDock/" />
 <meta property="og:title" content="StreamDock — Grab Any Stream, Instantly" />
-<meta property="og:description" content="Download videos and capture live streams from thousands of sites with one bold, fast desktop app. v1.7.0 out now." />
+<meta property="og:description" content="Download videos and capture live streams from thousands of sites with one bold, fast desktop app. v1.8.0 out now." />
 <meta property="og:image" content="https://isaac-onyango-dev.github.io/StreamDock/assets/og-image.svg" />
 <meta property="og:image:type" content="image/svg+xml" />
 <meta property="og:image:width" content="1200" />
@@ -1182,7 +1182,7 @@ footer {
     <a class="nav-logo" href="#top">
       <img class="nav-mark" src="assets/mark.svg" alt="" width="34" height="34" />
       <span class="nav-wordmark">Stream<span>Dock</span></span>
-      <span class="nav-badge">v1.7.0</span>
+      <span class="nav-badge">v1.8.0</span>
     </a>
     <ul class="nav-links">
       <li><a class="text-link" href="#screenshots">Screenshots</a></li>
@@ -1199,7 +1199,7 @@ footer {
 
   <!-- HERO -->
   <section class="hero" id="top">
-    <span class="hero-eyebrow"><span class="dot"></span>v1.7.0 — Now Available</span>
+    <span class="hero-eyebrow"><span class="dot"></span>v1.8.0 — Now Available</span>
 
     <img class="hero-mark" src="assets/mark.svg" alt="StreamDock logo" width="104" height="104" />
 
@@ -1216,7 +1216,7 @@ footer {
       <a href="#" class="btn-primary" id="hero-download-btn">
         <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         <span id="hero-download-label">Download StreamDock</span>
-        <small id="hero-download-sub">v1.7.0</small>
+        <small id="hero-download-sub">v1.8.0</small>
       </a>
       <div class="platform-picker" id="platform-picker">
         <a class="platform-pill" data-os="windows" href="#download"><svg viewBox="0 0 448 512" width="14" height="14" fill="currentColor" aria-hidden="true" focusable="false"><path d="M0 93.7l183.6-25.3v177.4H0V93.7zm0 324.6l183.6 25.3V268.4H0v149.9zm203.8 28L448 480V268.4H203.8v177.9zm0-380.6v180.1H448V32L203.8 65.7z"/></svg> Windows</a>
@@ -1410,7 +1410,7 @@ footer {
         <div class="card-meta">
           <span class="tag tag-violet">NSIS Installer</span>
           <span class="tag tag-pink">.exe</span>
-          <span class="tag tag-muted">v1.7.0</span>
+          <span class="tag tag-muted">v1.8.0</span>
         </div>
         <a class="btn-dl btn-dl-primary" id="windows-download-btn"
            href="https://github.com/Isaac-Onyango-Dev/StreamDock/releases/latest/download/StreamDock-Setup-Windows.exe"
@@ -1443,7 +1443,7 @@ footer {
         <div class="card-meta">
           <span class="tag tag-violet">AppImage</span>
           <span class="tag tag-pink">.AppImage</span>
-          <span class="tag tag-muted">v1.7.0</span>
+          <span class="tag tag-muted">v1.8.0</span>
         </div>
         <a class="btn-dl btn-dl-primary" id="linux-download-btn"
            href="https://github.com/Isaac-Onyango-Dev/StreamDock/releases/latest/download/StreamDock-Linux.AppImage"
@@ -1523,6 +1523,15 @@ footer {
     <h2 class="section-title">What's New</h2>
         <div class="release">
       <div class="release-head">
+        <span class="version-tag">v1.8.0</span>
+        <span class="release-date">2026-09-11</span>
+      </div>
+      <h3>Added</h3><ul><li><strong>An update now shows you that it is updating.</strong> Installing a new version used to give no sign at all that anything was happening: the prompt closed and a 300 MB installer downloaded in complete silence, sometimes for several minutes. There is now a banner in the app with a progress bar, a percentage, and how much has transferred so far.</li><li>Update progress, readiness and failure all appear in the app itself rather than in system dialogs, so there is one place to look.</li></ul>
+      <h3>Changed</h3><ul><li><strong>Updates never send you to GitHub any more.</strong> A failed update used to offer a releases listing, which asks you to pick the right file out of a list that also contains files no person needs. If an update genuinely cannot install itself, StreamDock now opens the StreamDock download page instead, and says so before it does.</li><li>The "View Release Notes" button is gone from the update prompt. It sat beside the install button and led out of the app on what was otherwise a working path.</li><li>A failed update now explains what went wrong and offers to try again, instead of quietly sending you somewhere else.</li></ul>
+      <h3>Fixed</h3><ul><li><strong>Installing an update no longer risks running the installer over a live app.</strong> If a download was in progress, confirming the restart raised the usual "downloads are active" question, and answering "keep downloading" left the installer running against the app it was replacing. Installing now pauses downloads and saves them first, so they resume after the restart.</li><li>StreamDock no longer offers itself an older version as an update. Versions were compared as text rather than as version numbers, so any difference in either direction counted as an update being available.</li><li>A failed update check at startup no longer has anything to say. Opening the app without a connection reported a failure nobody had asked for.</li></ul>
+    </div>
+    <div class="release">
+      <div class="release-head">
         <span class="version-tag">v1.7.0</span>
         <span class="release-date">2026-09-08</span>
       </div>
@@ -1537,14 +1546,6 @@ footer {
       </div>
       <h3>Fixed</h3><ul><li><strong>Bundled plugins now actually load.</strong> StreamDock ships yt-dlp extractors for anikoto, animepahe, aniwatch and kaido, plus a PO-token provider — and none of them had ever been reachable in a shipped build. The plugin path resolver handed yt-dlp each individual package folder, when yt-dlp expects the folder that *holds* the packages and finds them itself. Given the wrong level it loaded nothing and reported it only in verbose output, so every URL relying on those extractors fell through to the generic one and failed as an unsupported link.</li><li>The Chrome cookie-unlock plugin no longer breaks other plugins on Linux and macOS. It reaches Windows-only system calls as soon as it is imported, so once plugin loading started working it printed an import failure on every single download. It is now offered only on Windows, where it can run.</li><li><strong>Subtitles are a choice again.</strong> A global "embed subtitles" setting was applied after the per-download subtitle picker had already decided, and it defaulted to on — so choosing <strong>None</strong> still embedded a subtitle track, and choosing a separate file produced an embedded track *and* the file. One place now decides, and the setting became that picker's starting value rather than an override.</li><li>The subtitle picker offers all four real behaviours: none, a separate file beside the video, a track inside the video, or both. Subtitles are never burned permanently into the picture.</li><li>A saved subtitle preference now reaches the picker. Settings load after the capture screen appears, so a stored default of "None" was replaced by the built-in one every launch.</li><li><strong>The quality menu no longer invents resolutions.</strong> It fell back to a fixed 1080p/720p/480p/360p list whenever it had not detected any — which was before you press Analyze, for every playlist, and for every episode range. You could pick 1080p for a source that never offered it. It now lists only what the source actually reports, and just "Best quality" when it reports nothing.</li><li>Quality options read "up to 1080p", because that is what they do: a chosen quality is a ceiling, so each item in a playlist downloads at its own best within it rather than being skipped or forced.</li></ul>
       <h3>Changed</h3><ul><li>The website no longer advertises automatic season and episode renaming, which was deliberately removed in 1.5.0, or suggest that plugins can be installed from inside the app. Both described behaviour the application does not have.</li></ul>
-    </div>
-    <div class="release">
-      <div class="release-head">
-        <span class="version-tag">v1.6.0</span>
-        <span class="release-date">2026-09-08</span>
-      </div>
-      <h3>Added</h3><ul><li><strong>Linux release.</strong> StreamDock now ships an x86-64 AppImage with the same bundled engines the Windows build carries — yt-dlp and a full ffmpeg/ffprobe pair, no system Python and nothing else to install. Verified end to end on Ubuntu 26.04: the app boots, the bundled engines execute, and a real download completes and lands in the chosen folder.</li></ul>
-      <h3>Fixed</h3><ul><li><strong>Single videos no longer land in a folder called "NA".</strong> The preview list auto-selects its only entry for a one-item probe, which sent yt-dlp a <code>--playlist-items 1</code> selection; anything in that field counted as a confirmed multi-item batch, so the output template took its playlist branch, found no playlist title to use and fell back to yt-dlp's literal <code>NA</code>. A selection naming exactly one item is no longer treated as a batch, wherever it came from — so pulling a single episode out of a series also stops creating a folder for it.</li><li><strong>Video thumbnails are visible again.</strong> The probe had been resolving them correctly all along; the renderer's Content-Security-Policy allowed images only from <code>bing.com</code>, so every thumbnail was blocked and drew a broken-image glyph. Thumbnails come from whatever site is being downloaded from, which no allowlist can enumerate, so <code>img-src</code> now permits any https origin. Images only — no plain http, and script and network policy are unchanged.</li><li><strong>The Linux app icon shows the StreamDock mark instead of a generic placeholder.</strong> electron-builder downsamples a single PNG into a macOS <code>.icns</code> or a Windows <code>.ico</code>, but for Linux it ships only the sizes it is handed — so the lone 1024x1024 source was installed to a hicolor directory the freedesktop icon index does not list (it stops at 512x512), and every desktop fell back to a default icon. The build now ships eight indexed sizes from 16 to 512.</li></ul>
     </div>
   </section>
 
@@ -1588,7 +1589,7 @@ footer {
   <footer>
     <div class="footer-brand">
       <img src="assets/mark.svg" alt="" width="26" height="26" />
-      <span>Stream<em>Dock</em> <span class="ver">· v1.7.0</span></span>
+      <span>Stream<em>Dock</em> <span class="ver">· v1.8.0</span></span>
     </div>
     <div class="footer-links">
       <a href="https://github.com/Isaac-Onyango-Dev/StreamDock" target="_blank" rel="noopener">GitHub</a>
