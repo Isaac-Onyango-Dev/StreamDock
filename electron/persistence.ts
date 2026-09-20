@@ -45,6 +45,14 @@ export interface AppSettings {
     sponsorBlock?: boolean;
     customArgs?: string;
   };
+  /**
+   * The yt-dlp version that `-U` last confirmed was the newest release
+   * available. Age alone cannot tell whether a newer release exists — yt-dlp's
+   * gaps between stable releases have reached 84 days — so the mild staleness
+   * banner is suppressed for exactly the version yt-dlp itself called current.
+   * The severe (90-day) warning is never suppressed.
+   */
+  engineConfirmedLatest?: string;
 }
 
 export class PersistenceGateway {

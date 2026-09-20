@@ -4,7 +4,7 @@ vi.mock('electron-log', () => ({
   default: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-const { assessVersion, versionAgeDays } = await import('./version-checker');
+const { assessVersion, updateOutcomeMessage, versionAgeDays } = await import('./version-checker');
 
 const NOW = new Date('2026-09-07T00:00:00Z');
 
@@ -51,7 +51,7 @@ describe('assessVersion', () => {
     const verdict = assessVersion('2026.08.01', NOW);
     expect(verdict.isOutdated).toBe(true);
     expect(verdict.isSeverelyOutdated).toBe(false);
-    expect(verdict.warning).toMatch(/newer download engine/i);
+    expect(verdict.warning).toMatch(/37 days old/);
   });
 
   it('treats anything below the hard floor as severely outdated', () => {
@@ -62,5 +62,39 @@ describe('assessVersion', () => {
   it('does not warn right at the staleness boundary', () => {
     expect(assessVersion('2026.08.09', NOW).isOutdated).toBe(false);
     expect(assessVersion('2026.08.08', NOW).isOutdated).toBe(true);
+  });
+});
+
+describe('updateOutcomeMessage', () => {
+  // Verbatim output from `yt-dlp.exe -U` on 2026.08.19, which was the latest
+  // stable release at the time and therefore had nothing to update to.
+  const UP_TO_DATE = `Latest version: stable@2026.08.19 from yt-dlp/yt-dlp
+yt-dlp is up to date (stable@2026.08.19 from yt-dlp/yt-dlp)`;
+
+  it('reports an already-current engine as a success, not a failed update', () => {
+    expect(updateOutcomeMessage(UP_TO_DATE, '2026.08.19')).toBe(
+      'Download engine is already on the latest release (2026.08.19).',
+    );
+  });
+
+  it('reports a real replacement as an update', () => {
+    const output = `Updating to stable@2026.09.15 ...
+Updated yt-dlp to stable@2026.09.15`;
+    expect(updateOutcomeMessage(output, '2026.09.15')).toBe('Download engine updated to 2026.09.15.');
+  });
+
+  it('still says something useful when the version cannot be read back', () => {
+    expect(updateOutcomeMessage(UP_TO_DATE, null)).toBe('Download engine is already on the latest release.');
+    expect(updateOutcomeMessage('', null)).toBe('Download engine updated.');
+  });
+});
+
+describe('staleness warnings', () => {
+  it('never claims a newer release exists, because age cannot know that', () => {
+    // 2026.08.19 was 32 days old on 2026-09-20 and still the latest release.
+    const verdict = assessVersion('2026.08.19', new Date('2026-09-20T00:00:00Z'));
+    expect(verdict.isOutdated).toBe(true);
+    expect(verdict.warning).not.toMatch(/newer .* is available/i);
+    expect(verdict.warning).toContain('32 days old');
   });
 });

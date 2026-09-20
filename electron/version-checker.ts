@@ -85,9 +85,12 @@ export function assessVersion(version: string, now: Date = new Date()): Stalenes
     return {
       isOutdated: true,
       isSeverelyOutdated: false,
+      // Deliberately does NOT claim a newer release exists — age cannot know
+      // that. yt-dlp ships roughly monthly, so a current binary spends most of
+      // every cycle past 30 days old with nothing to update to.
       warning:
-        `A newer download engine is available (yt-dlp ${version} is ${ageDays} days old). ` +
-        'Updating improves site compatibility.',
+        `The download engine (yt-dlp ${version}) is ${ageDays} days old. ` +
+        'Checking for an update keeps site compatibility current.',
     };
   }
 
@@ -129,4 +132,24 @@ export async function checkYtDlpVersion(command: string, baseArgs: string[] = []
       resolve({ available: true, version, ageDays, ...verdict });
     });
   });
+}
+
+/**
+ * yt-dlp `-U` exits 0 both when it replaced itself and when there was nothing
+ * to replace; its output is the only thing that tells the two apart.
+ *
+ * This exists because the update handler used to verify a successful update by
+ * re-running the staleness check, and reported failure whenever the binary was
+ * still over 30 days old. Age answers "might this binary be breaking
+ * downloads?" — it can never answer "did the update work?", because upstream's
+ * release cadence decides that. With yt-dlp's latest stable at 2026.08.19 and
+ * no newer release for 32 days, every update attempt reported
+ * "still on 2026.08.19 after updating ... or reinstall StreamDock", and no
+ * reinstall could ever fix it: the bundled binary already was the latest.
+ */
+export function updateOutcomeMessage(output: string, version: string | null): string {
+  if (/is up to date/i.test(output)) {
+    return `Download engine is already on the latest release${version ? ` (${version})` : ''}.`;
+  }
+  return `Download engine updated${version ? ` to ${version}` : ''}.`;
 }
