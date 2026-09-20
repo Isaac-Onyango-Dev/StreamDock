@@ -22,7 +22,7 @@ import {
   initAppUpdater,
   installUpdate,
 } from './app-updater';
-import { checkYtDlpVersion } from './version-checker';
+import { checkYtDlpVersion, updateOutcomeMessage } from './version-checker';
 import { installCrashReporter } from './crash-reporter';
 
 import { initWallpaperManager, rotateNow, onSettingsChanged } from './wallpaper-manager';
@@ -386,26 +386,24 @@ function setupIpc(): void {
         return { success: false, error: toUserError(updated.output) };
       }
 
-      // Report the version we actually ended up on rather than echoing yt-dlp's
-      // update chatter. If the update was a no-op because the binary cannot
-      // replace itself, this is what reveals it.
+      // `-U` exited 0, so it either replaced the binary or found nothing to
+      // replace. Both are successes — only yt-dlp's own output distinguishes
+      // them, and a failure to self-replace exits non-zero and is handled above.
+      // This used to re-run the staleness check and report failure if the
+      // binary was still over 30 days old, which made "up to date" look like a
+      // broken update whenever upstream had not shipped in a month.
       const check = await checkYtDlpVersion(cmd.command, cmd.args);
       log.info(`[engine-update] yt-dlp now reports ${check.version ?? 'unknown'}`);
 
-      if (check.version && check.isOutdated) {
-        return {
-          success: false,
-          error:
-            `The engine is still on ${check.version} after updating. ` +
-            'Try running the update again, or reinstall StreamDock.',
-        };
+      // yt-dlp saying "up to date" is the only authoritative answer to "is a
+      // newer release available". Remember it so the startup banner stops
+      // nagging about a version that has nothing to update to.
+      if (check.version && /is up to date/i.test(updated.output)) {
+        persistence.updateSettings({ engineConfirmedLatest: check.version });
       }
 
       mainWindow?.webContents.send(IPC.APP_ENGINE_VERSION_WARNING, null);
-      return {
-        success: true,
-        message: check.version ? `Download engine updated to ${check.version}.` : 'Download engine updated.',
-      };
+      return { success: true, message: updateOutcomeMessage(updated.output, check.version) };
     } catch (e) {
       return { success: false, error: toUserError(e) };
     }
@@ -773,7 +771,9 @@ app.whenReady().then(async () => {
   try {
     const ytDlpCmd = resolveYtDlpCommand();
     const versionResult = await checkYtDlpVersion(ytDlpCmd.command, ytDlpCmd.args);
-    if (versionResult.isOutdated && versionResult.warning) {
+    const confirmedLatest = persistence.getSettings().engineConfirmedLatest === versionResult.version;
+    const suppressed = confirmedLatest && !versionResult.isSeverelyOutdated;
+    if (versionResult.isOutdated && versionResult.warning && !suppressed) {
       // Delay to ensure renderer is ready
       setTimeout(() => {
         mainWindow?.webContents.send(IPC.APP_ENGINE_VERSION_WARNING, versionResult.warning);

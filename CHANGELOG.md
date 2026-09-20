@@ -4,6 +4,24 @@ All notable changes to StreamDock are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.8.1] - 2026-09-20
+
+### Fixed
+- **"Update yt-dlp" no longer reports a failure when the engine is already up to
+  date.** The update ran correctly, yt-dlp confirmed there was nothing newer to
+  install, and StreamDock then declared it a failure and told you to reinstall
+  the app. Reinstalling could never have helped: the bundled engine already was
+  the newest release. The button now says whether it installed a new engine or
+  found you were already on the latest one.
+- **The engine warning no longer claims a newer version exists when none does.**
+  It was shown whenever the engine was over a month old, which is most of the
+  time even on a perfectly current install — yt-dlp's gaps between releases have
+  reached 84 days. It now says how old the engine is and suggests checking,
+  rather than asserting an update is waiting.
+- Once yt-dlp confirms you are on the newest release, StreamDock stops showing
+  that warning for that version instead of raising it again at every launch. A
+  severely outdated engine still warns every time.
+
 ## [1.8.0] - 2026-09-11
 
 ### Added
