@@ -1900,8 +1900,73 @@ matrix re-run. All four new guards were confirmed red against their bug: the
 missing `--nav-h`, a width-only `--shot-w`, a width-constrained slide, and a
 removed cap.
 
+### Session 21 - the engine update that always "failed"
+
+Version 1.8.0 -> **1.8.1**, pushed; Build & Release fired on the package.json
+change and tags it. One commit. Reported symptom: "Update yt-dlp" always fails
+with *"The engine is still on 2026.08.19 after updating. Try running the update
+again, or reinstall StreamDock"*, and reinstalling does not help.
+
+**Reproduced in one command, and the report's own detail named the cause.** A
+scratch copy of the bundled binary:
+
+    yt-dlp.exe -U
+    Latest version: stable@2026.08.19 from yt-dlp/yt-dlp
+    yt-dlp is up to date (stable@2026.08.19 from yt-dlp/yt-dlp)   EXIT=0
+
+GitHub's API confirms 2026.08.19 **is** the newest release, published 32 days
+earlier. So the update worked, and the handler called it broken - because its
+success criterion was `checkYtDlpVersion(...).isOutdated`, i.e. *"is the binary
+under 30 days old"*. Reinstalling could never clear it: the bundled engine
+already was the latest, so the check the advice pointed at was guaranteed to
+fail again.
+
+**Age answers "might this binary be breaking downloads?"  It can never answer
+"did the update work?"** - upstream cadence decides that. Measured over
+yt-dlp's last 12 stable releases the gaps run **3, 3, 3, 4, 10, 10, 17, 25, 26,
+46, 52, 84 days**, so no age threshold can honestly mean "a newer release
+exists" either. That measurement is why the 30-day tier was not simply raised:
+at any threshold below 84 it still lies, and above it the signal is worthless.
+
+Three fixes, one root cause - two callers asking age a question it cannot
+answer:
+
+1. *The update handler.* Success is now `-U`'s exit code, which is what actually
+   reports a failure to self-replace. `updateOutcomeMessage()` (in
+   `version-checker.ts`, beside the semantics it belongs to) reads yt-dlp's own
+   output to say whether it installed something or found nothing to install -
+   both successes. The `isOutdated` branch is deleted.
+2. *The startup banner copy.* It said "A newer download engine is available
+   (yt-dlp X is N days old)". There was no newer one. It now states the age and
+   suggests checking. **An existing test asserted that false copy** and had to be
+   updated - a test can pin a lie in place as firmly as it pins a fix.
+3. *The re-nag loop.* The banner fired at every launch, the button then said
+   "already on the latest release", and the next launch nagged again. When `-U`
+   reports up to date, that exact version is stored as `engineConfirmedLatest`
+   and the mild banner is suppressed for it only. That is not another threshold
+   guess - it is the one authoritative answer, from yt-dlp itself. The severe
+   (90-day) warning is never suppressed.
+
+Tests built from the binary's verbatim `-U` output and confirmed red against the
+bug before being kept.
+
+**Verification**: typecheck (both projects), ESLint 0/0, **222 Vitest tests**,
+`verify:engine` **292 checks**, Playwright 19/19, production build, `sync:docs`,
+`check:version`.
+
 ## Working agreements for future sessions on this repo
 
+- **A staleness heuristic is not a success criterion.** "Is this binary under 30
+  days old" was used to verify that `yt-dlp -U` had worked, so a correct update
+  on a current engine reported failure and advised a reinstall that could never
+  help. Age answers "might this be breaking downloads?"; only the operation's own
+  exit code and output answer "did it work?". When a check's advice loops back
+  into the same check, the check is answering the wrong question.
+- **Measure the cadence before picking a threshold.** yt-dlp's gaps between
+  stable releases run 3 to 84 days, so no age threshold can mean "a newer release
+  exists". Twelve lines of API output settled what raising the constant would
+  only have moved. If no threshold is honest, stop asserting and go ask the
+  authority - `-U` knows, and the app already runs it.
 - **Let the browser do the layout arithmetic.** Two carousel regressions came
   from computing a height in CSS: first width-only, then `100svh` minus a
   hardcoded furniture constant that never subtracted the sticky nav. A flex
