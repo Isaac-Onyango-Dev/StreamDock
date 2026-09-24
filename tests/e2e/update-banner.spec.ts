@@ -83,10 +83,23 @@ test('a download in progress shows a moving bar, a percentage and bytes', async 
     transferred: 0, total: 302678424, interactive: true,
   });
   const bar = banner(page).locator('div.bg-accent').first();
-  const width = async () => (await bar.boundingBox())!.width;
+  const track = banner(page).locator('div.bg-surface-4').first();
+
+  // The bar carries `transition-all` (150ms), so its rendered width lags the
+  // percentage text by a frame or more. Reading boundingBox() once, right after
+  // the text has rendered, samples the transition mid-flight: CI read 0 where it
+  // expected 37%, and 37% where it expected 92%. `settlesAt` polls until the
+  // animation has finished carrying the bar to the width the percentage
+  // demands, so it asserts where the bar arrives rather than where it happened
+  // to be at one sampled instant.
+  const settlesAt = async (percent: number) => {
+    const full = (await track.boundingBox())!.width;
+    await expect.poll(async () => (await bar.boundingBox())!.width)
+      .toBeCloseTo((full * percent) / 100, 0);
+  };
 
   await expect(banner(page)).toContainText('Downloading StreamDock 1.8.0…');
-  const atZero = await width();
+  await settlesAt(0);
 
   await emit(page, {
     phase: 'downloading', version: '1.8.0', percent: 37.4,
@@ -95,17 +108,13 @@ test('a download in progress shows a moving bar, a percentage and bytes', async 
   await expect(banner(page)).toContainText('37%');
   await expect(banner(page)).toContainText('107.96 MB of 288.66 MB');
   await expect(banner(page)).toContainText('3.91 MB/s');
-  const atThirtySeven = await width();
+  await settlesAt(37.4);
 
   await emit(page, {
     phase: 'downloading', version: '1.8.0', percent: 92,
     transferred: 278_000_000, total: 302678424, interactive: true,
   });
-  const atNinetyTwo = await width();
-
-  // The bar has to actually move, not just exist.
-  expect(atZero).toBeLessThan(atThirtySeven);
-  expect(atThirtySeven).toBeLessThan(atNinetyTwo);
+  await settlesAt(92);
 
   // And it must not be dismissible into invisibility mid-transfer by accident:
   // dismissing is allowed, but the control is a deliberate one.
