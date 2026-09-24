@@ -1954,8 +1954,44 @@ bug before being kept.
 `verify:engine` **292 checks**, Playwright 19/19, production build, `sync:docs`,
 `check:version`.
 
+**Follow-up - the one CI failure this release produced was a test race, not a
+regression.** v1.8.1 published cleanly (tag `v1.8.1` created by Build & Release,
+installer and site both green), but CI's E2E job failed on the docs commit with
+`expect(atZero).toBeLessThan(atThirtySeven)` - *Expected: < 0, Received: 0*, and
+on retry *57.375 < 57.375*. Both readings were of the update banner's progress
+bar before it had finished moving.
+
+The bar carries `transition-all`, which Tailwind compiles to a **150ms
+transition on `width`**. `update-banner.spec.ts` read `boundingBox()` once,
+immediately after asserting the percentage text. React writes the text and the
+inline width in the same commit, but the *rendered* width then animates toward
+it - so a single sample lands mid-flight. It passed locally every time and lost
+the race on a slower hosted runner.
+
+Reproduced deliberately rather than guessed at: stretching the transition to 3s
+with an injected `*{transition-duration:3s !important}` made the old assertion
+fail with the **identical** `Expected: < 0, Received: 0`. `settlesAt(percent)`
+now polls the bar's width until it reaches that fraction of its track, which is
+a *stricter* claim than the three ordered samples it replaces - a bar that
+merely twitched satisfied those. Confirmed three ways: green against the 3s
+transition, green against the real one, and red (`Expected: 0, Received: 324.1`)
+when the bar's width is hardcoded so it stops tracking percent. Test-only, no
+version bump.
+
+
 ## Working agreements for future sessions on this repo
 
+- **Never sample an animated value once.** A CSS transition means the rendered
+  width lags the state that set it, so `boundingBox()` straight after a text
+  assertion reads mid-flight - green locally, red on a slower runner. Poll to
+  the value the animation is heading for. Asserting where a thing *arrives* is
+  also stricter than comparing two snapshots, which a barely-moving element
+  would satisfy.
+- **Reproduce a flake before fixing it, by exaggerating what makes it flaky.**
+  Injecting `*{transition-duration:3s !important}` turned a runner-only failure
+  into a deterministic local one that reproduced CI's error text exactly - and
+  then proved the fix survives 20x the real timing. A flaky test "fixed" without
+  ever being made to fail on purpose is a guess.
 - **A staleness heuristic is not a success criterion.** "Is this binary under 30
   days old" was used to verify that `yt-dlp -U` had worked, so a correct update
   on a current engine reported failure and advised a reinstall that could never
