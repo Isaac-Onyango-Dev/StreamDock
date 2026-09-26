@@ -1975,7 +1975,58 @@ when the bar's width is hardcoded so it stops tracking percent. Test-only, no
 version bump.
 
 
+### Session 22 - full architecture audit, then the job-engine refactor (in progress)
+
+Branch `refactor/job-engine`, **nothing released**. Isaac reported eight symptoms
+(forced tray, Purge History resurrection, concurrency ignored, scrollbar, a 50+
+episode queue struggling, probe/download race, useless subtitle default, controls
+that only look like they work) and asked for an audit before any code. The full
+audit and phased plan live in `C:\Users\ISAAC\.claude\plans\steamdock-full-codebase-sparkling-rossum.md`.
+
+**Five root causes behind ~30 symptoms:** no single owner of a job's lifecycle
+(status written from ~12 methods, admission implemented 4 different ways); the
+renderer keeps a second copy of engine state and deletes rows the engine still
+owns; app lifetime keyed on `tasks.size`, which leaks; engine output judged line
+by line and never re-judged at exit; an unthrottled progress firehose.
+
+**Confirmed from Isaac's real 53-episode Series X log and the files on disk:**
+the "Completed + Connection timed out" rows are yt-dlp *retried* fragment errors
+(`log:1018`) that `consume()` stored and exit 0 never cleared; ep 553 failed on a
+DNS drop **after yt-dlp moved a 59 MB truncated file** into the folder (default
+`--skip-unavailable-fragments`), which a retry would call "Already saved"; dub
+selection "timed out, taking the default" on 8 of 10 episodes, and the job never
+records which language it got; after DNS died the queue burned ~45 episodes in
+~10 minutes; probe hosts are silently capped at 1 whatever the slider says.
+
+**Also found:** no single-instance lock; the Quit dialog's "Pause & Exit" hides to
+tray (the window close handler ignores `isQuitting`); pause/cancel during manifest
+resolution leaks a slot forever; stale language-probe results for URL A decide the
+manifest of URL B's download; "Use Chrome cookies" is read by nothing;
+`host-config.json` is **not packaged** (installed builds run on the hard-coded
+fallback); the engines are **installed twice** (331 MB in `app.asar.unpacked` that
+nothing reads); the completion notification is never sent.
+
+**Decisions (Isaac):** close keeps running in tray while work exists, made
+configurable; a Dub episode that can't be proven Dub fails clearly; remove the
+cookies toggle (no login failure in the log; revisit as cookies.txt import);
+history is kept until cleared (no 24 h prune).
+
+**Phase 0 (done, `b365efd`):** the first `DownloadEngine` test harness — fake
+yt-dlp child + deferred fake extractor, real state-store/url-router/classifier,
+fake timers. 5 characterization tests + 12 `it.fails` defects; a store test for
+Purge resurrection; a Playwright `test.fail` for the stale-probe race. Baseline:
+queueing 100 jobs = 103 full state writes and ~420 ms blocked main process; one
+IPC event per progress line. Pipeline: 242 tests, 292 engine checks, Playwright
+20/20. **Convention: a fix flips its `it.fails` to `it`; never delete one to get
+green.**
+
 ## Working agreements for future sessions on this repo
+
+- **An expected-failure test proves nothing until it has failed for its own
+  reason.** `it.fails`/`test.fail` pass on *any* throw. The probe-race spec first
+  failed on an ambiguous `Download` selector (it matched the Downloads tab too) —
+  marked as expected, that would have recorded a bug that was never reproduced.
+  Run each one unmarked once and read the assertion message.
 
 - **Never sample an animated value once.** A CSS transition means the rendered
   width lags the state that set it, so `boundingBox()` straight after a text
