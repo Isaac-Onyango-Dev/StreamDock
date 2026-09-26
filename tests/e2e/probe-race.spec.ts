@@ -9,7 +9,8 @@ import { test, expect } from '@playwright/test';
  * land, press Download: B was queued with A's manifest, i.e. the wrong episode
  * under B's name.
  *
- * `test.fail` marks the known defect (session-22 audit); the fix flips it.
+ * Fixed in session 22: every probe result carries the plan token it started
+ * with and is dropped if the plan has moved on.
  */
 const A = 'https://anikoto.cz/watch/show-a/ep-1';
 const B = 'https://anikoto.cz/watch/show-b/ep-7';
@@ -75,7 +76,7 @@ test.beforeEach(async ({ page }) => {
   await page.waitForSelector('input[name="capture-url"]', { timeout: 15000 });
 });
 
-test.fail('a language probe for the previous URL never decides the next download', async ({ page }) => {
+test('a language probe for the previous URL never decides the next download', async ({ page }) => {
   const input = page.locator('input[name="capture-url"]');
 
   await input.fill(A);

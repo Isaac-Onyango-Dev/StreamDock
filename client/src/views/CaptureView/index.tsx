@@ -9,7 +9,7 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlowToggle } from '../../components/FlowToggle';
 import { MediaLanguageSelectionModal } from '../../components/MediaLanguageSelectionModal';
 import type { CaptureMode, DownloadPackagingMode, MediaTrackProbe, PlaylistProbe, StreamOptionsProbeResult, UrlAnalysis } from '../../lib/types';
@@ -219,10 +219,24 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
     [firstCount, probe, rangeEnd, rangeStart, selection],
   );
 
+  /**
+   * Identifies the current plan. Every probe captures it when it starts and
+   * drops its result if it has changed by the time it answers.
+   *
+   * The language, track and inspect probes run in the background and used to
+   * write whatever they found into the plan unconditionally. Analyze episode A,
+   * paste episode B, let A's language probe land, press Download: B was queued
+   * with A's manifest — the wrong episode under B's name.
+   */
+  const planToken = useRef(0);
+
   // useCallback (with all-stable deps: setState setters plus the already-memoized
   // clearSelection) so handleInputUrl below can depend on this without picking up a
   // new identity — and therefore without re-running — on every render.
   const resetPlan = useCallback(() => {
+    planToken.current += 1;
+    setProbingTracks(false);
+    setProbingStreamOptions(false);
     setAnalysis(null);
     setProbe(null);
     setTrackProbe(null);
@@ -292,9 +306,11 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
 
   const loadMediaTracks = useCallback(async (pageUrl: string) => {
     if (!window.streamDock?.probeMediaTracks) return;
+    const token = planToken.current;
     setProbingTracks(true);
     try {
       const result = await window.streamDock.probeMediaTracks({ pageUrl });
+      if (token !== planToken.current) return;
       if (!result?.success) {
         console.warn('[StreamDock] probeMediaTracks failed:', result?.error);
         return;
@@ -306,15 +322,17 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
     } catch (error) {
       console.error('[StreamDock] probeMediaTracks error:', error);
     } finally {
-      setProbingTracks(false);
+      if (token === planToken.current) setProbingTracks(false);
     }
   }, []);
 
   const loadStreamOptions = useCallback(async (pageUrl: string) => {
     if (!window.streamDock?.probeStreamOptions) return;
+    const token = planToken.current;
     setProbingStreamOptions(true);
     try {
       const result = await window.streamDock.probeStreamOptions(pageUrl);
+      if (token !== planToken.current) return;
       if (result.success && result.options.length > 1) {
         setStreamOptions(result);
         const defaultManifestUrl = result.defaultOption?.manifestUrl || result.options[0].manifestUrl;
@@ -324,6 +342,7 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
           setProbingTracks(true);
           try {
             const trackResult = await window.streamDock.probeMediaTracks({ pageUrl: defaultManifestUrl, manifestUrl: defaultManifestUrl });
+            if (token !== planToken.current) return;
             if (trackResult?.success) {
               setTrackProbe(trackResult.data);
               const defaultSubs = trackResult.data.subtitleTracks.filter((t) => t.isDefault).map((t) => t.id);
@@ -333,7 +352,7 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
           } catch (error) {
             console.error('[StreamDock] probeMediaTracks for default stream option error:', error);
           } finally {
-            setProbingTracks(false);
+            if (token === planToken.current) setProbingTracks(false);
           }
         }
       } else {
@@ -342,10 +361,11 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
       }
     } catch (error) {
       console.error('[StreamDock] probeStreamOptions error:', error);
+      if (token !== planToken.current) return;
       setStreamOptions(null);
       setSelectedStreamOption(null);
     } finally {
-      setProbingStreamOptions(false);
+      if (token === planToken.current) setProbingStreamOptions(false);
     }
   }, []);
 
@@ -460,9 +480,11 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
   const handleStreamOptionSelect = useCallback(async (manifestUrl: string) => {
     setSelectedStreamOption(manifestUrl);
     if (!window.streamDock?.probeMediaTracks) return;
+    const token = planToken.current;
     setProbingTracks(true);
     try {
       const result = await window.streamDock.probeMediaTracks({ pageUrl: manifestUrl, manifestUrl });
+      if (token !== planToken.current) return;
       if (result?.success) {
         setTrackProbe(result.data);
         const defaultSubs = result.data.subtitleTracks.filter((t) => t.isDefault).map((t) => t.id);
@@ -472,7 +494,7 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
     } catch (error) {
       console.error('[StreamDock] probeMediaTracks for stream option error:', error);
     } finally {
-      setProbingTracks(false);
+      if (token === planToken.current) setProbingTracks(false);
     }
   }, []);
 
@@ -532,11 +554,13 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
   };
 
   const inspect = async () => {
+    const token = planToken.current;
     const current = analysis?.url === url.trim() ? analysis : await analyze();
-    if (!current) return null;
+    if (!current || token !== planToken.current) return null;
     setProbing(true);
     try {
       const result = await window.streamDock?.inspectUrl(current.url);
+      if (token !== planToken.current) return null;
       if (!result) throw new Error('Electron API is not available.');
       if (!result.success) {
         onError(result.error);
@@ -573,8 +597,11 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
   };
 
   const start = async () => {
+    // The URL can change while this awaits the analysis or the probe; queueing
+    // the old one after the user has moved on is the same race as a stale probe.
+    const token = planToken.current;
     const current = analysis?.url === url.trim() ? analysis : await analyze();
-    if (!current) return;
+    if (!current || token !== planToken.current) return;
     if (!outputDir) {
       onError('Choose a save folder in Settings before starting.');
       return;
@@ -592,6 +619,7 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
     // thumbnail, no playlist detection — which is why single videos showed up
     // as "Video download" behind a placeholder icon.
     const activeProbe = probe && analysis?.url === url.trim() ? probe : await inspect();
+    if (token !== planToken.current) return;
 
     const isPlaylist = activeProbe?.support === 'playlist';
     const isEpisodeRange = activeProbe?.support === 'episode-range';

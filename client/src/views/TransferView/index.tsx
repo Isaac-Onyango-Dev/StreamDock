@@ -47,6 +47,7 @@ export function TransferView({
   const hasFailed = useMemo(() => items.some((i) => i.status === 'failed'), [items]);
   const hasActive = useMemo(() => items.some((i) => ['running', 'queued', 'retrying'].includes(i.status)), [items]);
   const hasPaused = useMemo(() => items.some((i) => i.status === 'paused'), [items]);
+  const hasCancelled = useMemo(() => items.some((i) => i.status === 'cancelled'), [items]);
   const queueItems = useMemo(
     () => items.filter((i) => i.status === 'queued').sort((a, b) => a.priority - b.priority),
     [items],
@@ -107,9 +108,14 @@ export function TransferView({
             <Trash2 className="h-3.5 w-3.5" /> Clear failed
           </button>
         )}
-        {items.length > 0 && (
-          <button type="button" onClick={onClearAll} className="btn-ghost">
-            Purge history
+        {(hasCompleted || hasFailed || hasCancelled) && (
+          <button
+            type="button"
+            onClick={onClearAll}
+            className="btn-ghost"
+            title="Remove finished, failed and cancelled downloads from this list. Files on disk are kept; active downloads are not affected."
+          >
+            Clear history
           </button>
         )}
       </div>

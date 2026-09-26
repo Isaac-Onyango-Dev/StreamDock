@@ -27,6 +27,12 @@ function isActiveStatus(status: DownloadRecord['status']): boolean {
 
 class DownloadStore {
   private records: Map<string, DownloadRecord> = new Map();
+  /**
+   * Ids the engine has deleted. A progress event already in flight when a row
+   * was removed would otherwise re-add it — an unknown id reads as a new
+   * download — which is the shape of the Purge History resurrection.
+   */
+  private removedIds: Set<string> = new Set();
   private listeners: Set<Listener> = new Set();
   private initialized = false;
   
@@ -57,6 +63,7 @@ class DownloadStore {
     });
 
     window.streamDock.onDownloadProgress((record) => {
+      if (this.removedIds.has(record.id)) return;
       const isNew = !this.records.has(record.id);
       this.records.set(record.id, record);
       this.cachedRecordsArray = null;
@@ -75,6 +82,8 @@ class DownloadStore {
       
       this.addToast(`Downloaded: ${record.title}`, 'success');
     });
+
+    window.streamDock.onDownloadRemoved?.((ids) => this.forget(ids));
 
     window.streamDock.onDownloadError((record) => {
       this.records.set(record.id, record);
@@ -150,6 +159,12 @@ class DownloadStore {
     await window.streamDock?.cancelDownload(id);
   }
 
+  /**
+   * Remove one download. The engine deletes it; the row goes only once the
+   * engine says so. This used to delete the row locally after a cancel that
+   * was a no-op for finished downloads, so the engine kept the record and it
+   * came back on the next launch.
+   */
   public async removeRecord(id: string) {
     const record = this.records.get(id);
     if (record && isActiveStatus(record.status)) {
@@ -161,38 +176,34 @@ class DownloadStore {
       if (!confirmed) return;
     }
 
-    await window.streamDock?.cancelDownload(id);
-    this.records.delete(id);
-    this.cachedRecordsArray = null;
-    this.emit({ type: 'recordRemoved', id });
-    this.emit({ type: 'stateChanged' });
-    this.updateActiveCount();
+    if (await window.streamDock?.removeDownload(id)) this.forget([id]);
   }
 
+  /**
+   * Clear finished rows. Only completed, failed and cancelled downloads are
+   * removed — by the engine — and the list is then reloaded from it, so what
+   * remains on screen is exactly what the engine still owns.
+   *
+   * The old version promised to "cancel N active downloads", cancelled none,
+   * and cleared every row locally anyway. The engine kept those jobs running,
+   * and their next progress event (Pause All emits one for each) put them back.
+   */
   public async clearRecords(scope: 'all' | 'completed' | 'failed' | 'cancelled') {
-    if (scope === 'all') {
-      const active = this.getActiveCount();
-      if (active > 0) {
-        const confirmed = await this.requestConfirmation(
-          'Clear All Records?',
-          `This will cancel ${active} active downloads. Proceed?`,
-          'Clear All'
-        );
-        if (!confirmed) return;
-      }
-    }
-
+    const before = new Set(this.records.keys());
     await window.streamDock?.clearEngineRecords(scope);
-    
-    if (scope === 'all') {
-      this.records.clear();
-    } else {
-      Array.from(this.records.values()).forEach(r => {
-        if (r.status === scope) this.records.delete(r.id);
-      });
+    const remaining = (await window.streamDock?.listDownloads()) ?? [];
+    const kept = new Set(remaining.map((r) => r.id));
+    this.forget([...before].filter((id) => !kept.has(id)));
+  }
+
+  private forget(ids: string[]) {
+    if (ids.length === 0) return;
+    for (const id of ids) {
+      this.removedIds.add(id);
+      this.records.delete(id);
+      this.emit({ type: 'recordRemoved', id });
     }
     this.cachedRecordsArray = null;
-    
     this.emit({ type: 'stateChanged' });
     this.updateActiveCount();
   }

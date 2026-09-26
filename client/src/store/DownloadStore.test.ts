@@ -26,8 +26,19 @@ let emitProgress: (r: DownloadRecord) => void = () => undefined;
 
 async function freshStore(engineRecords: DownloadRecord[]) {
   vi.resetModules();
+  // A minimal engine: clearing drops terminal records, listing returns the rest.
+  let engineState = [...engineRecords];
   const bridge = {
-    listDownloads: vi.fn(async () => engineRecords),
+    listDownloads: vi.fn(async () => engineState),
+    clearEngineRecords: vi.fn(async () => {
+      engineState = engineState.filter((r) => !['completed', 'failed', 'cancelled'].includes(r.status));
+      return true;
+    }),
+    removeDownload: vi.fn(async (id: string) => {
+      engineState = engineState.filter((r) => r.id !== id);
+      return true;
+    }),
+    onDownloadRemoved: vi.fn(() => () => undefined),
     onDownloadProgress: vi.fn((fn: (r: DownloadRecord) => void) => {
       emitProgress = fn;
       return () => undefined;
@@ -35,7 +46,6 @@ async function freshStore(engineRecords: DownloadRecord[]) {
     onDownloadComplete: vi.fn(() => () => undefined),
     onDownloadError: vi.fn(() => () => undefined),
     updateActiveCount: vi.fn(),
-    clearEngineRecords: vi.fn(async () => true),
     cancelDownload: vi.fn(async () => true),
   };
   (window as unknown as { streamDock: unknown }).streamDock = bridge;
@@ -43,12 +53,6 @@ async function freshStore(engineRecords: DownloadRecord[]) {
   downloadStore.init();
   await vi.waitFor(() => expect(downloadStore.getRecords()).toHaveLength(engineRecords.length));
   return { store: downloadStore, bridge };
-}
-
-/** Answer the confirmation dialog the way a user clicking the action would. */
-async function confirm(store: { confirmationState: { resolve: (ok: boolean) => void } | null }) {
-  await vi.waitFor(() => expect(store.confirmationState).not.toBeNull());
-  store.confirmationState!.resolve(true);
 }
 
 const ids = (store: { getRecords: () => DownloadRecord[] }) => store.getRecords().map((r) => r.id).sort();
@@ -72,14 +76,23 @@ describe('download list', () => {
   // Purge history hid every row, including jobs the engine kept running, so the
   // next progress event — Pause All emits one for every active job — put them
   // back. What the list shows after a clear must be what the engine still owns.
-  it.fails('clearing history does not resurrect rows on the next progress event', async () => {
+  it('clearing history does not resurrect rows on the next progress event', async () => {
     const { store } = await freshStore([record('a', 'running'), record('b', 'completed')]);
-    const clearing = store.clearRecords('all');
-    await confirm(store);
-    await clearing;
+    await store.clearRecords('all');
     const afterClear = ids(store);
+    expect(afterClear).toEqual(['a']);
 
     emitProgress(record('a', 'paused'));
     expect(ids(store)).toEqual(afterClear);
+  });
+
+  it('removing a finished row goes through the engine, and a late event cannot bring it back', async () => {
+    const { store, bridge } = await freshStore([record('a', 'running'), record('b', 'completed')]);
+    await store.removeRecord('b');
+    expect(bridge.removeDownload).toHaveBeenCalledWith('b');
+    expect(ids(store)).toEqual(['a']);
+
+    emitProgress(record('b', 'completed'));
+    expect(ids(store)).toEqual(['a']);
   });
 });

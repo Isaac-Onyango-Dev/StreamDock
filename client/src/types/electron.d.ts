@@ -87,6 +87,7 @@ declare global {
       resumeAll: () => Promise<boolean>;
       reorderDownload: (id: string, newPosition: number) => Promise<boolean>;
       listDownloads: () => Promise<DownloadRecord[]>;
+      removeDownload: (id: string) => Promise<boolean>;
       clearEngineRecords: (scope?: 'all' | 'completed' | 'failed' | 'cancelled') => Promise<boolean>;
       updateEngine: () => Promise<{ success: boolean; message?: string; error?: string }>;
       getMenuLabels?: () => Promise<string[]>;
@@ -110,6 +111,7 @@ declare global {
       onDownloadProgress: (callback: (record: DownloadRecord) => void) => () => void;
       onDownloadComplete: (callback: (record: DownloadRecord) => void) => () => void;
       onDownloadError: (callback: (record: DownloadRecord) => void) => () => void;
+      onDownloadRemoved: (callback: (ids: string[]) => void) => () => void;
       onEngineVersionWarning: (callback: (warning: string) => void) => () => void;
       onMenuFocusTab: (callback: (tab: string) => void) => () => void;
       onMenuOpenDownloadFolder: (callback: () => void) => () => void;
