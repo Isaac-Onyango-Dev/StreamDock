@@ -15,7 +15,7 @@ import { test, expect } from '@playwright/test';
 const A = 'https://anikoto.cz/watch/show-a/ep-1';
 const B = 'https://anikoto.cz/watch/show-b/ep-7';
 
-type Started = { mode: string; request: { url: string; manifestUrl?: string } };
+type Started = { mode: string; request: { url: string; manifestUrl?: string; translation?: string } };
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -28,8 +28,8 @@ test.beforeEach(async ({ page }) => {
         success: true,
         url: pageUrl,
         options: [
-          { manifestUrl: `${pageUrl}#sub-manifest`, language: 'Japanese', translation: 'sub', label: 'Sub' },
-          { manifestUrl: `${pageUrl}#dub-manifest`, language: 'English', translation: 'dub', label: 'Dub' },
+          { manifestUrl: `${pageUrl}#sub-manifest`, language: 'Sub', translation: 'sub', label: 'Sub' },
+          { manifestUrl: `${pageUrl}#dub-manifest`, language: 'Dub', translation: 'dub', label: 'Dub' },
         ],
       });
 
@@ -41,7 +41,7 @@ test.beforeEach(async ({ page }) => {
       getMenuLabels: async () => ['File', 'Edit', 'View', 'Help'],
       analyzeUrl: async (url: string) => ({
         success: true,
-        data: { url, host: 'anikoto.cz', valid: true, suggestedMode: 'video', reason: 'test' },
+        data: { url, host: 'anikoto.cz', valid: true, suggestedMode: 'video', reason: 'test', probesLanguages: true },
       }),
       inspectUrl: async (url: string) => ({
         success: true,
@@ -89,6 +89,12 @@ test('a language probe for the previous URL never decides the next download', as
   await page.evaluate((url) => (window as unknown as { __resolveStreamOptions: (u: string) => void }).__resolveStreamOptions(url), A);
   await page.waitForTimeout(200);
 
+  // Download for B asks B's own languages (session 22 waits for that answer);
+  // A's options must not stand in for them.
+  await page.getByRole('button', { name: 'Download', exact: true }).click();
+  await expect(page.getByText('Checking which languages this source offers before downloading')).toBeVisible();
+  await page.evaluate((url) => (window as unknown as { __resolveStreamOptions: (u: string) => void }).__resolveStreamOptions(url), B);
+  await page.getByLabel('Language', { exact: true }).selectOption({ label: 'Sub' });
   await page.getByRole('button', { name: 'Download', exact: true }).click();
   await expect
     .poll(async () => page.evaluate(() => (window as unknown as { __started: unknown[] }).__started.length))
@@ -97,4 +103,42 @@ test('a language probe for the previous URL never decides the next download', as
   const [first] = await page.evaluate(() => (window as unknown as { __started: Started[] }).__started);
   expect(first.request.url).toBe(B);
   expect(first.request.manifestUrl ?? '').not.toContain('show-a');
+});
+
+/**
+ * Download pressed while the source is still being asked whether it has Dub.
+ *
+ * It used to queue at once with no language, so the site default (Sub); a
+ * first-click Download without Analyze always raced this way. Now it waits,
+ * says so, and asks when there is a choice to make.
+ */
+const started = (page: import('@playwright/test').Page) =>
+  page.evaluate(() => (window as unknown as { __started: Started[] }).__started);
+const resolveOptions = (page: import('@playwright/test').Page, url: string) =>
+  page.evaluate((u) => (window as unknown as { __resolveStreamOptions: (x: string) => void }).__resolveStreamOptions(u), url);
+
+test('Download while languages are being checked waits, then asks which one', async ({ page }) => {
+  await page.locator('input[name="capture-url"]').fill(A);
+  await page.getByRole('button', { name: 'Download', exact: true }).click();
+
+  await expect(page.getByText('Checking which languages this source offers before downloading')).toBeVisible();
+  expect(await started(page)).toHaveLength(0);
+
+  await resolveOptions(page, A);
+  await expect(page.getByText('This source offers Sub and Dub')).toBeVisible();
+  expect(await started(page)).toHaveLength(0);
+
+  await page.getByLabel('Language', { exact: true }).selectOption({ label: 'Dub' });
+  await page.getByRole('button', { name: 'Download', exact: true }).click();
+  await expect.poll(async () => (await started(page)).length).toBe(1);
+  expect((await started(page))[0].request.translation).toBe('dub');
+});
+
+test('downloading with the site default is an explicit choice', async ({ page }) => {
+  await page.locator('input[name="capture-url"]').fill(A);
+  await page.getByRole('button', { name: 'Download', exact: true }).click();
+  await page.getByRole('button', { name: "Download with the site's default" }).click();
+
+  await expect.poll(async () => (await started(page)).length).toBe(1);
+  expect((await started(page))[0].request.translation).toBeUndefined();
 });

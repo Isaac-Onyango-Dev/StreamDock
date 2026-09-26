@@ -3,17 +3,8 @@ import type { LanguageConfidence, TranslationType } from '../../../shared/langua
 // Role: shared renderer-side TypeScript types for StreamDock.
 
 // Types that cross the IPC boundary are defined once, in shared/.
-import type { CaptureMode } from '../../../shared/downloads';
-export type { CaptureMode, DownloadRecord, DownloadRequest, DownloadStatus } from '../../../shared/downloads';
+export type { CaptureMode, DownloadRecord, DownloadRequest, DownloadStatus, UrlAnalysis } from '../../../shared/downloads';
 export type { DownloadPackagingMode } from '../../../shared/subtitle-args';
-
-export interface UrlAnalysis {
-  url: string;
-  host: string;
-  valid: boolean;
-  suggestedMode: CaptureMode;
-  reason: string;
-}
 
 export interface PlaylistProbeItem {
   id?: string;

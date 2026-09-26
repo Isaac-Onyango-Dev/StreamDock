@@ -12,13 +12,14 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlowToggle } from '../../components/FlowToggle';
 import { MediaLanguageSelectionModal } from '../../components/MediaLanguageSelectionModal';
-import type { CaptureMode, DownloadPackagingMode, MediaTrackProbe, PlaylistProbe, StreamOptionsProbeResult, UrlAnalysis } from '../../lib/types';
+import type { CaptureMode, DownloadPackagingMode, PlaylistProbe, UrlAnalysis } from '../../lib/types';
 import { computePackagingMode } from '../../lib/languages';
 import { buildQualityChoices } from '../../lib/quality';
 import { buildSubtitleArgs } from '../../../../shared/subtitle-args';
 import { buildAudioChoices, hasLanguageStreams } from '../../lib/audio-choices';
 import { inferModeFromText } from '../../lib/url-routing';
 import { playDiscovery, playPop } from '../../lib/audio';
+import { useSourceProbes } from './useSourceProbes';
 
 interface CaptureViewProps {
   mode: CaptureMode;
@@ -75,16 +76,6 @@ function selectionLabel(value: SelectionMode, probe: PlaylistProbe | null) {
   if (value === 'first') return 'First N';
   if (value === 'range') return 'Range';
   return 'All';
-}
-
-function defaultAudioTrackId(probe: MediaTrackProbe): string | null {
-  if (probe.audioTracks.length <= 1) return null;
-  return (
-    probe.audioTracks.find((track) => track.isOriginal)?.id ||
-    probe.audioTracks.find((track) => track.isDefault)?.id ||
-    probe.audioTracks[0]?.id ||
-    null
-  );
 }
 
 function selectedEpisodeUrls(
@@ -151,16 +142,26 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
   const [dragOverWindow, setDragOverWindow] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [trackProbe, setTrackProbe] = useState<MediaTrackProbe | null>(null);
-  const [probingTracks, setProbingTracks] = useState(false);
-  const [selectedAudioId, setSelectedAudioId] = useState<string | null>(null);
-  const [selectedSubtitleIds, setSelectedSubtitleIds] = useState<Set<string>>(new Set());
   const [subtitleConvert, setSubtitleConvert] = useState<'original' | 'srt' | 'vtt'>('original');
   const [subsOnly, setSubsOnly] = useState(false);
   const [showLanguageModal, setShowLanguageModal] = useState(false);
-  const [streamOptions, setStreamOptions] = useState<StreamOptionsProbeResult | null>(null);
-  const [selectedStreamOption, setSelectedStreamOption] = useState<string | null>(null);
-  const [probingStreamOptions, setProbingStreamOptions] = useState(false);
+  /** Download was pressed while languages were still being checked. */
+  const [languagePrompt, setLanguagePrompt] = useState<'waiting' | 'choose' | null>(null);
+  const probes = useSourceProbes();
+  const {
+    planToken,
+    trackProbe,
+    probingTracks,
+    selectedAudioId,
+    setSelectedAudioId,
+    selectedSubtitleIds,
+    setSelectedSubtitleIds,
+    toggleSubtitleTrack,
+    streamOptions,
+    selectedStreamOption,
+    selectStreamOption,
+    probingStreamOptions,
+  } = probes;
 
   const toggleIndex = useCallback((index: number) => {
     setSelectedIndices((prev) => {
@@ -219,35 +220,21 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
     [firstCount, probe, rangeEnd, rangeStart, selection],
   );
 
-  /**
-   * Identifies the current plan. Every probe captures it when it starts and
-   * drops its result if it has changed by the time it answers.
-   *
-   * The language, track and inspect probes run in the background and used to
-   * write whatever they found into the plan unconditionally. Analyze episode A,
-   * paste episode B, let A's language probe land, press Download: B was queued
-   * with A's manifest — the wrong episode under B's name.
-   */
-  const planToken = useRef(0);
-
   // useCallback (with all-stable deps: setState setters plus the already-memoized
-  // clearSelection) so handleInputUrl below can depend on this without picking up a
-  // new identity — and therefore without re-running — on every render.
+  // clearSelection and probes.reset) so handleInputUrl below can depend on this
+  // without picking up a new identity — and therefore without re-running — on
+  // every render. probes.reset() also advances the plan token, so anything still
+  // probing the previous URL is ignored when it answers.
+  const resetProbes = probes.reset;
   const resetPlan = useCallback(() => {
-    planToken.current += 1;
-    setProbingTracks(false);
-    setProbingStreamOptions(false);
+    resetProbes();
+    setLanguagePrompt(null);
     setAnalysis(null);
     setProbe(null);
-    setTrackProbe(null);
-    setSelectedAudioId(null);
-    setSelectedSubtitleIds(new Set());
     setSubsOnly(false);
-    setStreamOptions(null);
-    setSelectedStreamOption(null);
     clearSelection();
     setQuality('');
-  }, [clearSelection]);
+  }, [clearSelection, resetProbes]);
 
   const handleInputUrl = useCallback((newUrl: string) => {
     setUrl(newUrl);
@@ -303,71 +290,6 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
       document.removeEventListener('drop', onDrop);
     };
   }, [handleInputUrl]);
-
-  const loadMediaTracks = useCallback(async (pageUrl: string) => {
-    if (!window.streamDock?.probeMediaTracks) return;
-    const token = planToken.current;
-    setProbingTracks(true);
-    try {
-      const result = await window.streamDock.probeMediaTracks({ pageUrl });
-      if (token !== planToken.current) return;
-      if (!result?.success) {
-        console.warn('[StreamDock] probeMediaTracks failed:', result?.error);
-        return;
-      }
-      setTrackProbe(result.data);
-      const defaultSubs = result.data.subtitleTracks.filter((t) => t.isDefault).map((t) => t.id);
-      if (defaultSubs.length > 0) setSelectedSubtitleIds(new Set(defaultSubs));
-      setSelectedAudioId(defaultAudioTrackId(result.data));
-    } catch (error) {
-      console.error('[StreamDock] probeMediaTracks error:', error);
-    } finally {
-      if (token === planToken.current) setProbingTracks(false);
-    }
-  }, []);
-
-  const loadStreamOptions = useCallback(async (pageUrl: string) => {
-    if (!window.streamDock?.probeStreamOptions) return;
-    const token = planToken.current;
-    setProbingStreamOptions(true);
-    try {
-      const result = await window.streamDock.probeStreamOptions(pageUrl);
-      if (token !== planToken.current) return;
-      if (result.success && result.options.length > 1) {
-        setStreamOptions(result);
-        const defaultManifestUrl = result.defaultOption?.manifestUrl || result.options[0].manifestUrl;
-        setSelectedStreamOption(defaultManifestUrl);
-        // Probe tracks for the default stream option's manifest
-        if (window.streamDock?.probeMediaTracks && defaultManifestUrl !== pageUrl) {
-          setProbingTracks(true);
-          try {
-            const trackResult = await window.streamDock.probeMediaTracks({ pageUrl: defaultManifestUrl, manifestUrl: defaultManifestUrl });
-            if (token !== planToken.current) return;
-            if (trackResult?.success) {
-              setTrackProbe(trackResult.data);
-              const defaultSubs = trackResult.data.subtitleTracks.filter((t) => t.isDefault).map((t) => t.id);
-              if (defaultSubs.length > 0) setSelectedSubtitleIds(new Set(defaultSubs));
-              setSelectedAudioId(defaultAudioTrackId(trackResult.data));
-            }
-          } catch (error) {
-            console.error('[StreamDock] probeMediaTracks for default stream option error:', error);
-          } finally {
-            if (token === planToken.current) setProbingTracks(false);
-          }
-        }
-      } else {
-        setStreamOptions(null);
-        setSelectedStreamOption(null);
-      }
-    } catch (error) {
-      console.error('[StreamDock] probeStreamOptions error:', error);
-      if (token !== planToken.current) return;
-      setStreamOptions(null);
-      setSelectedStreamOption(null);
-    } finally {
-      if (token === planToken.current) setProbingStreamOptions(false);
-    }
-  }, []);
 
   const selectedAudioLanguage = useMemo(() => {
     if (!trackProbe || !selectedAudioId) return undefined;
@@ -468,45 +390,6 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
     setQuality('');
   }, [quality, qualityChoices]);
 
-  /**
-   * Switching language switches the whole stream, so the track list has to be
-   * re-read for the new manifest — sub and dub are different files with their
-   * own audio and subtitle tracks.
-   *
-   * This lived inline on the modal, which is why picking a language from
-   * anywhere else could not work. The main row owns the choice now, so the
-   * behaviour lives with the state instead of with one of its call sites.
-   */
-  const handleStreamOptionSelect = useCallback(async (manifestUrl: string) => {
-    setSelectedStreamOption(manifestUrl);
-    if (!window.streamDock?.probeMediaTracks) return;
-    const token = planToken.current;
-    setProbingTracks(true);
-    try {
-      const result = await window.streamDock.probeMediaTracks({ pageUrl: manifestUrl, manifestUrl });
-      if (token !== planToken.current) return;
-      if (result?.success) {
-        setTrackProbe(result.data);
-        const defaultSubs = result.data.subtitleTracks.filter((t) => t.isDefault).map((t) => t.id);
-        if (defaultSubs.length > 0) setSelectedSubtitleIds(new Set(defaultSubs));
-        setSelectedAudioId(defaultAudioTrackId(result.data));
-      }
-    } catch (error) {
-      console.error('[StreamDock] probeMediaTracks for stream option error:', error);
-    } finally {
-      if (token === planToken.current) setProbingTracks(false);
-    }
-  }, []);
-
-  const toggleSubtitleTrack = useCallback((id: string) => {
-    setSelectedSubtitleIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
   useEffect(() => {
     if (!probe || probe.preview.length === 0) return;
     playDiscovery();
@@ -582,10 +465,11 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
         setQuality('bestaudio/best');
         setSubtitleMode('none');
       }
-      void loadMediaTracks(current.url);
-      // For stream mode or anime sites, probe for separate language manifest URLs
-      if (mode === 'stream' || ['anikoto', 'animepahe', 'hianime', 'gojoora'].some(h => current.host.includes(h))) {
-        void loadStreamOptions(current.url);
+      void probes.loadTracks({ pageUrl: current.url });
+      // Hosts that serve dub and sub as separate streams are asked which they
+      // have. Which hosts those are is the main process's call (host-config).
+      if (mode === 'stream' || current.probesLanguages) {
+        void probes.loadStreamOptions(current.url);
       }
       return result.data;
     } catch (error) {
@@ -596,7 +480,12 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
     }
   };
 
-  const start = async () => {
+  /**
+   * @param useSiteDefault Download even though the languages this source offers
+   *   are still being checked — the user's explicit choice, never the default.
+   */
+  const start = async ({ useSiteDefault = false }: { useSiteDefault?: boolean } = {}) => {
+    setLanguagePrompt(null);
     // The URL can change while this awaits the analysis or the probe; queueing
     // the old one after the user has moved on is the same race as a stale probe.
     const token = planToken.current;
@@ -620,6 +509,16 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
     // as "Video download" behind a placeholder icon.
     const activeProbe = probe && analysis?.url === url.trim() ? probe : await inspect();
     if (token !== planToken.current) return;
+
+    // Pressing Download while this source is still being asked whether it has
+    // Dub used to queue straight away with no language — so the site default
+    // (Sub) — and a first-click Download without Analyze always raced this way.
+    // Now it waits and says so; downloading with the site default is an
+    // explicit choice on that notice.
+    if (!useSiteDefault && probes.isDiscovering()) {
+      setLanguagePrompt('waiting');
+      return;
+    }
 
     const isPlaylist = activeProbe?.support === 'playlist';
     const isEpisodeRange = activeProbe?.support === 'episode-range';
@@ -753,6 +652,19 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
     }
   };
 
+  // A waiting Download resumes when the language check finishes: with one
+  // language (or none) there is nothing to choose, so it starts; with several,
+  // the user is asked to pick rather than being given the default silently.
+  // Read through a ref so the effect runs the current render's start(), whose
+  // closure holds the options that just arrived.
+  const startRef = useRef(start);
+  startRef.current = start;
+  useEffect(() => {
+    if (languagePrompt !== 'waiting' || probingStreamOptions) return;
+    if (languageStreams && languageStreams.length > 1) setLanguagePrompt('choose');
+    else void startRef.current();
+  }, [languagePrompt, probingStreamOptions, languageStreams]);
+
   const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac');
 
   return (
@@ -852,7 +764,10 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
                 name="stream-language"
                 aria-label="Language"
                 value={selectedStreamOption ?? ''}
-                onChange={(e) => { void handleStreamOptionSelect(e.target.value); }}
+                onChange={(e) => {
+                  selectStreamOption(e.target.value);
+                  setLanguagePrompt(null);
+                }}
                 disabled={busy}
                 className="select-field h-8 w-32"
               >
@@ -913,13 +828,33 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
                 </option>
               ))}
             </select>
-            <button type="button" onClick={start} disabled={busy || probing} className="btn-primary min-w-[88px]">
+            <button type="button" onClick={() => void start()} disabled={busy || probing} className="btn-primary min-w-[88px]">
               {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5 fill-current" />}
               Download
             </button>
           </div>
         </div>
       </form>
+
+      {languagePrompt === 'waiting' && (
+        <div role="status" className="card card-pad flex flex-wrap items-center gap-2 text-sm animate-fade-in">
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-accent" />
+          <span className="min-w-0 flex-1 text-text-secondary">
+            Checking which languages this source offers before downloading…
+          </span>
+          <button type="button" onClick={() => void start({ useSiteDefault: true })} className="btn-secondary text-sm">
+            Download with the site&apos;s default
+          </button>
+          <button type="button" onClick={() => setLanguagePrompt(null)} className="btn-ghost text-sm">
+            Cancel
+          </button>
+        </div>
+      )}
+      {languagePrompt === 'choose' && languageStreams && (
+        <div role="status" className="card card-pad text-sm text-text-secondary animate-fade-in">
+          This source offers {languageStreams.map((o) => o.language).join(' and ')}. Choose one beside Quality, then press Download.
+        </div>
+      )}
 
       {analysis && !probe && !busy && !probing && (
         <div className="flex items-center gap-2 rounded-md border border-border-subtle bg-surface-2 px-3 py-2 text-sm animate-fade-in">

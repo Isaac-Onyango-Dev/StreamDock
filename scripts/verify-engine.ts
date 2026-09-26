@@ -1290,6 +1290,23 @@ function verifyRendererIsProjection(): void {
   assert(engine.includes('PROGRESS_INTERVAL_MS'), 'progress events are coalesced');
 }
 
+/**
+ * Probing decides nothing by accident (session 22, phase 4).
+ *
+ * Download pressed while the language check was still running queued with no
+ * language — the site default — and the renderer decided which hosts to ask
+ * with its own substring list, a fourth copy of the host lists.
+ */
+function verifyProbeLifecycle(): void {
+  const capture = stripComments(readProjectFile('client/src/views/CaptureView/index.tsx'));
+  assert(!/'anikoto'/.test(capture), 'the Capture view keeps no host list of its own');
+  assert(/current\.probesLanguages/.test(capture), 'which hosts are asked about languages comes from the main process');
+  assert(/probes\.isDiscovering\(\)/.test(capture), 'Download waits for an in-flight language check instead of racing it');
+  assert(/useSiteDefault/.test(capture), 'downloading with the site default is an explicit choice');
+  const router = stripComments(readProjectFile('electron/url-router.ts'));
+  assert(/probesLanguages: matchesHost\(analysis\.host, ANIME_HOSTS\(\)\)/.test(router), 'the language-probe hosts are the configured anime hosts');
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
@@ -1314,5 +1331,6 @@ verifyAppLifecycle();
 verifyFailureIsDecidedAtExit();
 verifySingleLifecycleOwner();
 verifyRendererIsProjection();
+verifyProbeLifecycle();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);

@@ -6,17 +6,10 @@
 // took effect in dev. One import, one source, no fallback to drift.
 import hostConfigJson from './host-config.json';
 
-import type { CaptureMode } from '../shared/downloads';
+import type { UrlAnalysis } from '../shared/downloads';
 
-export type { CaptureMode } from '../shared/downloads';
+export type { CaptureMode, UrlAnalysis } from '../shared/downloads';
 
-export interface UrlAnalysis {
-  url: string;
-  host: string;
-  valid: boolean;
-  suggestedMode: CaptureMode;
-  reason: string;
-}
 
 /**
  * How a host numbers its episodes, expressed as data rather than code.
@@ -84,6 +77,11 @@ function matchesHost(host: string, domains: string[]): boolean {
 }
 
 export function analyzeUrl(value: string): UrlAnalysis {
+  const analysis = classifyUrl(value);
+  return { ...analysis, probesLanguages: matchesHost(analysis.host, ANIME_HOSTS()) };
+}
+
+function classifyUrl(value: string): Omit<UrlAnalysis, 'probesLanguages'> {
   let parsed: URL;
   try {
     parsed = new URL(value.trim());

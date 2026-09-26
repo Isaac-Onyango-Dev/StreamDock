@@ -7,6 +7,22 @@ import type { DownloadPackagingMode, SubtitleMode } from './subtitle-args';
 
 export type CaptureMode = 'video' | 'stream';
 
+/** What the main process makes of a pasted URL. */
+export interface UrlAnalysis {
+  url: string;
+  host: string;
+  valid: boolean;
+  suggestedMode: CaptureMode;
+  reason: string;
+  /**
+   * The host serves dub and sub as separate streams, so it is worth asking
+   * which it has. The renderer used to decide this with its own substring list
+   * ('anikoto', 'animepahe', 'hianime', 'gojoora') — a fourth copy of the host
+   * lists, already missing anidap, animedao, aniwatch and kaido.
+   */
+  probesLanguages: boolean;
+}
+
 export interface DownloadRequest {
   url: string;
   mode: CaptureMode;
