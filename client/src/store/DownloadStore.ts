@@ -19,7 +19,7 @@ export type ConfirmationRequest = {
 
 type Listener = (event: StoreEvent) => void;
 
-const ACTIVE_STATUSES = new Set<DownloadRecord['status']>(['running', 'queued', 'retrying', 'paused']);
+const ACTIVE_STATUSES = new Set<DownloadRecord['status']>(['scheduled', 'queued', 'resolving', 'running', 'paused']);
 
 function isActiveStatus(status: DownloadRecord['status']): boolean {
   return ACTIVE_STATUSES.has(status);

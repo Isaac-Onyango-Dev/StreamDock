@@ -45,7 +45,7 @@ export function TransferView({
 
   const hasCompleted = useMemo(() => items.some((i) => i.status === 'completed'), [items]);
   const hasFailed = useMemo(() => items.some((i) => i.status === 'failed'), [items]);
-  const hasActive = useMemo(() => items.some((i) => ['running', 'queued', 'retrying'].includes(i.status)), [items]);
+  const hasActive = useMemo(() => items.some((i) => ['scheduled', 'queued', 'resolving', 'running'].includes(i.status)), [items]);
   const hasPaused = useMemo(() => items.some((i) => i.status === 'paused'), [items]);
   const hasCancelled = useMemo(() => items.some((i) => i.status === 'cancelled'), [items]);
   const queueItems = useMemo(

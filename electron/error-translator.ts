@@ -44,8 +44,61 @@ export function sanitizeRaw(raw: string): string {
  * Classify a raw error string into a structured category.
  * Returns the user-facing message and logs the raw error internally.
  */
+/** Name resolution failed: the host could not even be found. */
+const UNREACHABLE = [
+  'getaddrinfo',
+  'enotfound',
+  'dns',
+  'name or service not known',
+  'could not resolve host',
+  'err_name_not_resolved',
+];
+
+/** A connection was made, or attempted, and then failed or dropped. */
+const CONNECTION_LOST = [
+  'econnrefused',
+  'econnreset',
+  'socket hang up',
+  'connection was reset',
+  'connection closed abruptly',
+  'recv failure',
+  "couldn't connect to server",
+  'could not connect to server',
+  'err_internet_disconnected',
+  'err_network_changed',
+];
+
+/**
+ * True when a failure is about reaching the server rather than about the
+ * content — the case where retrying later can succeed.
+ *
+ * Reads the failing line only: yt-dlp prints its *retried* network errors
+ * above an unrelated fatal one, and those must not make a 404 look like a
+ * dropped connection. The engine uses this to hold a job for the network
+ * instead of failing it, so this and the user-facing message share one list.
+ */
+export function isNetworkFailure(error: unknown): boolean {
+  const raw = failureText(error);
+  const subject = (pickFatalLine(raw) ?? raw).toLowerCase();
+  return UNREACHABLE.some((token) => subject.includes(token))
+    || CONNECTION_LOST.some((token) => subject.includes(token))
+    || /\btimed out\b|etimedout/.test(subject);
+}
+
+/**
+ * The text a failure is judged by: the message, never the JS stack.
+ *
+ * The stack of an Error the engine creates is a list of *our* call frames. It
+ * was searched along with yt-dlp's output, so a frame named like Node's
+ * `listOnTimeout` read as "timed out" and an unrelated failure was reported as
+ * "Connection timed out".
+ */
+function failureText(error: unknown, fallback = ''): string {
+  return error instanceof Error ? error.message : String(error ?? fallback);
+}
+
 export function toUserError(error: unknown, fallback = 'Something went wrong. Retry or report this.'): string {
-  const raw = error instanceof Error ? `${error.message}\n${error.stack ?? ''}` : String(error ?? fallback);
+  const raw = failureText(error, fallback);
   const lower = raw.toLowerCase();
 
   // Log full technical detail internally — never surfaces to UI
@@ -79,27 +132,10 @@ export function toUserError(error: unknown, fallback = 'Something went wrong. Re
   // "curl: (6) Could not resolve host". None of those matched, so a DNS drop
   // surfaced as "Something went wrong" (and once, via an unrelated WARNING
   // mentioning --downloader ffmpeg, as "FFmpeg is required").
-  if (
-    lower.includes('getaddrinfo') ||
-    lower.includes('enotfound') ||
-    lower.includes('dns') ||
-    lower.includes('name or service not known') ||
-    lower.includes('could not resolve host') ||
-    lower.includes('err_name_not_resolved')
-  ) {
+  if (UNREACHABLE.some((token) => lower.includes(token))) {
     return 'Could not reach the server. Check your connection.';
   }
-  if (
-    lower.includes('econnrefused') ||
-    lower.includes('econnreset') ||
-    lower.includes('socket hang up') ||
-    lower.includes('connection was reset') ||
-    lower.includes('connection closed abruptly') ||
-    lower.includes('recv failure') ||
-    lower.includes("couldn't connect to server") ||
-    lower.includes('could not connect to server') ||
-    (lower.includes('network') && lower.includes('error'))
-  ) {
+  if (CONNECTION_LOST.some((token) => lower.includes(token)) || (lower.includes('network') && lower.includes('error'))) {
     return 'The network connection failed. Check your internet and retry.';
   }
 
@@ -197,7 +233,9 @@ export function toUserError(error: unknown, fallback = 'Something went wrong. Re
 
   // ── Clean up yt-dlp output if no specific translation matched ─────────────
   // Strip paths and stack traces, keep only the "ERROR:" line content
-  const errorLine = fatalLine;
+  // A one-line message the engine wrote itself ("Could not find a playable
+  // stream…") is its own fatal line; it used to be found via the stack header.
+  const errorLine = fatalLine ?? (raw.trim() && !raw.includes('\n') ? raw.trim() : null);
   if (errorLine) {
     const cleaned = errorLine
       // Case-insensitive to match pickFatalLine, which is. When the engine
@@ -368,7 +406,7 @@ const CDN_HINT = /cdn[.-]|mewstream|nekostream|megaplay\.buzz|cinewave|gogocdn|i
  * to be applied wherever the classification happens, not in only one of them.
  */
 export function classifyEngineFailure(error: unknown, context: FailureContext = {}): string {
-  const raw = error instanceof Error ? `${error.message}\n${error.stack ?? ''}` : String(error ?? '');
+  const raw = failureText(error);
   const subject = pickFatalLine(raw) ?? raw;
 
   // yt-dlp announcing its own staleness outranks the status it then got: an

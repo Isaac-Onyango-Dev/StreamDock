@@ -79,6 +79,19 @@ export interface ManifestResult {
   referer?: string;
   /** Path to a Netscape-format cookies.txt for this CDN domain, if available. */
   cookiesFile?: string;
+  /**
+   * What happened to the requested language, when one was requested.
+   *
+   * 'selected' — the requested server was clicked before this manifest was
+   * accepted; 'absent' — the page offers no such language; 'unconfirmed' — the
+   * selection could not be proven (it timed out or failed), so this manifest
+   * may be the page's default. The gate used to log "taking the default
+   * stream" and hand the manifest over as if it were the one asked for: 8 of
+   * 10 Dub episodes in one real run, with nothing on the row to say so.
+   */
+  languageOutcome?: 'selected' | 'absent' | 'unconfirmed';
+  /** The translation proven to be selected — set only with 'selected'. */
+  translation?: string;
 }
 
 export interface ApiProbeResult {
@@ -729,7 +742,10 @@ function refererForRequest(
 export async function extractManifest(
   pageUrl: string,
   wantedTranslation?: string,
+  signal?: AbortSignal,
 ): Promise<ManifestResult | null> {
+  if (signal?.aborted) return null;
+  const wantsLanguage = Boolean(wantedTranslation) && wantedTranslation !== 'unknown';
   if (getProbeStrategy(pageUrl) === 'ytdlp') {
     try {
       log.info(`[manifest-extractor] Routing to yt-dlp probe: ${pageUrl}`);
@@ -748,7 +764,11 @@ export async function extractManifest(
   }
 
   // --- Fast-path: try direct API probe first (avoids BrowserWindow) ---
-  const apiResult = await tryApiProbe(pageUrl);
+  // Skipped when a language is requested: the API path returns whichever
+  // stream the mapper hands back and cannot select sub or dub, so its answer
+  // would arrive unproven every time.
+  const apiResult = wantsLanguage ? null : await tryApiProbe(pageUrl);
+  if (signal?.aborted) return null;
   if (apiResult) {
     const type = mediaTypeFromUrl(apiResult.url) || 'm3u8';
     log.info(`[manifest-extractor] Returning URL from direct API probe: ${apiResult.url}`);
@@ -786,7 +806,7 @@ export async function extractManifest(
   // Priority 2: Prevent ad popups
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
-  return probeOnce(win, probeSession, pageUrl, preloadPath, false, wantedTranslation);
+  return probeOnce(win, probeSession, pageUrl, preloadPath, false, wantedTranslation, signal);
 }
 
 async function probeOnce(
@@ -796,10 +816,12 @@ async function probeOnce(
   preloadPath?: string,
   isRetry = false,
   wantedTranslation?: string,
+  signal?: AbortSignal,
 ): Promise<ManifestResult | null> {
   return new Promise<ManifestResult | null>((resolve) => {
     let settled = false;
     let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+    let languageOutcome: ManifestResult['languageOutcome'];
 
     // When a language is requested, the manifest the page loads on its own is
     // the wrong one — anikoto opens on SUB. Manifests are ignored until the
@@ -812,11 +834,24 @@ async function probeOnce(
     const finish = (result: ManifestResult | null) => {
       if (settled) return;
       settled = true;
+      signal?.removeEventListener('abort', onAbort);
       if (reloadTimer) clearTimeout(reloadTimer);
       try { if (preloadPath) rmSync(preloadPath, { force: true }); } catch { /* temp file cleanup is best-effort */ }
       cleanup();
+      if (result && wantsLanguage) {
+        const outcome = languageOutcome ?? 'unconfirmed';
+        result = {
+          ...result,
+          languageOutcome: outcome,
+          translation: outcome === 'selected' ? wantedTranslation : undefined,
+        };
+      }
       resolve(result);
     };
+    // Paused or cancelled by the engine: stop now rather than run to the
+    // timeout with a hidden Chromium renderer nobody is waiting for.
+    const onAbort = () => finish(null);
+    signal?.addEventListener('abort', onAbort, { once: true });
 
     const manifestFromStr = (urls: string[]): ManifestResult | null => {
       for (const u of urls) {
@@ -874,22 +909,24 @@ async function probeOnce(
         // Bounded like every other await in this file: a hung renderer must not
         // leave the gate closed forever, or no manifest is ever accepted.
         let answered = false;
-        const open = (why: string): void => {
+        const open = (outcome: NonNullable<ManifestResult['languageOutcome']>, why: string): void => {
           if (answered) return;
           answered = true;
           languageReady = true;
+          languageOutcome = outcome;
           log.info(`[manifest-extractor] Language "${wantedTranslation}": ${why}`);
         };
-        const bail = setTimeout(() => open('selection timed out, taking the default stream'), LANGUAGE_WAIT_MS + 4_000);
+        const bail = setTimeout(() => open('unconfirmed', 'selection timed out; the manifest captured next is unproven'), LANGUAGE_WAIT_MS + 4_000);
         win.webContents
           .executeJavaScript(languageClickScript(String(wantedTranslation)))
           .then((outcome: string) => {
             clearTimeout(bail);
-            open(outcome === 'clicked' ? 'server selected' : 'not offered by this page, taking the default stream');
+            if (outcome === 'clicked') open('selected', 'server selected');
+            else open('absent', 'not offered by this page');
           })
           .catch(() => {
             clearTimeout(bail);
-            open('selection failed, taking the default stream');
+            open('unconfirmed', 'selection failed; the manifest captured next is unproven');
           });
       });
     }

@@ -40,11 +40,16 @@ export class StateStore {
         return { records: [], requests: new Map() };
       }
 
-      // On load: any "running" download becomes "paused" (process died during restart)
+      // A job that was mid-flight when the app stopped has no process now.
+      // 'running' came back as 'paused' before; 'retrying' (a status that no
+      // longer exists) and 'resolving' came back as themselves — a row with no
+      // process behind it and no control that could move it. All three resume
+      // from 'paused', which is also what a clean shutdown writes.
       const records = state.records.map((r) => {
-        if (r.status === 'running') {
-          log.info(`[state-store] Download ${r.id} was running, marking as paused on restart`);
-          return { ...r, status: 'paused' as const, speed: '', eta: '' };
+        const status = r.status as string;
+        if (status === 'running' || status === 'resolving' || status === 'retrying') {
+          log.info(`[state-store] Download ${r.id} was ${status}, marking as paused on restart`);
+          return { ...r, status: 'paused' as const, speed: '', eta: '', stallMessage: undefined };
         }
         return r;
       });
@@ -64,18 +69,20 @@ export class StateStore {
   /** Atomically save state. Write to .tmp, then rename to final. */
   save(records: DownloadRecord[], requests: Map<string, DownloadRequest>): void {
     try {
+      // Cancelled downloads are not kept across restarts.
+      const persisted = records.filter((r) => r.status !== 'cancelled');
+      // A Set, not records.some() per request: that was quadratic, and this
+      // runs on every state change of every download.
+      const kept = new Set(persisted.map((r) => r.id));
       const state: PersistedState = {
         version: STATE_VERSION,
-        records: records.filter((r) =>
-          // Don't persist cancelled records or very old completed ones
-          r.status !== 'cancelled'
-        ),
+        records: persisted,
         requests: Array.from(requests.entries())
-          .filter(([id]) => records.some((r) => r.id === id))
+          .filter(([id]) => kept.has(id))
           .map(([id, request]) => ({ id, request })),
       };
 
-      const json = JSON.stringify(state, null, 2);
+      const json = JSON.stringify(state);
       // Atomic write: .tmp → rename → final (prevents corruption on crash)
       writeFileSync(this.tmpPath, json, 'utf-8');
       renameSync(this.tmpPath, this.statePath);

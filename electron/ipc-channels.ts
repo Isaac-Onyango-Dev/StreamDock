@@ -49,7 +49,6 @@ export const IPC = {
   DOWNLOAD_RESUME_ALL:      'download:resume-all',
   DOWNLOAD_OPEN_FILE:       'download:open-file',
   DOWNLOAD_SHOW_IN_FOLDER:  'download:show-in-folder',
-  DOWNLOAD_REORDER:         'download:reorder',
   DOWNLOAD_LIST:            'download:list',
   DOWNLOAD_REMOVE:          'download:remove',
 

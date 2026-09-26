@@ -85,7 +85,6 @@ declare global {
       retryDownload: (id: string) => Promise<boolean>;
       stopAll: (mode?: 'pause' | 'cancel') => Promise<boolean>;
       resumeAll: () => Promise<boolean>;
-      reorderDownload: (id: string, newPosition: number) => Promise<boolean>;
       listDownloads: () => Promise<DownloadRecord[]>;
       removeDownload: (id: string) => Promise<boolean>;
       clearEngineRecords: (scope?: 'all' | 'completed' | 'failed' | 'cancelled') => Promise<boolean>;

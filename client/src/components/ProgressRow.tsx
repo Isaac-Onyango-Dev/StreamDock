@@ -37,7 +37,7 @@ function truncatePath(path: string | undefined) {
 function statusTone(status: DownloadRecord['status']) {
   switch (status) {
     case 'running':
-    case 'retrying':
+    case 'resolving':
       return 'bg-accent-muted text-accent';
     case 'completed':
       return 'bg-success-muted text-success';
@@ -53,7 +53,7 @@ function statusTone(status: DownloadRecord['status']) {
 }
 
 function statusLabel(status: DownloadRecord['status']) {
-  if (status === 'retrying') return 'Reconnecting';
+  if (status === 'resolving') return 'Finding stream';
   if (status === 'scheduled') return 'Scheduled';
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
@@ -121,7 +121,9 @@ export function ProgressRow({
   const isPaused = item.status === 'paused';
   const isDone = item.status === 'completed';
   const isFailed = item.status === 'failed';
-  const isRetrying = item.status === 'retrying';
+  // The manifest-resolution phase: a hidden browser is finding the stream.
+  // It holds a slot and can be paused or cancelled like a running download.
+  const isRetrying = item.status === 'resolving';
   const isQueued = item.status === 'queued';
   const ModeIcon = item.mode === 'stream' ? Radio : Video;
   const progress = Math.max(0, Math.min(item.progress, 100));
@@ -251,10 +253,12 @@ export function ProgressRow({
                   </>
                 ) : isDone ? (
                   item.bytesTotal ? formatBytes(item.bytesTotal) : 'Complete'
-                ) : isQueued ? (
-                  'Queued'
+                ) : isQueued || item.status === 'scheduled' ? (
+                  item.waitReason ?? 'Queued'
                 ) : isRetrying ? (
-                  'Retrying…'
+                  item.requestedTranslation
+                    ? `Finding the ${item.requestedTranslation.charAt(0).toUpperCase()}${item.requestedTranslation.slice(1)} stream…`
+                    : 'Finding the stream…'
                 ) : null}
               </span>
             </div>

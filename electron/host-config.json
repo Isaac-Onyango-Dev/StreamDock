@@ -86,5 +86,9 @@
       "seriesIdPattern": "data-id=\"(\\d{1,10})\"",
       "seriesApi": "https://anikotoapi.site/series/{id}"
     }
-  ]
+  ],
+  "concurrency": {
+    "probeHostMaxConcurrent": 1,
+    "startSpacingMs": 3000
+  }
 }

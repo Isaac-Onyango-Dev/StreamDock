@@ -1,7 +1,10 @@
 // Role: authoritative main-process URL analysis and mode suggestion.
-import { readFileSync } from 'fs';
-import { join } from 'path';
-import { app } from 'electron';
+// The host lists are bundled into the main-process build rather than read from
+// disk at runtime. The runtime read looked for resources/electron/host-config.json,
+// which electron-builder never packaged: every installed build silently ran on a
+// hand-maintained fallback copy in this file, and edits to the JSON only ever
+// took effect in dev. One import, one source, no fallback to drift.
+import hostConfigJson from './host-config.json';
 
 export type CaptureMode = 'video' | 'stream';
 
@@ -40,6 +43,14 @@ export interface EpisodePatternConfig {
   seriesApi?: string;
 }
 
+/** Download concurrency for hosts the engine must be gentle with. */
+export interface ConcurrencyConfig {
+  /** Most downloads at once from any one manifest-probe host (anime CDNs). */
+  probeHostMaxConcurrent: number;
+  /** Least time between two download starts on the same host. */
+  startSpacingMs: number;
+}
+
 interface HostConfig {
   streamHosts: string[];
   referenceHosts: string[];
@@ -48,42 +59,13 @@ interface HostConfig {
   animeHosts: string[];
   ytDlpSupportedHosts: string[];
   episodePatterns?: EpisodePatternConfig[];
+  concurrency: ConcurrencyConfig;
 }
 
-let configCache: HostConfig | null = null;
+const hostConfig: HostConfig = hostConfigJson;
 
 function loadHostConfig(): HostConfig {
-  if (configCache) return configCache;
-
-  // Path resolution itself (app.getAppPath() / process.resourcesPath) used to sit
-  // outside the try/catch below, so if either was unavailable — e.g. app not yet
-  // ready, or a restricted/mocked runtime — this threw instead of falling back to
-  // the hardcoded defaults the catch block promises. Everything now goes through
-  // one try/catch so ANY failure to obtain a usable config falls back safely.
-  try {
-    const isDev = !app.isPackaged || process.env.NODE_ENV === 'development';
-    const configPath = isDev
-      ? join(app.getAppPath(), 'electron', 'host-config.json')
-      : join(process.resourcesPath, 'electron', 'host-config.json');
-    const content = readFileSync(configPath, 'utf-8');
-    configCache = JSON.parse(content) as HostConfig;
-    return configCache;
-  } catch {
-    // Fallback to hardcoded defaults if config file not found
-    configCache = {
-      streamHosts: ['twitch.tv', 'kick.com', 'trovo.live', 'afreecatv.com', 'movies-central.com', 'supernova.to'],
-      referenceHosts: ['everythingmoe.com', 'everythingmoe.org'],
-      pluginExtractorHosts: ['anikoto.cz', 'anikototv.to', 'animepahe.com', 'animepahe.pw', 'animepahe.org', 'aniwatchtv.to', 'kaido.to'],
-      manifestProbeHosts: ['anikoto.cz', 'anidap.se', 'animedao.watch', 'anikototv.to', 'shuttletv.su', 'gojoora.com', 'gojoora.net', 'movies-central.com', 'supernova.to', 'hianime.to', 'hianime.com', 'hianime.re', 'aniwatch.to', 'aniwatch.com', 'fmovies.to', 'fmovies.ps', 'fmovies.wtf'],
-      animeHosts: ['anikoto.cz', 'anidap.se', 'animedao.watch', 'anikototv.to', 'animepahe.com', 'animepahe.pw', 'animepahe.org', 'aniwatchtv.to', 'kaido.to', 'hianime.to', 'hianime.com', 'hianime.re', 'aniwatch.to', 'aniwatch.com', 'gojoora.com', 'gojoora.net'],
-      ytDlpSupportedHosts: ['youtube.com', 'youtu.be', 'vimeo.com', 'tiktok.com', 'instagram.com', 'twitter.com', 'x.com', 'twitch.tv'],
-      episodePatterns: [
-        { hosts: ['shuttletv.su'], pathPattern: '^/watch/(?<series>[^/]+)', episodeParam: 'e', titlePrefix: 'ShuttleTV' },
-        { hosts: ['anikoto.cz', 'anikototv.to'], pathPattern: '^/watch/(?<series>[^/]+)/ep-(?<episode>\\d+)$', nextPath: '/watch/{series}/ep-{episode}', seriesIdPattern: 'data-id="(\\d{1,10})"', seriesApi: 'https://anikotoapi.site/series/{id}' },
-      ],
-    };
-    return configCache;
-  }
+  return hostConfig;
 }
 
 export const STREAM_HOSTS = () => loadHostConfig().streamHosts;
@@ -93,6 +75,7 @@ export const MANIFEST_PROBE_HOSTS = () => loadHostConfig().manifestProbeHosts;
 export const ANIME_HOSTS = () => loadHostConfig().animeHosts;
 export const YTDLP_SUPPORTED_HOSTS = () => loadHostConfig().ytDlpSupportedHosts;
 export const EPISODE_PATTERNS = (): EpisodePatternConfig[] => loadHostConfig().episodePatterns ?? [];
+export const CONCURRENCY = (): ConcurrencyConfig => loadHostConfig().concurrency;
 
 function matchesHost(host: string, domains: string[]): boolean {
   return domains.some((domain) => host === domain || host.endsWith(`.${domain}`));

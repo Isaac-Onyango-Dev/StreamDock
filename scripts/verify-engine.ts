@@ -92,9 +92,12 @@ function verifyEngineWiring(): void {
   assert(appSource.includes("clearRecords('failed')"), 'Clear Failed routes through the download store');
   assert(mainSource.includes("scope?: 'all' | 'completed' | 'failed' | 'cancelled'"), 'main process accepts scoped clear requests');
   assert(preloadSource.includes('type ClearRecordScope'), 'preload exposes the scoped clear type');
-  assert(engineSource.includes("type ClearRecordScope = 'all' | 'completed' | 'failed' | 'cancelled'"), 'engine defines scoped clear behavior');
+  assert(
+    /clearRecords\(scope: 'all' \| 'completed' \| 'failed' \| 'cancelled'/.test(engineSource),
+    'engine defines scoped clear behavior',
+  );
   assert(engineSource.includes('buildOutputTemplate('), 'download engine uses the smart-naming module');
-  assert(engineSource.includes('resolveOutputTemplate('), 'download engine builds the -o template from smart-naming');
+  assert(/'-o',\s*buildOutputTemplate\(/.test(engineSource), 'download engine builds the -o template from smart-naming');
   // The -o template must stay relative and be paired with --paths, or yt-dlp
   // ignores the staging directory and writes partials straight into the user's
   // download folder.
@@ -879,14 +882,18 @@ function verifyBatchManifestIsolation(): void {
   );
 
   const engine = stripComments(readProjectFile('electron/download-engine.ts'));
-  // The guard must count on the queued page URL, which survives the rewrite.
+  // The count must use the queued page URL, which survives manifest resolution:
+  // each attempt records its host from the untouched request, and the request is
+  // never rewritten (the resolved URL lives in spawnUrl instead).
   assert(
-    /matchesProbeHost\(extractHost\(t\.originalUrl\)\)/.test(engine),
+    /active: \[\.\.\.this\.tasks\.values\(\)\]\.map\(\(t\) => t\.host\)/.test(engine)
+      && /const host = extractHost\(request\.url\)/.test(engine)
+      && !/task\.request\s*=/.test(engine),
     'probe-host concurrency is counted on the queued URL, not the rewritten one',
   );
   assert(
-    /originalUrl: request\.url/.test(engine),
-    'each task records the page URL it was queued for',
+    /\n\s+host: string;/.test(engine) && /\n\s+host,\n/.test(engine),
+    'each task records the page host it was queued for',
   );
 }
 
@@ -950,7 +957,7 @@ function verifyExtractionCannotHang(): void {
     'the engine caps how long it waits for a manifest',
   );
   assert(
-    /Promise\.race\(\[\s*extractManifest\(/.test(engine),
+    /this\.withCeiling\(\s*extractManifest\(/.test(engine) && /Promise\.race\(\[\s*work,/.test(engine),
     'extraction is raced against that ceiling, so a hang cannot stall the queue',
   );
 }
@@ -978,11 +985,19 @@ function verifyLanguageCarriesAcrossBatch(): void {
 
   const engine = stripComments(readProjectFile('electron/download-engine.ts'));
   assert(
-    /extractManifest\([^,)]+,\s*request\.translation\b/.test(engine),
+    /extractManifest\([^,)]+,\s*wanted,/.test(engine)
+      && /requestedTranslation: requestedTranslation\(request\)/.test(engine),
     'the engine asks the extractor for the chosen language',
   );
+  // Decision 2 (session 22): a language the extractor could not prove fails the
+  // episode instead of arriving as the site default.
   assert(
-    /Finding \$\{request\.translation\}/.test(engine),
+    /languageOutcome === 'selected'/.test(engine) && /Could not confirm the \$\{label\} stream/.test(engine),
+    'an episode whose requested language is unproven fails instead of downloading the default',
+  );
+  const row = stripComments(readProjectFile('client/src/components/ProgressRow.tsx'));
+  assert(
+    /Finding the \$\{item\.requestedTranslation/.test(row),
     'the row says which language it is resolving while it runs',
   );
 
@@ -1213,6 +1228,36 @@ function verifyFailureIsDecidedAtExit(): void {
   assert(engine.includes("'--abort-on-unavailable-fragments'"), 'VOD downloads abort on a missing fragment instead of skipping it');
 }
 
+/**
+ * One owner per lifecycle decision (session 22, phase 2).
+ *
+ * Status was assigned from twelve methods and admission written four times,
+ * each with its own rule — how a resolved anime job stopped counting against
+ * its host, a paused one kept its slot, and a completed one kept an error.
+ */
+function verifySingleLifecycleOwner(): void {
+  const engine = stripComments(readProjectFile('electron/download-engine.ts'));
+  const method = (name: string): string => {
+    const start = engine.search(new RegExp(`\\n  (?:private |async |private async )*${name}\\(`));
+    if (start === -1) return '';
+    const end = engine.indexOf('\n  }\n', start);
+    return engine.slice(start, end + 4);
+  };
+  const outside = [method('transition'), method('restoreState')].reduce((src, body) => src.replace(body, ''), engine);
+  assert(method('transition').length > 0, 'the engine has a transition() function');
+  assert(!/\.status\s*=[^=]/.test(outside), 'only transition() (and restore-time normalisation) assigns a download status');
+
+  const startRunCalls = engine.match(/this\.startRun\(/g) ?? [];
+  assert(startRunCalls.length === 1 && method('pumpOnce').includes('this.startRun('), 'only the scheduler pass starts a download');
+  assert(!/\bspawn\(/.test(engine.replace(method('spawnYtDlp'), '')), 'yt-dlp is spawned from exactly one place');
+  assert(!engine.includes('retryWithManifest'), 'there is no second copy of the spawn pipeline');
+  assert(engine.includes('planStarts('), 'admission goes through the pure scheduler');
+
+  const router = stripComments(readProjectFile('electron/url-router.ts'));
+  assert(router.includes("from './host-config.json'"), 'host-config.json is bundled into the build, not read from disk');
+  assert(!router.includes('readFileSync'), 'there is no runtime config read with a hand-copied fallback');
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
@@ -1235,5 +1280,6 @@ verifySingleOwnerPerChoice();
 verifyUpdateFlow();
 verifyAppLifecycle();
 verifyFailureIsDecidedAtExit();
+verifySingleLifecycleOwner();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);

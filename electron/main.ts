@@ -179,7 +179,9 @@ function createWindow(): void {
   // intercepted and the app hid to the tray instead of exiting.
   mainWindow.on('close', (e) => {
     if (isQuitting) return;
-    const active = engine.activeCount();
+    // Anything that would still happen if the app stayed open — running,
+    // queued or scheduled — not just what holds a process right now.
+    const active = engine.pendingCount();
     if (active > 0) {
       e.preventDefault();
       mainWindow?.hide();
@@ -350,10 +352,6 @@ function setupIpc(): void {
 
   ipcMain.handle(IPC.DOWNLOAD_RESUME_ALL, () => {
     try { engine.resumeAll(); return true; } catch { return false; }
-  });
-
-  ipcMain.handle(IPC.DOWNLOAD_REORDER, (_event, id: string, newPosition: number) => {
-    try { engine.reorder(id, newPosition); return true; } catch { return false; }
   });
 
   ipcMain.handle(IPC.DOWNLOAD_REMOVE, (_event, id: string) => {
@@ -665,7 +663,7 @@ function setupBeforeQuit(): void {
   app.on('before-quit', async (e) => {
     if (isQuitting) return;
 
-    const active = engine.activeCount();
+    const active = engine.pendingCount();
     if (active === 0) {
       engine.shutdown();
       return;

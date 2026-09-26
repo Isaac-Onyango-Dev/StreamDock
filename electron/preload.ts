@@ -142,8 +142,6 @@ const api = {
   stopAll: (mode?: 'pause' | 'cancel') =>
     ipcRenderer.invoke(IPC.DOWNLOAD_STOP_ALL, mode ?? 'pause') as Promise<boolean>,
   resumeAll: () => ipcRenderer.invoke(IPC.DOWNLOAD_RESUME_ALL) as Promise<boolean>,
-  reorderDownload: (id: string, newPosition: number) =>
-    ipcRenderer.invoke(IPC.DOWNLOAD_REORDER, id, newPosition) as Promise<boolean>,
   listDownloads: () => ipcRenderer.invoke(IPC.DOWNLOAD_LIST) as Promise<DownloadRecord[]>,
   removeDownload: (id: string) => ipcRenderer.invoke(IPC.DOWNLOAD_REMOVE, id) as Promise<boolean>,
 

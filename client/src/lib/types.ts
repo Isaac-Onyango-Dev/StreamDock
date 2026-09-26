@@ -44,7 +44,7 @@ export interface DownloadRecord {
   url: string;
   mode: CaptureMode;
   title: string;
-  status: 'queued' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled' | 'retrying' | 'scheduled';
+  status: 'scheduled' | 'queued' | 'resolving' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
   progress: number;
   speed: string;
   eta: string;
@@ -62,6 +62,12 @@ export interface DownloadRecord {
   detectedFormat?: string;
   /** Stall message shown in UI when connection drops */
   stallMessage?: string;
+  /** Why a queued or scheduled download has not started. */
+  waitReason?: string;
+  /** The language the user asked this download for (sub/dub), if any. */
+  requestedTranslation?: string;
+  /** The language the source was proven to serve — set only when proven. */
+  resolvedTranslation?: string;
   /** yt-dlp skipped this because the file was already on disk. */
   alreadyExisted?: boolean;
   /** Redacted engine output for a failure, shown behind a "details" toggle. */
