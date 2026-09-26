@@ -219,7 +219,7 @@ describe('lifecycle that works today', () => {
 describe('known defects', () => {
   // Screenshot 1: rows "Completed" with "Connection timed out" under them.
   // streamdock.log:1018 is the exact line — yt-dlp retried it and succeeded.
-  it.fails('an error line yt-dlp retried does not survive a successful exit', async () => {
+  it('an error line yt-dlp retried does not survive a successful exit', async () => {
     const engine = newEngine();
     const { id } = startVideo(engine, YOUTUBE);
     const child = childFor(YOUTUBE);
@@ -234,7 +234,7 @@ describe('known defects', () => {
     expect(find(engine, id).error).toBeUndefined();
   });
 
-  it.fails('a retried error line does not raise a download-error event', async () => {
+  it('a retried error line does not raise a download-error event', async () => {
     const engine = newEngine();
     startVideo(engine, YOUTUBE);
     childFor(YOUTUBE).out(
@@ -247,7 +247,7 @@ describe('known defects', () => {
   // Pause/cancel while "Extracting stream manifest…": no process exists yet, so
   // the task was never removed — a permanently occupied slot, a Resume that does
   // nothing, and a window close that always hides to the tray.
-  it.fails('pausing while the manifest is resolving frees the slot', async () => {
+  it('pausing while the manifest is resolving frees the slot', async () => {
     const engine = newEngine();
     const { id } = startVideo(engine, episode(1));
     engine.pause(id);
@@ -256,7 +256,7 @@ describe('known defects', () => {
     expect(engine.activeCount()).toBe(0);
   });
 
-  it.fails('a job paused while resolving can be resumed', async () => {
+  it('a job paused while resolving can be resumed', async () => {
     const engine = newEngine();
     const { id } = startVideo(engine, episode(1));
     engine.pause(id);
@@ -266,7 +266,7 @@ describe('known defects', () => {
     expect(extractions).toHaveLength(2);
   });
 
-  it.fails('cancelling while the manifest is resolving frees the slot', async () => {
+  it('cancelling while the manifest is resolving frees the slot', async () => {
     const engine = newEngine();
     const { id } = startVideo(engine, episode(1));
     engine.cancel(id);
@@ -326,7 +326,7 @@ describe('known defects', () => {
   // Ep 553: DNS failed mid-download, yt-dlp skipped fragments, moved a 59MB
   // file into the folder, then exited 1. The file stayed; with --no-overwrites a
   // retry would then report it "Already saved".
-  it.fails('a failed download leaves no file it had already moved into the folder', async () => {
+  it('a failed download leaves no file it had already moved into the folder', async () => {
     const engine = newEngine();
     const { id } = startVideo(engine, YOUTUBE);
     const final = join(outputDir, 'Episode 553.mp4');
@@ -344,7 +344,7 @@ describe('known defects', () => {
     expect(existsSync(final)).toBe(false);
   });
 
-  it.fails('a VOD download aborts on missing fragments instead of skipping them', async () => {
+  it('a VOD download aborts on missing fragments instead of skipping them', async () => {
     const engine = newEngine();
     startVideo(engine, YOUTUBE);
     expect(childFor(YOUTUBE).args).toContain('--abort-on-unavailable-fragments');
@@ -352,13 +352,13 @@ describe('known defects', () => {
 
   // Remove on a finished row was renderer-only: the engine kept the record and
   // it came back on the next launch.
-  it.fails('removing a finished download deletes it from the engine and from disk state', async () => {
+  it('removing a finished download deletes it from the engine and from disk state', async () => {
     const engine = newEngine();
     const { id } = startVideo(engine, YOUTUBE);
     childFor(YOUTUBE).exit(0);
     await settle(10);
 
-    (engine as unknown as { remove: (id: string) => void }).remove(id);
+    engine.remove(id);
     expect(engine.list().map((r) => r.id)).not.toContain(id);
     expect(readFileSync(join(userDataDir, 'downloads-state.json'), 'utf-8')).not.toContain(id);
   });

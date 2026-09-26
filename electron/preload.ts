@@ -145,6 +145,7 @@ const api = {
   reorderDownload: (id: string, newPosition: number) =>
     ipcRenderer.invoke(IPC.DOWNLOAD_REORDER, id, newPosition) as Promise<boolean>,
   listDownloads: () => ipcRenderer.invoke(IPC.DOWNLOAD_LIST) as Promise<DownloadRecord[]>,
+  removeDownload: (id: string) => ipcRenderer.invoke(IPC.DOWNLOAD_REMOVE, id) as Promise<boolean>,
 
   // File operations
   openFile: (filePath: string) => ipcRenderer.invoke(IPC.DOWNLOAD_OPEN_FILE, filePath),
@@ -174,6 +175,8 @@ const api = {
     on<DownloadRecord>(IPC.EVENT_DOWNLOAD_COMPLETE, callback),
   onDownloadError: (callback: (record: DownloadRecord) => void): Unsubscribe =>
     on<DownloadRecord>(IPC.EVENT_DOWNLOAD_ERROR, callback),
+  onDownloadRemoved: (callback: (ids: string[]) => void): Unsubscribe =>
+    on<string[]>(IPC.EVENT_DOWNLOAD_REMOVED, callback),
 
   // Menu events
   onMenuFocusTab: (callback: MenuCallback): Unsubscribe =>

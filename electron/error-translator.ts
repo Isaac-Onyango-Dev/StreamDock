@@ -74,11 +74,18 @@ export function toUserError(error: unknown, fallback = 'Something went wrong. Re
   if (lower.includes('timed out') || lower.includes('timeout') || lower.includes('etimedout')) {
     return 'Connection timed out. Check your internet connection.';
   }
+  // Impersonated downloads (every manifest-probe host) go through curl_cffi,
+  // which reports network failures in curl's words rather than Python's —
+  // "curl: (6) Could not resolve host". None of those matched, so a DNS drop
+  // surfaced as "Something went wrong" (and once, via an unrelated WARNING
+  // mentioning --downloader ffmpeg, as "FFmpeg is required").
   if (
     lower.includes('getaddrinfo') ||
     lower.includes('enotfound') ||
     lower.includes('dns') ||
-    lower.includes('name or service not known')
+    lower.includes('name or service not known') ||
+    lower.includes('could not resolve host') ||
+    lower.includes('err_name_not_resolved')
   ) {
     return 'Could not reach the server. Check your connection.';
   }
@@ -86,6 +93,11 @@ export function toUserError(error: unknown, fallback = 'Something went wrong. Re
     lower.includes('econnrefused') ||
     lower.includes('econnreset') ||
     lower.includes('socket hang up') ||
+    lower.includes('connection was reset') ||
+    lower.includes('connection closed abruptly') ||
+    lower.includes('recv failure') ||
+    lower.includes("couldn't connect to server") ||
+    lower.includes('could not connect to server') ||
     (lower.includes('network') && lower.includes('error'))
   ) {
     return 'The network connection failed. Check your internet and retry.';
@@ -160,7 +172,10 @@ export function toUserError(error: unknown, fallback = 'Something went wrong. Re
   }
 
   // ── ffmpeg errors ────────────────────────────────────────────────────────────
-  if (lower.includes('ffmpeg') || lower.includes('mux') || lower.includes('muxing')) {
+  // The failing line, not the whole blob: yt-dlp's WARNING suggesting
+  // "--downloader ffmpeg" for live HLS mentions ffmpeg on runs that failed for
+  // entirely different reasons.
+  if (subjectLower.includes('ffmpeg') || subjectLower.includes('mux') || subjectLower.includes('muxing')) {
     return 'FFmpeg is required for this operation and could not be used.';
   }
 

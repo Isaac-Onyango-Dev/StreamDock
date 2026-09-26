@@ -51,6 +51,7 @@ export const IPC = {
   DOWNLOAD_SHOW_IN_FOLDER:  'download:show-in-folder',
   DOWNLOAD_REORDER:         'download:reorder',
   DOWNLOAD_LIST:            'download:list',
+  DOWNLOAD_REMOVE:          'download:remove',
 
   // Settings
   SETTINGS_GET:    'settings:get',
@@ -65,6 +66,8 @@ export const IPC = {
   EVENT_DOWNLOAD_PROGRESS:  'event:download-progress',
   EVENT_DOWNLOAD_COMPLETE:  'event:download-complete',
   EVENT_DOWNLOAD_ERROR:     'event:download-error',
+  /** Ids the engine deleted; the renderer drops them and ignores late events. */
+  EVENT_DOWNLOAD_REMOVED:   'event:download-removed',
   EVENT_ENGINE_STATUS:      'event:engine-status',
   EVENT_STALL:              'event:stall',
   EVENT_NETWORK_STATUS:     'event:network-status',

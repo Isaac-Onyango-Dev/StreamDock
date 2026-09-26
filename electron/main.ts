@@ -89,6 +89,22 @@ log.transports.console.level = process.env.NODE_ENV === 'development' ? 'debug' 
 // Install crash reporter before anything else
 installCrashReporter();
 
+// One StreamDock at a time. Closing the window hides it to the tray while
+// downloads run, so a user who thinks it closed and launches it again used to
+// get a second process: two engines restoring and re-queueing the same
+// downloads-state.json, both downloading, and whichever wrote last deciding
+// what the list held on the next launch. The second launch now hands over to
+// the first and exits.
+if (!app.requestSingleInstanceLock()) {
+  app.exit(0);
+}
+app.on('second-instance', () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+});
+
 import { persistence, type AppSettings } from './persistence';
 
 let mainWindow: BrowserWindow | null = null;
@@ -156,8 +172,13 @@ function createWindow(): void {
   mainWindow.on('focus', () => mainWindow?.webContents.send(IPC.WINDOW_FOCUSED));
   mainWindow.on('blur',  () => mainWindow?.webContents.send(IPC.WINDOW_BLURRED));
 
-  // Tray-based close: hide instead of quit when downloads are active
+  // Tray-based close: hide instead of quit when downloads are active — but
+  // never while quitting. "Pause & Exit" pauses everything and calls
+  // app.quit(), yet the yt-dlp processes only leave the active count when they
+  // finish exiting, so without this check the quit's own window close was
+  // intercepted and the app hid to the tray instead of exiting.
   mainWindow.on('close', (e) => {
+    if (isQuitting) return;
     const active = engine.activeCount();
     if (active > 0) {
       e.preventDefault();
@@ -335,6 +356,10 @@ function setupIpc(): void {
     try { engine.reorder(id, newPosition); return true; } catch { return false; }
   });
 
+  ipcMain.handle(IPC.DOWNLOAD_REMOVE, (_event, id: string) => {
+    try { return engine.remove(id); } catch (err) { log.warn('[ipc] remove failed:', err); return false; }
+  });
+
   ipcMain.handle(IPC.DOWNLOAD_LIST, () => {
     try { return engine.list(); } catch { return []; }
   });
@@ -437,20 +462,9 @@ function setupIpc(): void {
     if (mainWindow?.isMaximized()) mainWindow.unmaximize();
     else mainWindow?.maximize();
   });
-  ipcMain.handle(IPC.WINDOW_CLOSE, () => {
-    const active = engine.activeCount();
-    if (active > 0) {
-      mainWindow?.hide();
-      if (process.platform === 'win32') {
-        tray?.displayBalloon({
-          title: 'StreamDock is still running',
-          content: `${active} download${active > 1 ? 's' : ''} continuing in background.`,
-        });
-      }
-    } else {
-      mainWindow?.close();
-    }
-  });
+  // The title-bar close button goes through the window's own close handler, so
+  // there is one decision about hiding to the tray rather than two copies.
+  ipcMain.handle(IPC.WINDOW_CLOSE, () => mainWindow?.close());
 
   // ── Native Notification ────────────────────────────────────────────────────
   ipcMain.handle(IPC.NOTIFICATION_DOWNLOAD_COMPLETE, (_event, { title }: { title: string }) => {

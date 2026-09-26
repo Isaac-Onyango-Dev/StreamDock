@@ -978,7 +978,7 @@ function verifyLanguageCarriesAcrossBatch(): void {
 
   const engine = stripComments(readProjectFile('electron/download-engine.ts'));
   assert(
-    /extractManifest\(request\.url, request\.translation\)/.test(engine),
+    /extractManifest\([^,)]+,\s*request\.translation\b/.test(engine),
     'the engine asks the extractor for the chosen language',
   );
   assert(
@@ -1174,6 +1174,45 @@ function verifyUpdateFlow(): void {
   }
 }
 
+/**
+ * The app can always be quit, and only one copy of it runs.
+ *
+ * Session 22: "Pause & Exit" hid the window to the tray instead of exiting —
+ * the window close handler never looked at `isQuitting`, and the paused
+ * processes were still counted as active while they wound down. And nothing
+ * stopped a second launch: a user who thought the tray-hidden app had closed
+ * got two engines re-queueing the same state file.
+ */
+function verifyAppLifecycle(): void {
+  const main = stripComments(readProjectFile('electron/main.ts'));
+  assert(main.includes('requestSingleInstanceLock()'), 'main.ts takes the single-instance lock');
+  assert(/app\.on\('second-instance'/.test(main), 'a second launch focuses the existing window');
+
+  const closeHandler = main.match(/mainWindow\.on\('close',[\s\S]*?\n {2}\}\);/)?.[0] ?? '';
+  assert(closeHandler.length > 0, 'the window close handler exists');
+  assert(/if \(isQuitting\) return;/.test(closeHandler), 'the close handler lets a quit through instead of hiding to the tray');
+
+  const closeIpc = main.match(/ipcMain\.handle\(IPC\.WINDOW_CLOSE[^\n]*/)?.[0] ?? '';
+  assert(!closeIpc.includes('hide('), 'the title-bar close button has no hide-to-tray logic of its own');
+}
+
+/**
+ * Only a process exit decides that a download failed.
+ *
+ * Per-line classification stored yt-dlp's *retried* fragment errors on the
+ * record, and exit 0 never cleared them — Completed rows with "Connection timed
+ * out" under them. And yt-dlp's default for VOD is to skip a fragment it cannot
+ * fetch, which delivered a 59MB "episode" into the download folder.
+ */
+function verifyFailureIsDecidedAtExit(): void {
+  const engine = stripComments(readProjectFile('electron/download-engine.ts'));
+  const consume = engine.match(/private consume\([\s\S]*?\n {2}\}\n/)?.[0] ?? '';
+  assert(consume.length > 0, 'consume() exists');
+  assert(!/\.error\s*=/.test(consume), 'consume() never sets a record error from a single output line');
+  assert(!consume.includes('emitError('), 'consume() never raises a download-error event');
+  assert(engine.includes("'--abort-on-unavailable-fragments'"), 'VOD downloads abort on a missing fragment instead of skipping it');
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
@@ -1194,5 +1233,7 @@ verifyExtractionCannotHang();
 verifyLanguageCarriesAcrossBatch();
 verifySingleOwnerPerChoice();
 verifyUpdateFlow();
+verifyAppLifecycle();
+verifyFailureIsDecidedAtExit();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);

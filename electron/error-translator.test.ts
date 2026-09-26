@@ -271,3 +271,29 @@ ${CDN_MANIFEST_403}`,
     expect(message).toMatch(/rate limited/i);
   });
 });
+
+// Verbatim from Isaac's 53-episode run (streamdock.log, 2026-09-26 00:18) after
+// his DNS dropped mid-queue. curl_cffi words network failures its own way.
+describe('network failures reported by curl (impersonated downloads)', () => {
+  it('a DNS failure on a fragment is a connection problem, not ffmpeg', () => {
+    const stderr = `WARNING: Live HLS streams are not supported by the native downloader. If this is a livestream, please add "--downloader ffmpeg --hls-use-mpegts" to your command
+ERROR: [download] Got error: Failed to perform, curl: (6) Could not resolve host: f0ja7.zhaevor.top. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.. Giving up after 3 retries`;
+    const message = classifyEngineFailure(stderr, { manifestAttempted: true });
+    expect(message).toMatch(/could not reach the server/i);
+    expect(message).not.toMatch(/ffmpeg/i);
+  });
+
+  it('a DNS failure on the page is a connection problem, not "something went wrong"', () => {
+    const stderr = "ERROR: [anikoto] odmau: Unable to download webpage: Failed to perform, curl: (6) Could not resolve host: anikoto.cz. See https://curl.se/libcurl/c/libcurl-errors.html first for more details. (caused by TransportError('Failed to perform, curl: (6) Could not resolve host: anikoto.cz.'))";
+    expect(classifyEngineFailure(stderr, {})).toMatch(/could not reach the server/i);
+  });
+
+  it('a dropped TLS connection is a network failure', () => {
+    const stderr = 'ERROR: [download] Got error: Failed to perform, curl: (35) BoringSSL SSL_connect: Connection closed abruptly (SSL_ERROR_SYSCALL; error queue empty) in connection to 55z9f.midnightvale.top:443. Giving up after 10 retries';
+    expect(classifyEngineFailure(stderr, { manifestAttempted: true })).toMatch(/network connection failed/i);
+  });
+
+  it('a genuine ffmpeg failure on the fatal line is still reported as ffmpeg', () => {
+    expect(classifyEngineFailure('ERROR: Postprocessing: ffprobe and ffmpeg not found', {})).toMatch(/ffmpeg/i);
+  });
+});

@@ -20,7 +20,6 @@ import { buildPluginDirArgs, resolveBinary, resolveYtDlpCommand, type YtDlpComma
 import {
   toErrorDetail,
   classifyEngineFailure,
-  mentionsStaleEngine,
   type FailureContext,
 } from './error-translator';
 import { extractManifest } from './manifest-extractor';
@@ -164,6 +163,16 @@ interface ActiveTask {
    * processes hammered the same CDN until it answered 429.
    */
   originalUrl: string;
+  /**
+   * Files this attempt moved out of staging into the download folder.
+   *
+   * A move is not proof of a good file: with fragments skipped yt-dlp moved a
+   * 59MB "episode" into the folder and *then* exited 1 (ep 553 in the
+   * session-22 log). Kept so a failed single-item run can take back what it
+   * delivered — otherwise `--no-overwrites` makes the retry report the
+   * truncated file as "Already saved".
+   */
+  movedFiles: string[];
 }
 
 /** Known video CDN hosts whose manifest URLs need a specific referer. */
@@ -173,6 +182,7 @@ const KNOWN_CDNS = ['s2.cinewave2.site', 'cinewave2.site'];
 const STAGING_DIR_NAME = '.streamdock-incomplete';
 
 const PRUNE_AGE_MS = 86_400_000; // 24 hours
+const TERMINAL_STATUSES = new Set<DownloadRecord['status']>(['completed', 'failed', 'cancelled']);
 type ClearRecordScope = 'all' | 'completed' | 'failed' | 'cancelled';
 
 function extractHost(url: string): string {
@@ -226,6 +236,9 @@ export class DownloadEngine {
   private statsUpdateInterval: NodeJS.Timeout | null = null;
   private saveStateInterval: NodeJS.Timeout | null = null;
   private lastSpawnTime = 0;
+
+  /** Removed while their process was still exiting; deleted in close(). */
+  private pendingRemoval = new Set<string>();
 
   private readonly stateStore: StateStore;
 
@@ -296,6 +309,34 @@ export class DownloadEngine {
     }
     this.pruneOldRecords();
     this.saveState();
+  }
+
+  /**
+   * Remove one download from the list — the engine's copy, not just the row.
+   *
+   * "Remove" used to be renderer-only: the row vanished, the engine kept the
+   * record, and it came back on the next launch. A finished download is deleted
+   * here outright. An active one is cancelled first, and — if its process is
+   * still winding down — deleted when it closes, so a late progress event
+   * cannot recreate it.
+   *
+   * @returns true when the download is gone or will be once its process exits.
+   */
+  remove(id: string): boolean {
+    const record = this.records.get(id);
+    if (!record) return false;
+    if (!TERMINAL_STATUSES.has(record.status) || this.tasks.has(id)) {
+      this.cancel(id);
+      if (this.tasks.has(id)) {
+        this.pendingRemoval.add(id);
+        return true;
+      }
+    }
+    this.records.delete(id);
+    this.savedRequests.delete(id);
+    this.saveState();
+    this.getWindow()?.webContents.send(IPC.EVENT_DOWNLOAD_REMOVED, [id]);
+    return true;
   }
 
   /** Begin a new download (may queue it if concurrent limit is reached). */
@@ -452,6 +493,16 @@ export class DownloadEngine {
     if (task) {
       task.record.status = 'cancelled';
       this.emitProgress(task.record);
+      if (!task.process) {
+        // Still resolving the manifest: there is no process whose exit would
+        // run close(), so this is the only place the task can be released.
+        this.releaseResolvingTask(id, task);
+        this.cleanPartialFiles(task.record);
+        this.clearStaging(task.request, id);
+        this.savedRequests.delete(id);
+        this.saveState();
+        return;
+      }
       this.killProcess(task, 'cancel');
       return;
     }
@@ -488,8 +539,32 @@ export class DownloadEngine {
     task.record.status = 'paused';
     task.record.stallMessage = undefined;
     this.emitProgress(task.record);
+    if (!task.process) {
+      this.releaseResolvingTask(id, task);
+      this.saveState();
+      log.info(`[engine] Download ${id} paused while resolving its manifest`);
+      return;
+    }
     this.killProcess(task, 'pause');
     log.info(`[engine] Download ${id} paused at ${task.record.progress.toFixed(1)}%`);
+  }
+
+  /**
+   * Free the slot of a task that has no process yet.
+   *
+   * Pause and cancel used to rely on close() to remove the task, but close()
+   * only runs when a yt-dlp process exits — and during manifest resolution
+   * there is none. The task stayed in `tasks` forever: a permanently occupied
+   * slot, a Resume that returned early because the job looked "already
+   * running", a probe-host queue that never advanced, and a window that always
+   * hid to the tray because the active count never reached zero. The pending
+   * extraction notices it has been superseded (see runExtractionAndSpawn) and
+   * spawns nothing.
+   */
+  private releaseResolvingTask(id: string, task: ActiveTask): void {
+    task.monitor.dispose();
+    if (this.tasks.get(id) === task) this.tasks.delete(id);
+    this.drainQueue();
   }
 
   resume(id: string): void {
@@ -713,6 +788,7 @@ export class DownloadEngine {
       startedAt: Date.now(),
       speedSamples: [],
       originalUrl: request.url,
+      movedFiles: [],
     };
 
     this.tasks.set(id, task);
@@ -757,14 +833,26 @@ export class DownloadEngine {
         // every remaining episode with the row stuck on "starting". The
         // extractor has its own timeouts; this exists so a third such hang
         // cannot take the queue down with it.
+        //
+        // The ceiling timer is cleared once the race settles. It used to be
+        // left running, so every extraction — including ones that succeeded
+        // in 20s — logged "exceeded 120000ms" two minutes later, naming the
+        // CDN URL the request had since been rewritten to (57 of them in one
+        // real session log).
+        const pageUrl = request.url;
+        let ceiling: ReturnType<typeof setTimeout> | undefined;
         const result = await Promise.race([
-          extractManifest(request.url, request.translation),
-          new Promise<null>((resolve) => setTimeout(() => {
-            log.warn(`[engine] Manifest extraction exceeded ${MANIFEST_EXTRACTION_CEILING_MS}ms for ${request.url}`);
-            resolve(null);
-          }, MANIFEST_EXTRACTION_CEILING_MS)),
-        ]);
-        if (record.status === 'cancelled' || record.status === 'paused') return;
+          extractManifest(pageUrl, request.translation),
+          new Promise<null>((resolve) => {
+            ceiling = setTimeout(() => {
+              log.warn(`[engine] Manifest extraction exceeded ${MANIFEST_EXTRACTION_CEILING_MS}ms for ${pageUrl}`);
+              resolve(null);
+            }, MANIFEST_EXTRACTION_CEILING_MS);
+          }),
+        ]).finally(() => clearTimeout(ceiling));
+        // Paused, cancelled or resumed into a new task while this was pending:
+        // this attempt no longer owns the job and must not spawn anything.
+        if (this.tasks.get(id) !== task) return;
 
         if (result && result.manifestUrl) {
           log.info(`[engine] Manifest extraction successful: ${result.manifestUrl}`);
@@ -791,7 +879,7 @@ export class DownloadEngine {
       }
     }
 
-    if (record.status === 'cancelled' || record.status === 'paused') return;
+    if (this.tasks.get(id) !== task) return;
 
     // Bug 2 fix: for manifest-fallback VODs, use the per-item titleHint passed from
     // the UI (e.g. "One Piece - Episode 1 - Romance Dawn"). This is more reliable than
@@ -841,6 +929,7 @@ export class DownloadEngine {
       const waitTime = 3000 - timeSinceLastSpawn;
       log.info(`[engine] Staggering spawn for ${id} by ${waitTime}ms to prevent cookie DB locking...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
+      if (this.tasks.get(id) !== task) return;
     }
     this.lastSpawnTime = Date.now();
 
@@ -930,6 +1019,7 @@ export class DownloadEngine {
       // would target a staging path that no longer exists.
       const moved = trimmed.match(/\[MoveFiles\]\s+Moving file\s+"(.+?)"\s+to\s+"(.+?)"/i);
       if (moved) {
+        task.movedFiles.push(moved[2].trim());
         task.record.outputPath = moved[2].trim();
         task.record.title = basename(moved[2].trim()).replace(/\.[^.]+$/, '');
         this.emitProgress(task.record);
@@ -988,32 +1078,14 @@ export class DownloadEngine {
         task.record.thumbnail = thumb[1].trim();
       }
 
-      // Error lines — classify and emit
-      if (/error:/i.test(trimmed) || trimmed.startsWith('ERROR')) {
-        const userMsg = this.classifyErrorLine(trimmed, task);
-        if (userMsg) {
-          task.record.error = userMsg;
-          task.record.errorDetail = toErrorDetail(task.stderr || trimmed) ?? undefined;
-          this.emitError(task.record);
-        }
-      }
+      // Error lines are deliberately NOT turned into record state here. Only
+      // the exit code decides whether a download failed (close → fail, which
+      // classifies the whole stderr with context). Classifying per line put
+      // yt-dlp's own *retried* errors — "[download] Got error: … timed out …
+      // Retrying (1/3)..." — on the record, where exit 0 never cleared them:
+      // rows marked Completed with "Connection timed out" under them, plus a
+      // "Failed:" toast for a download that did not fail.
     }
-  }
-
-  /**
-   * Classify a single yt-dlp error line into a user-facing message.
-   *
-   * Delegates to the shared classifier so a line seen mid-stream and the same
-   * stderr seen at process close cannot disagree — they used to, and because
-   * close() always runs last its context-free answer replaced this one.
-   * The staleness signal is the one thing only the streaming view has: it
-   * arrives as a WARNING above the ERROR, so the whole accumulated stderr is
-   * passed rather than the single line.
-   */
-  private classifyErrorLine(line: string, task: ActiveTask): string | null {
-    const context = { manifestAttempted: task.manifestAttempted, url: task.request.url };
-    const combined = mentionsStaleEngine(task.stderr) ? `${task.stderr}\n${line}` : line;
-    return classifyEngineFailure(combined, context);
   }
 
   // ──────────────────────────────────────────────────────────── Process Events
@@ -1050,7 +1122,12 @@ export class DownloadEngine {
         this.clearStaging(task.request, id);
         this.savedRequests.delete(id);
       }
-      this.emitProgress(task.record);
+      if (this.pendingRemoval.delete(id)) {
+        this.records.delete(id);
+        this.getWindow()?.webContents.send(IPC.EVENT_DOWNLOAD_REMOVED, [id]);
+      } else {
+        this.emitProgress(task.record);
+      }
       this.saveState();
       return;
     }
@@ -1064,6 +1141,10 @@ export class DownloadEngine {
       task.record.speed = '';
       task.record.eta = '';
       task.record.stallMessage = undefined;
+      // A completed download carries no error. Retry/resume clear these too,
+      // but a successful exit is the one place that must never keep one.
+      task.record.error = undefined;
+      task.record.errorDetail = undefined;
       this.emitProgress(task.record);
       this.getWindow()?.webContents.send(IPC.EVENT_DOWNLOAD_COMPLETE, { ...task.record });
       log.info(`[engine] Download ${id} completed: ${task.record.title}`);
@@ -1095,10 +1176,34 @@ export class DownloadEngine {
       }
     }
 
+    this.retractMovedFiles(task);
     this.fail(id, new Error(task.stderr || `yt-dlp exited with code ${code ?? 'unknown'}`), task.record, {
       manifestAttempted: task.manifestAttempted,
       url: task.request.url,
     });
+  }
+
+  /**
+   * Delete what a failed single-item run already delivered to the folder.
+   *
+   * Only for a spawn that covers exactly one item: in a playlist run every
+   * earlier item was moved after finishing cleanly, and a later item's failure
+   * says nothing about them. The "has already been downloaded" path never adds
+   * to movedFiles, so a file that pre-dated this run is never touched.
+   */
+  private retractMovedFiles(task: ActiveTask): void {
+    if (task.request.isPlaylist || task.request.playlistItems) return;
+    for (const file of task.movedFiles) {
+      try {
+        rmSync(file, { force: true });
+        log.warn(`[engine] Removed ${basename(file)}: the download failed after it was moved into the folder`);
+      } catch (err) {
+        log.warn(`[engine] Could not remove ${basename(file)} after a failed download:`, err);
+      }
+    }
+    if (task.movedFiles.length && task.record.outputPath && task.movedFiles.includes(task.record.outputPath)) {
+      task.record.outputPath = undefined;
+    }
   }
 
   private retryWithManifest(id: string, failedTask: ActiveTask): void {
@@ -1189,6 +1294,7 @@ export class DownloadEngine {
           startedAt: Date.now(),
           speedSamples: [],
           cookiesFile: result.cookiesFile, // tracked for cleanup in close()
+          movedFiles: [],
         };
 
         this.tasks.set(id, newTask);
@@ -1303,8 +1409,16 @@ export class DownloadEngine {
       '--trim-filenames', '180',
       '--ffmpeg-location', ffmpeg,
       '--retries', '3',
-      '--fragment-retries', '3',
+      // Generous, because a missing fragment now fails the download instead
+      // of being skipped (below): 10 tries with exponential sleep capped at
+      // 10s rides out roughly a minute of network trouble.
+      '--fragment-retries', '10',
       '--retry-sleep', 'fragment:exp=1:10',
+      // yt-dlp's default for HLS/DASH VOD is to *skip* a fragment it cannot
+      // fetch and carry on. On a DNS drop that produced a 59MB "episode"
+      // (a full one is ~330MB), moved into the folder as finished. Live
+      // capture keeps the default: a live edge genuinely loses fragments.
+      ...(request.mode === 'stream' ? [] : ['--abort-on-unavailable-fragments']),
       // Rate limiting: be polite
       '--sleep-requests', '0.5',
       ...(this.buildImpersonationArgs(request, originalPageUrl, referer)),
