@@ -45,7 +45,9 @@ export class StateStore {
       // longer exists) and 'resolving' came back as themselves — a row with no
       // process behind it and no control that could move it. All three resume
       // from 'paused', which is also what a clean shutdown writes.
-      const records = state.records.map((r) => {
+      const records = state.records.map((stored) => {
+        // Written before records carried a revision.
+        const r = { ...stored, revision: stored.revision ?? 0 };
         const status = r.status as string;
         if (status === 'running' || status === 'resolving' || status === 'retrying') {
           log.info(`[state-store] Download ${r.id} was ${status}, marking as paused on restart`);

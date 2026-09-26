@@ -1,7 +1,7 @@
 // Role: secure contextBridge API exposed to the StreamDock renderer.
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC } from './ipc-channels';
-import type { DownloadRecord } from './download-engine';
+import type { DownloadRecord, DownloadRequest } from '../shared/downloads';
 import type { CaptureMode, UrlAnalysis } from './url-router';
 import type { UpdateState } from '../shared/update-state';
 
@@ -22,37 +22,8 @@ type Settings = {
   clipboardWatcher?: boolean;
 };
 
-type StartRequest = {
-  url: string;
-  outputDir: string;
-  quality?: string;
-  playlistItems?: string;
-  audioPreference?: 'auto' | 'dub' | 'sub';
-  subtitleMode?: 'none' | 'sidecar' | 'embed' | 'both';
-  isPlaylist?: boolean;
-  folderHint?: string;
-  /** Per-item title for episode/series downloads (e.g. "One Piece - Episode 1 - Romance Dawn"). */
-  titleHint?: string;
-  impersonate?: string;
-  pluginDirs?: string[];
-  priority?: number;
-  scheduledAt?: string;
-  thumbnail?: string;
-  selectedAudioLanguage?: string;
-  selectedAudioFormatId?: string;
-  selectedAudioManifestUrl?: string;
-  selectedSubtitleLanguages?: string[];
-  selectedSubtitleFormatIds?: string[];
-  selectedSubtitleManifestUrls?: string[];
-  subtitleConvertFormat?: 'original' | 'srt' | 'vtt';
-  subsOnly?: boolean;
-  downloadPackaging?: 'video-only' | 'video-audio' | 'video-subs' | 'video-audio-subs' | 'video-multi-subs' | 'subs-only';
-  /** User-selected manifest URL from stream options probe (for language-specific streams) */
-  manifestUrl?: string;
-  /** Referer URL for the selected manifest (for sites that require it) */
-  manifestReferer?: string;
-  translation?: string;
-};
+/** Everything but what main injects itself (the mode comes from the channel). */
+type StartRequest = Omit<DownloadRequest, 'mode' | 'useCookies'>;
 
 type Unsubscribe = () => void;
 type MenuCallback = (tab: string) => void;
@@ -94,7 +65,6 @@ const api = {
   // Notification & OS Badges
   notifyDownloadComplete: (title: string) =>
     ipcRenderer.invoke(IPC.NOTIFICATION_DOWNLOAD_COMPLETE, { title }) as Promise<void>,
-  updateActiveCount: (count: number) => ipcRenderer.invoke(IPC.DOWNLOADS_ACTIVE_COUNT, count),
 
   // Settings
   getSettings: () => ipcRenderer.invoke(IPC.SETTINGS_GET) as Promise<Settings>,

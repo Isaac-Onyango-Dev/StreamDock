@@ -81,7 +81,6 @@ export const IPC = {
   ENGINE_STATUS:        'engine:status',
 
   // Active count update (renderer → main, for badge/tray)
-  DOWNLOADS_ACTIVE_COUNT: 'downloads:active-count',
 
   // Native notification
   NOTIFICATION_DOWNLOAD_COMPLETE: 'notification:download-complete',

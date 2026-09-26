@@ -12,7 +12,7 @@ import {
   Video,
   X,
 } from 'lucide-react';
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { formatBytes, formatPercent, formatTime, shortDate } from '../lib/format';
 import type { DownloadRecord } from '../lib/types';
 
@@ -101,7 +101,7 @@ function TechnicalDetailsModal({
   );
 }
 
-export function ProgressRow({
+function ProgressRowView({
   item,
   density = 'comfortable',
   onCancel,
@@ -376,3 +376,18 @@ export function ProgressRow({
     </>
   );
 }
+
+/**
+ * Rows re-render only when their own download changed.
+ *
+ * The store replaces a record's object when the engine reports it and keeps
+ * every other row's object as it was, so identity is the change signal. The
+ * handlers are left out of the comparison on purpose: TransferView's parent
+ * recreates them each render, but each only forwards an id to the engine, so a
+ * new function never means different behaviour.
+ */
+export const ProgressRow = memo(
+  ProgressRowView,
+  (prev, next) =>
+    prev.item === next.item && prev.density === next.density && prev.queuePosition === next.queuePosition,
+);

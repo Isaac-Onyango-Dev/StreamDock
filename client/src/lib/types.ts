@@ -2,7 +2,10 @@ import type { LanguageConfidence, TranslationType } from '../../../shared/langua
 
 // Role: shared renderer-side TypeScript types for StreamDock.
 
-export type CaptureMode = 'video' | 'stream';
+// Types that cross the IPC boundary are defined once, in shared/.
+import type { CaptureMode } from '../../../shared/downloads';
+export type { CaptureMode, DownloadRecord, DownloadRequest, DownloadStatus } from '../../../shared/downloads';
+export type { DownloadPackagingMode } from '../../../shared/subtitle-args';
 
 export interface UrlAnalysis {
   url: string;
@@ -39,41 +42,6 @@ export interface PlaylistProbe {
   notes: string[];
 }
 
-export interface DownloadRecord {
-  id: string;
-  url: string;
-  mode: CaptureMode;
-  title: string;
-  status: 'scheduled' | 'queued' | 'resolving' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
-  progress: number;
-  speed: string;
-  eta: string;
-  outputPath?: string;
-  error?: string;
-  createdAt: string;
-  priority: number;
-  /** Thumbnail URL (from yt-dlp metadata or probe) */
-  thumbnail?: string;
-  /** Bytes downloaded (parsed from yt-dlp progress output) */
-  bytesDownloaded: number;
-  /** Total bytes (parsed from yt-dlp progress output, 0 = unknown) */
-  bytesTotal: number;
-  /** Detected media format (hls/dash/mp4/etc.) */
-  detectedFormat?: string;
-  /** Stall message shown in UI when connection drops */
-  stallMessage?: string;
-  /** Why a queued or scheduled download has not started. */
-  waitReason?: string;
-  /** The language the user asked this download for (sub/dub), if any. */
-  requestedTranslation?: string;
-  /** The language the source was proven to serve — set only when proven. */
-  resolvedTranslation?: string;
-  /** yt-dlp skipped this because the file was already on disk. */
-  alreadyExisted?: boolean;
-  /** Redacted engine output for a failure, shown behind a "details" toggle. */
-  errorDetail?: string;
-}
-
 export interface EngineStatus {
   name: 'yt-dlp' | 'ffmpeg';
   path: string | null;
@@ -81,14 +49,6 @@ export interface EngineStatus {
 }
 
 export type SubtitleFormat = 'vtt' | 'srt' | 'ass' | 'ssa' | 'ttml' | 'unknown';
-
-export type DownloadPackagingMode =
-  | 'video-only'
-  | 'video-audio'
-  | 'video-subs'
-  | 'video-audio-subs'
-  | 'video-multi-subs'
-  | 'subs-only';
 
 export interface AudioTrack {
   id: string;
@@ -153,35 +113,6 @@ export interface StreamOptionsProbeResult {
   error?: string;
 }
 
-export interface StartRequest {
-  url: string;
-  outputDir: string;
-  quality?: string;
-  playlistItems?: string;
-  audioPreference?: 'auto' | 'dub' | 'sub';
-  subtitleMode?: 'none' | 'sidecar' | 'embed' | 'both';
-  isPlaylist?: boolean;
-  folderHint?: string;
-  /** Per-item title for episode/series downloads (e.g. "One Piece - Episode 1 - Romance Dawn"). */
-  titleHint?: string;
-  /** Queue-row label only; never used to build a filename. */
-  displayTitle?: string;
-  impersonate?: string;
-  pluginDirs?: string[];
-  priority?: number;
-  scheduledAt?: string;
-  thumbnail?: string;
-  selectedAudioLanguage?: string;
-  selectedAudioFormatId?: string;
-  selectedAudioManifestUrl?: string;
-  selectedSubtitleLanguages?: string[];
-  selectedSubtitleFormatIds?: string[];
-  selectedSubtitleManifestUrls?: string[];
-  subtitleConvertFormat?: 'original' | 'srt' | 'vtt';
-  subsOnly?: boolean;
-  downloadPackaging?: DownloadPackagingMode;
-}
-
 /**
  * 'gradient' is the install site's own gradient and the app default;
  * 'theme' selects one of the ambient themes named by `backgroundTheme`.
@@ -212,11 +143,5 @@ export interface Settings {
     customArgs?: string;
   };
 }
-
-export type QueueStats = {
-  active: number;
-  queued: number;
-  maxConcurrent: number;
-};
 
 export type Tab = 'capture' | 'transfers' | 'settings';

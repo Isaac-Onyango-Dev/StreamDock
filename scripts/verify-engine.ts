@@ -1258,6 +1258,38 @@ function verifySingleLifecycleOwner(): void {
   assert(!router.includes('readFileSync'), 'there is no runtime config read with a hand-copied fallback');
 }
 
+/**
+ * The renderer is a projection of the engine (session 22, phase 3).
+ *
+ * The download types were copied three times and had already drifted (the
+ * preload's request lacked displayTitle); the list was subscribed to in App,
+ * re-rendering everything on every progress event; and the renderer sent the
+ * tray count back to main on every event, counted by its own rule.
+ */
+function verifyRendererIsProjection(): void {
+  const types = stripComments(readProjectFile('client/src/lib/types.ts'));
+  assert(!/interface DownloadRecord\b/.test(types), 'the renderer does not keep its own copy of DownloadRecord');
+  assert(types.includes("from '../../../shared/downloads'"), 'the renderer takes download types from shared/');
+  const preload = stripComments(readProjectFile('electron/preload.ts'));
+  assert(/type StartRequest = Omit<DownloadRequest/.test(preload), 'the preload request type is the shared one');
+
+  const app = stripComments(readProjectFile('client/src/App.tsx'));
+  assert(!app.includes('useDownloadRecords('), 'App does not subscribe to the download list');
+  const transfer = stripComments(readProjectFile('client/src/views/TransferView/index.tsx'));
+  assert(transfer.includes('useDownloadRecords('), 'the Downloads tab reads the list itself');
+  const row = stripComments(readProjectFile('client/src/components/ProgressRow.tsx'));
+  assert(/export const ProgressRow = memo\(/.test(row), 'rows re-render only when their own download changed');
+
+  const store = stripComments(readProjectFile('client/src/store/DownloadStore.ts'));
+  assert(/held\.revision > record\.revision/.test(store), 'an older event cannot overwrite newer state');
+  assert(!/toastQueue\.push\(/.test(store), 'the toast queue is replaced, never mutated in place');
+
+  const channels = stripComments(readProjectFile('electron/ipc-channels.ts'));
+  assert(!channels.includes('DOWNLOADS_ACTIVE_COUNT'), 'the tray count is not sent back from the renderer');
+  const engine = stripComments(readProjectFile('electron/download-engine.ts'));
+  assert(engine.includes('PROGRESS_INTERVAL_MS'), 'progress events are coalesced');
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
@@ -1281,5 +1313,6 @@ verifyUpdateFlow();
 verifyAppLifecycle();
 verifyFailureIsDecidedAtExit();
 verifySingleLifecycleOwner();
+verifyRendererIsProjection();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);

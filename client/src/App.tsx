@@ -9,7 +9,7 @@ import { CaptureView } from './views/CaptureView';
 import { OverlayBus } from './components/OverlayBus';
 import type { CaptureMode, EngineStatus, Settings, Tab } from './lib/types';
 import { downloadStore } from './store/DownloadStore';
-import { useDownloadRecords, useActiveCount } from './store/useDownloadStore';
+import { useActiveCount } from './store/useDownloadStore';
 import { IDLE_UPDATE_STATE, type UpdateState } from '../../shared/update-state';
 
 const fallbackSettings: Settings = {
@@ -35,7 +35,9 @@ export default function App() {
   const deliverUrl = (url: string) =>
     setIncomingUrl((prev) => ({ url, seq: (prev?.seq ?? 0) + 1 }));
 
-  const items = useDownloadRecords();
+  // Only the count here. The list itself is read by TransferView: subscribing
+  // to it in App re-rendered the entire app — Capture view included — on every
+  // progress event of every download.
   const activeCount = useActiveCount();
 
   useEffect(() => {
@@ -225,7 +227,6 @@ export default function App() {
 
             {currentTab === 'transfers' && (
               <TransferView
-                items={items}
                 density={settings.densityMode ?? 'comfortable'}
                 onDensityChange={(mode) => void handleDensityChange(mode)}
                 onCancel={(id) => void downloadStore.cancelDownload(id)}

@@ -485,15 +485,20 @@ function setupIpc(): void {
     }
     return url;
   });
+}
 
-  // ── Active Count / Tray Badge ──────────────────────────────────────────────
-  ipcMain.handle(IPC.DOWNLOADS_ACTIVE_COUNT, (_event, count: number) => {
-    if (process.platform === 'darwin') {
-      app.dock?.setBadge(count > 0 ? count.toString() : '');
-    } else {
-      tray?.setToolTip(`StreamDock - ${count > 0 ? count + ' active downloads' : 'Idle'}`);
-    }
-  });
+/**
+ * Tray tooltip and dock badge, from the engine's own count of downloads with
+ * work left. The renderer used to compute this and send it back over IPC on
+ * every progress event — and counted by its own rule, which differed from the
+ * one the close-to-tray decision used.
+ */
+function showPendingCount(count: number): void {
+  if (process.platform === 'darwin') {
+    app.dock?.setBadge(count > 0 ? count.toString() : '');
+  } else {
+    tray?.setToolTip(`StreamDock - ${count > 0 ? `${count} download${count === 1 ? '' : 's'} in progress` : 'Idle'}`);
+  }
 }
 
 function setupTray(): void {
@@ -701,6 +706,7 @@ app.whenReady().then(async () => {
   log.transports.file.resolvePathFn = () => join(app.getPath('userData'), 'streamdock.log');
 
   engine = new DownloadEngine(() => mainWindow);
+  engine.onPendingChange = showPendingCount;
 
   // Apply saved settings
   const settings = persistence.getSettings();

@@ -2,7 +2,7 @@
 import type {
   CaptureMode,
   DownloadRecord,
-  DownloadPackagingMode,
+  DownloadRequest,
   EngineStatus,
   MediaTrackProbe,
   Settings,
@@ -46,38 +46,7 @@ declare global {
       getEngineStatus: () => Promise<EngineStatus[]>;
       startDownload: (
         mode: CaptureMode,
-        request: {
-          url: string;
-          outputDir: string;
-          quality?: string;
-          playlistItems?: string;
-          audioPreference?: 'auto' | 'dub' | 'sub';
-          subtitleMode?: 'none' | 'sidecar' | 'embed' | 'both';
-          isPlaylist?: boolean;
-          folderHint?: string;
-          /** Per-item title for episode/series downloads (e.g. "One Piece - Episode 1 - Romance Dawn"). */
-          titleHint?: string;
-          /** Queue-row label only; never used to build a filename. */
-          displayTitle?: string;
-          /** Poster resolved by the probe, shown on the queue row. */
-          thumbnail?: string;
-          impersonate?: string;
-          pluginDirs?: string[];
-          scheduledAt?: string;
-          priority?: number;
-          selectedAudioLanguage?: string;
-          selectedAudioFormatId?: string;
-          selectedAudioManifestUrl?: string;
-          selectedSubtitleLanguages?: string[];
-          selectedSubtitleFormatIds?: string[];
-          selectedSubtitleManifestUrls?: string[];
-          subtitleConvertFormat?: 'original' | 'srt' | 'vtt';
-          subsOnly?: boolean;
-          downloadPackaging?: DownloadPackagingMode;
-          manifestUrl?: string;
-          manifestReferer?: string;
-          translation?: string;
-        },
+        request: Omit<DownloadRequest, 'mode' | 'useCookies'>,
       ) => Promise<DownloadRecord>;
       cancelDownload: (id: string) => Promise<boolean>;
       pauseDownload: (id: string) => Promise<boolean>;
@@ -103,7 +72,6 @@ declare global {
       onWindowBlurred: (callback: () => void) => () => void;
       // Notifications & badge
       notifyDownloadComplete: (title: string) => Promise<void>;
-      updateActiveCount: (count: number) => Promise<void>;
       // Onboarding
       markOnboarded: () => Promise<void>;
       // Download events

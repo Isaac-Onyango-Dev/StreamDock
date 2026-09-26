@@ -575,3 +575,23 @@ describe('remove', () => {
     expect(sent.filter((e) => e.channel === 'event:download-removed')).toHaveLength(1);
   });
 });
+
+describe('events to the renderer', () => {
+  it('coalesces a burst of progress lines, never delays a status change, and numbers every event', async () => {
+    const engine = newEngine();
+    const { id } = startVideo(engine, YOUTUBE);
+    await settle(300);
+    sent = [];
+    for (let i = 1; i <= 20; i++) childFor(YOUTUBE).out(`[download]  ${i}.0% of   300.00MiB at    1.00MiB/s ETA 05:00`);
+    const burst = sent.filter((e) => e.channel === 'event:download-progress').length;
+    expect(burst).toBeLessThanOrEqual(1);
+
+    engine.pause(id);
+    expect(sent.at(-1)?.record.status).toBe('paused');
+
+    await settle(300);
+    const revisions = sent.filter((e) => e.record.id === id).map((e) => e.record.revision);
+    expect(revisions).toEqual([...revisions].sort((a, b) => a - b));
+    expect(new Set(revisions).size).toBe(revisions.length);
+  });
+});

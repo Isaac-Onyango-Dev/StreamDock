@@ -6,7 +6,9 @@
 // took effect in dev. One import, one source, no fallback to drift.
 import hostConfigJson from './host-config.json';
 
-export type CaptureMode = 'video' | 'stream';
+import type { CaptureMode } from '../shared/downloads';
+
+export type { CaptureMode } from '../shared/downloads';
 
 export interface UrlAnalysis {
   url: string;

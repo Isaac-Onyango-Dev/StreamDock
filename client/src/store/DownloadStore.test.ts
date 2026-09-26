@@ -5,9 +5,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DownloadRecord } from '../lib/types';
 
-function record(id: string, status: DownloadRecord['status']): DownloadRecord {
+function record(id: string, status: DownloadRecord['status'], revision = 1): DownloadRecord {
   return {
     id,
+    revision,
     url: `https://www.youtube.com/watch?v=${id}`,
     mode: 'video',
     title: id,
@@ -45,7 +46,6 @@ async function freshStore(engineRecords: DownloadRecord[]) {
     }),
     onDownloadComplete: vi.fn(() => () => undefined),
     onDownloadError: vi.fn(() => () => undefined),
-    updateActiveCount: vi.fn(),
     cancelDownload: vi.fn(async () => true),
   };
   (window as unknown as { streamDock: unknown }).streamDock = bridge;
@@ -84,6 +84,23 @@ describe('download list', () => {
 
     emitProgress(record('a', 'paused'));
     expect(ids(store)).toEqual(afterClear);
+  });
+
+  it('never lets an older event roll a row back', async () => {
+    const { store } = await freshStore([record('a', 'running', 5)]);
+    emitProgress({ ...record('a', 'completed', 7), progress: 100 });
+    emitProgress({ ...record('a', 'running', 6), progress: 90 });
+    expect(store.getRecords()[0].status).toBe('completed');
+  });
+
+  it('shows a new toast without waiting for an unrelated re-render, capped and de-duplicated', async () => {
+    const { store } = await freshStore([]);
+    const before = store.toastQueue;
+    store.addToast('one');
+    expect(store.toastQueue).not.toBe(before);
+    store.addToast('one');
+    for (const m of ['two', 'three', 'four']) store.addToast(m);
+    expect(store.toastQueue.map((t) => t.message)).toEqual(['two', 'three', 'four']);
   });
 
   it('removing a finished row goes through the engine, and a late event cannot bring it back', async () => {

@@ -1,10 +1,9 @@
 import { Download, LayoutGrid, List, Pause, Play, Trash2 } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
-import type { DownloadRecord } from '../../lib/types';
 import { ProgressRow } from '../../components/ProgressRow';
+import { useDownloadRecords } from '../../store/useDownloadStore';
 
 interface TransferViewProps {
-  items: DownloadRecord[];
   density?: DensityMode;
   onDensityChange?: (mode: DensityMode) => void;
   onCancel: (id: string) => void;
@@ -24,7 +23,6 @@ interface TransferViewProps {
 type DensityMode = 'comfortable' | 'compact';
 
 export function TransferView({
-  items,
   density = 'comfortable',
   onDensityChange,
   onCancel,
@@ -40,6 +38,7 @@ export function TransferView({
   onPauseAll,
   onResumeAll,
 }: TransferViewProps) {
+  const items = useDownloadRecords();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
 

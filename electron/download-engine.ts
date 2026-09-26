@@ -28,147 +28,17 @@ import { IPC } from './ipc-channels';
 import { buildPluginDirArgs, resolveBinary } from './binary-resolver';
 import { toErrorDetail, classifyEngineFailure, isNetworkFailure } from './error-translator';
 import { extractManifest, type ManifestResult } from './manifest-extractor';
-import { CONCURRENCY, MANIFEST_PROBE_HOSTS, REFERENCE_HOSTS, type CaptureMode } from './url-router';
+import { CONCURRENCY, MANIFEST_PROBE_HOSTS, REFERENCE_HOSTS } from './url-router';
 import { detectFormat, buildFormatArgs } from './format-detector';
 import { StallWatch, isInternetReachable } from './network-monitor';
 import { StateStore } from './state-store';
 import { buildOutputTemplate } from './smart-naming';
-import { buildSubtitleArgs, type SubtitleMode } from '../shared/subtitle-args';
+import { buildSubtitleArgs } from '../shared/subtitle-args';
+import type { DownloadRecord, DownloadRequest, DownloadStatus } from '../shared/downloads';
+
+export type { DownloadRecord, DownloadRequest, DownloadStatus } from '../shared/downloads';
 import { persistence } from './persistence';
 import { describeWait, planStarts, type HostPolicy } from './scheduler';
-
-export interface DownloadRequest {
-  url: string;
-  mode: CaptureMode;
-  outputDir: string;
-  quality?: string;
-  playlistItems?: string;
-  audioPreference?: 'auto' | 'dub' | 'sub';
-  subtitleMode?: SubtitleMode;
-  isPlaylist?: boolean;
-  /** A suggested folder name from the UI (e.g. series or playlist title) */
-  folderHint?: string;
-  /** Per-item title hint from the UI (e.g. "One Piece - Episode 1 - Romance Dawn").
-   *  Used as the output *filename* for manifest-based VOD downloads where yt-dlp
-   *  cannot derive a meaningful title from the CDN stream URL. Only ever set for
-   *  a spawn covering a single item — one hint across a playlist would give
-   *  every file in it the same name. */
-  titleHint?: string;
-  /** Label for the queue row only; never used to build a filename.
-   *  Kept separate from titleHint precisely so a playlist can show its real
-   *  name in the UI without that name being forced onto every file it
-   *  contains — the queue row and the output template are different questions. */
-  displayTitle?: string;
-  /** Whether to use browser cookies */
-  useCookies?: boolean;
-  /** Browser to impersonate for TLS fingerprinting */
-  impersonate?: string;
-  /** Additional plugin directories */
-  pluginDirs?: string[];
-  /** Priority in queue (lower = higher priority). Default: 100 */
-  priority?: number;
-  /** Optional scheduled start time (ISO string) */
-  scheduledAt?: string;
-  /** Thumbnail URL for display */
-  thumbnail?: string;
-  /** Explicit audio language code from media track probe (e.g. en, ja) */
-  selectedAudioLanguage?: string;
-  /** Explicit yt-dlp audio format ID selected by the user. Preferred over language filters. */
-  selectedAudioFormatId?: string;
-  /** Manifest URL that produced the selected audio track, used to reject mixed-CDN combinations. */
-  selectedAudioManifestUrl?: string;
-  /** Subtitle language codes to download */
-  selectedSubtitleLanguages?: string[];
-  /** Explicit yt-dlp subtitle format IDs, when exposed by the extractor. */
-  selectedSubtitleFormatIds?: string[];
-  /** Manifest URLs that produced selected subtitle tracks, used to reject mixed-CDN combinations. */
-  selectedSubtitleManifestUrls?: string[];
-  /** Convert subtitles to this format (original keeps source ext) */
-  subtitleConvertFormat?: 'original' | 'srt' | 'vtt';
-  /** Download subtitles without video */
-  subsOnly?: boolean;
-  /** User-selected packaging mode from language UI */
-  downloadPackaging?: 'video-only' | 'video-audio' | 'video-subs' | 'video-audio-subs' | 'video-multi-subs' | 'subs-only';
-  /** User-selected manifest URL from stream options probe (for language-specific streams) */
-  manifestUrl?: string;
-  /** Referer URL for the selected manifest (for sites that require it) */
-  manifestReferer?: string;
-  /**
-   * Language to select on each episode page, for hosts that serve sub and dub
-   * as separate streams.
-   *
-   * A batch cannot reuse one probed manifest — the CDN token expires in about
-   * 90 seconds, long before a queue reaches its later episodes — so each
-   * episode is probed at its own download time and needs to be told which
-   * language to pick. Without this every episode of a "Dub" range came down as
-   * the site default, which is Sub.
-   */
-  translation?: string;
-}
-
-/**
- * Where a download is in its lifecycle. Only transition() assigns it.
- *
- * `resolving` is the manifest-extraction phase. It used to be shown by writing
- * "Extracting stream manifest…" into the *title*, which then had to be
- * recognised and undone by string comparison before the title could be used as
- * a filename — and one of those status strings was missing from the list.
- */
-export type DownloadStatus =
-  | 'scheduled'
-  | 'queued'
-  | 'resolving'
-  | 'running'
-  | 'paused'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
-
-export interface DownloadRecord {
-  id: string;
-  url: string;
-  mode: CaptureMode;
-  title: string;
-  status: DownloadStatus;
-  progress: number;
-  speed: string;
-  eta: string;
-  outputPath?: string;
-  error?: string;
-  createdAt: string;
-  priority: number;
-  thumbnail?: string;
-  /** Bytes downloaded (parsed from yt-dlp output) */
-  bytesDownloaded: number;
-  /** Total bytes (parsed from yt-dlp output) */
-  bytesTotal: number;
-  /** Detected format */
-  detectedFormat?: string;
-  /** Stall message for UI */
-  stallMessage?: string;
-  /** Why a queued or scheduled download has not started. */
-  waitReason?: string;
-  /** The language the user asked this download for (sub/dub), if any. */
-  requestedTranslation?: string;
-  /** The language the source was proven to serve — set only when proven. */
-  resolvedTranslation?: string;
-  /**
-   * The file was already on disk, so yt-dlp skipped it (`--no-overwrites`).
-   *
-   * Without this the row reported a plain "completed" for a run that fetched
-   * nothing — a 200MB episode "downloading" in six seconds. Stale files from an
-   * earlier bad run then silently masked whether a fix worked at all.
-   */
-  alreadyExisted?: boolean;
-  /**
-   * Redacted engine output for the failure, shown behind a "details" toggle.
-   *
-   * `error` is a friendly one-liner, which on its own made this whole class of
-   * bug undiagnosable from the UI: a stale-engine 403 and a genuine login wall
-   * produced the same sentence. This carries the real HTTP status and stderr.
-   */
-  errorDetail?: string;
-}
 
 /** The moves the lifecycle allows. Anything else is a bug, logged and refused. */
 const NEXT: Record<DownloadStatus, readonly DownloadStatus[]> = {
@@ -237,6 +107,13 @@ const EXTRACTION_ATTEMPTS = 2;
 const MAX_NETWORK_RETRIES = 3;
 const OFFLINE_RECHECK_MS = 10_000;
 const SAVE_DEBOUNCE_MS = 500;
+/**
+ * Least time between two progress events for one download. yt-dlp prints a
+ * progress line per fragment, and every one used to become an IPC message, a
+ * full re-render of the renderer, and an IPC back to main for the tray
+ * tooltip. Status changes are never delayed.
+ */
+const PROGRESS_INTERVAL_MS = 250;
 
 const STALL_MESSAGE = 'No data for 30 seconds — the connection may have dropped. yt-dlp is retrying.';
 
@@ -304,6 +181,16 @@ export class DownloadEngine {
 
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly stateStore: StateStore;
+
+  private lastEmitAt = new Map<string, number>();
+  private trailingEmit = new Map<string, ReturnType<typeof setTimeout>>();
+  private lastPending = -1;
+  /**
+   * Called when the number of downloads with work left changes. Main drives the
+   * tray tooltip and dock badge from this; the renderer used to compute the
+   * count and send it back over IPC on every single progress event.
+   */
+  onPendingChange: ((count: number) => void) | null = null;
 
   constructor(private readonly getWindow: () => BrowserWindow | null) {
     this.stateStore = new StateStore();
@@ -484,6 +371,7 @@ export class DownloadEngine {
         ? 'Live stream capture'
         : (request.displayTitle?.trim() || request.titleHint?.trim() || 'Video download'),
       status: scheduled ? 'scheduled' : 'queued',
+      revision: 0,
       progress: 0,
       speed: '',
       eta: '',
@@ -498,7 +386,7 @@ export class DownloadEngine {
 
     this.records.set(id, record);
     this.requests.set(id, request);
-    this.emitProgress(record);
+    this.emitProgress(record, true);
 
     if (scheduled) this.arm(id, request.scheduledAt!);
     else this.enqueue(id);
@@ -632,7 +520,7 @@ export class DownloadEngine {
       record.eta = '';
       record.stallMessage = undefined;
     }
-    this.emitProgress(record);
+    this.emitProgress(record, true);
     this.scheduleSave();
     return true;
   }
@@ -1465,7 +1353,35 @@ export class DownloadEngine {
 
   // ──────────────────────────────────────────────────────── IPC Emit
 
-  private emitProgress(record: DownloadRecord): void {
+  /** Send a download's state, coalesced unless `urgent` (a status change). */
+  private emitProgress(record: DownloadRecord, urgent = false): void {
+    const since = Date.now() - (this.lastEmitAt.get(record.id) ?? 0);
+    if (!urgent && since < PROGRESS_INTERVAL_MS) {
+      if (!this.trailingEmit.has(record.id)) {
+        this.trailingEmit.set(record.id, setTimeout(() => {
+          this.trailingEmit.delete(record.id);
+          this.sendRecord(record);
+        }, PROGRESS_INTERVAL_MS - since));
+      }
+      return;
+    }
+    clearTimeout(this.trailingEmit.get(record.id));
+    this.trailingEmit.delete(record.id);
+    this.sendRecord(record);
+  }
+
+  private sendRecord(record: DownloadRecord): void {
+    // A removed download is never announced again — a late event for an id
+    // the renderer has dropped is exactly how rows used to come back.
+    if (this.records.get(record.id) !== record) return;
+    record.revision += 1;
+    this.lastEmitAt.set(record.id, Date.now());
     this.getWindow()?.webContents.send(IPC.EVENT_DOWNLOAD_PROGRESS, { ...record });
+
+    const pending = this.pendingCount();
+    if (pending !== this.lastPending) {
+      this.lastPending = pending;
+      this.onPendingChange?.(pending);
+    }
   }
 }

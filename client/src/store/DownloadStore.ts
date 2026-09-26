@@ -1,12 +1,4 @@
-import { DownloadRecord } from '../lib/types';
-
-export type StoreEvent = 
-  | { type: 'recordAdded'; record: DownloadRecord }
-  | { type: 'recordUpdated'; record: DownloadRecord }
-  | { type: 'recordRemoved'; id: string }
-  | { type: 'activeCountChanged'; count: number }
-  | { type: 'downloadComplete'; record: DownloadRecord }
-  | { type: 'stateChanged' }; // Fired on any mutation for React hooks to re-render
+import type { DownloadRecord } from '../lib/types';
 
 export type ConfirmationRequest = {
   id: string;
@@ -17,111 +9,110 @@ export type ConfirmationRequest = {
   resolve: (confirmed: boolean) => void;
 };
 
-type Listener = (event: StoreEvent) => void;
+type Toast = { id: string; message: string; type: 'success' | 'error' | 'info' };
+type Listener = () => void;
 
 const ACTIVE_STATUSES = new Set<DownloadRecord['status']>(['scheduled', 'queued', 'resolving', 'running', 'paused']);
+/** Toasts on screen at once; a batch finishing should not bury the window in them. */
+const MAX_TOASTS = 3;
+const TOAST_MS = 5_000;
 
 function isActiveStatus(status: DownloadRecord['status']): boolean {
   return ACTIVE_STATUSES.has(status);
 }
 
+/**
+ * The renderer's view of the engine's downloads — a projection, never an owner.
+ *
+ * It applies what the engine reports and nothing else: rows leave only when the
+ * engine says it removed them, and an event is applied only if it is newer
+ * (by `revision`) than what the store already holds. This store used to delete
+ * rows the engine still owned and re-add any id a late event mentioned, which
+ * is the whole of the Purge History resurrection.
+ */
 class DownloadStore {
   private records: Map<string, DownloadRecord> = new Map();
   /**
    * Ids the engine has deleted. A progress event already in flight when a row
    * was removed would otherwise re-add it — an unknown id reads as a new
-   * download — which is the shape of the Purge History resurrection.
+   * download.
    */
   private removedIds: Set<string> = new Set();
   private listeners: Set<Listener> = new Set();
   private initialized = false;
-  
-  // Cache for getRecords to prevent useSyncExternalStore infinite loops
-  private cachedRecordsArray: DownloadRecord[] | null = null;
-  
+
+  /** Stable snapshots for useSyncExternalStore: replaced only when something changed. */
+  private recordsSnapshot: DownloadRecord[] = [];
+  private activeCount = 0;
+
   // State for OverlayBus
   public confirmationState: ConfirmationRequest | null = null;
-  public toastQueue: Array<{ id: string; message: string; type: 'success' | 'error' | 'info' }> = [];
-
-  constructor() {
-    this.setupIpcListeners();
-  }
-
-  private setupIpcListeners() {
-    // We defer IPC registration until app mounts to avoid undefined streamDock in SSR/early load
-  }
+  public toastQueue: Toast[] = [];
 
   public init() {
     if (typeof window === 'undefined' || !window.streamDock || this.initialized) return;
     this.initialized = true;
 
-    window.streamDock.listDownloads().then((items) => {
-      items.forEach(item => this.records.set(item.id, item));
-      this.cachedRecordsArray = null;
-      this.emit({ type: 'stateChanged' });
-      this.updateActiveCount();
-    });
-
-    window.streamDock.onDownloadProgress((record) => {
-      if (this.removedIds.has(record.id)) return;
-      const isNew = !this.records.has(record.id);
-      this.records.set(record.id, record);
-      this.cachedRecordsArray = null;
-      this.emit(isNew ? { type: 'recordAdded', record } : { type: 'recordUpdated', record });
-      this.emit({ type: 'stateChanged' });
-      this.updateActiveCount();
-    });
-
+    // Subscribe before asking for the snapshot, so nothing that happens in
+    // between is missed; revisions settle any overlap either way.
+    window.streamDock.onDownloadProgress((record) => this.apply([record]));
     window.streamDock.onDownloadComplete((record) => {
-      this.records.set(record.id, record);
-      this.cachedRecordsArray = null;
-      this.emit({ type: 'recordUpdated', record });
-      this.emit({ type: 'downloadComplete', record });
-      this.emit({ type: 'stateChanged' });
-      this.updateActiveCount();
-      
+      this.apply([record]);
       this.addToast(`Downloaded: ${record.title}`, 'success');
     });
-
-    window.streamDock.onDownloadRemoved?.((ids) => this.forget(ids));
-
     window.streamDock.onDownloadError((record) => {
-      this.records.set(record.id, record);
-      this.cachedRecordsArray = null;
-      this.emit({ type: 'recordUpdated', record });
-      this.emit({ type: 'stateChanged' });
-      this.updateActiveCount();
-      
+      this.apply([record]);
       this.addToast(`Failed: ${record.error || 'Unknown error'}`, 'error');
     });
+    window.streamDock.onDownloadRemoved?.((ids) => this.forget(ids));
+    void window.streamDock.listDownloads().then((items) => this.apply(items));
   }
 
   // --- Read API ---
   public getRecords(): DownloadRecord[] {
-    if (!this.cachedRecordsArray) {
-      this.cachedRecordsArray = Array.from(this.records.values());
-    }
-    return this.cachedRecordsArray;
+    return this.recordsSnapshot;
   }
 
   public getActiveCount(): number {
-    return Array.from(this.records.values()).filter((r) => isActiveStatus(r.status)).length;
+    return this.activeCount;
   }
 
-  // --- Write API ---
   public subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
-  private emit(event: StoreEvent) {
-    this.listeners.forEach(l => l(event));
+  // --- Applying engine state ---
+
+  private apply(incoming: DownloadRecord[]) {
+    let changed = false;
+    for (const record of incoming) {
+      if (this.removedIds.has(record.id)) continue;
+      const held = this.records.get(record.id);
+      if (held && held.revision > record.revision) continue;
+      this.records.set(record.id, record);
+      changed = true;
+    }
+    if (changed) this.recordsChanged();
   }
 
-  private updateActiveCount() {
-    const count = this.getActiveCount();
-    this.emit({ type: 'activeCountChanged', count });
-    window.streamDock?.updateActiveCount?.(count);
+  private forget(ids: string[]) {
+    let changed = false;
+    for (const id of ids) {
+      this.removedIds.add(id);
+      changed = this.records.delete(id) || changed;
+    }
+    if (changed) this.recordsChanged();
+  }
+
+  private recordsChanged() {
+    this.recordsSnapshot = Array.from(this.records.values());
+    this.activeCount = this.recordsSnapshot.filter((r) => isActiveStatus(r.status)).length;
+    this.notify();
+  }
+
+  private notify() {
+    this.listeners.forEach((l) => l());
   }
 
   // --- Destructive Actions (Gated) ---
@@ -135,27 +126,27 @@ class DownloadStore {
         isDestructive,
         resolve: (confirmed: boolean) => {
           this.confirmationState = null;
-          this.emit({ type: 'stateChanged' });
+          this.notify();
           resolve(confirmed);
-        }
+        },
       };
-      this.emit({ type: 'stateChanged' });
+      this.notify();
     });
   }
 
   public async cancelDownload(id: string) {
     const record = this.records.get(id);
     if (!record) return;
-    
+
     if (record.status !== 'completed' && record.status !== 'failed' && record.status !== 'cancelled') {
       const confirmed = await this.requestConfirmation(
         'Cancel Download?',
         `Are you sure you want to cancel "${record.title}"?`,
-        'Cancel Download'
+        'Cancel Download',
       );
       if (!confirmed) return;
     }
-    
+
     await window.streamDock?.cancelDownload(id);
   }
 
@@ -168,10 +159,10 @@ class DownloadStore {
   public async removeRecord(id: string) {
     const record = this.records.get(id);
     if (record && isActiveStatus(record.status)) {
-       const confirmed = await this.requestConfirmation(
+      const confirmed = await this.requestConfirmation(
         'Cancel and Remove?',
-        `This download is currently active. Are you sure you want to cancel and remove it?`,
-        'Cancel & Remove'
+        'This download is currently active. Are you sure you want to cancel and remove it?',
+        'Cancel & Remove',
       );
       if (!confirmed) return;
     }
@@ -196,28 +187,24 @@ class DownloadStore {
     this.forget([...before].filter((id) => !kept.has(id)));
   }
 
-  private forget(ids: string[]) {
-    if (ids.length === 0) return;
-    for (const id of ids) {
-      this.removedIds.add(id);
-      this.records.delete(id);
-      this.emit({ type: 'recordRemoved', id });
-    }
-    this.cachedRecordsArray = null;
-    this.emit({ type: 'stateChanged' });
-    this.updateActiveCount();
-  }
-
   // --- Toasts ---
-  public addToast(message: string, type: 'success' | 'error' | 'info' = 'info') {
+
+  /**
+   * Show a toast. The queue is replaced, never mutated: useSyncExternalStore
+   * compares snapshots by identity, so a pushed-onto array looked unchanged and
+   * a new toast appeared only when something unrelated re-rendered. Capped and
+   * de-duplicated, because a failing batch used to stack one per error line.
+   */
+  public addToast(message: string, type: Toast['type'] = 'info') {
+    if (this.toastQueue.some((t) => t.message === message)) return;
     const id = crypto.randomUUID();
-    this.toastQueue.push({ id, message, type });
-    this.emit({ type: 'stateChanged' });
-    
+    this.toastQueue = [...this.toastQueue, { id, message, type }].slice(-MAX_TOASTS);
+    this.notify();
+
     setTimeout(() => {
-      this.toastQueue = this.toastQueue.filter(t => t.id !== id);
-      this.emit({ type: 'stateChanged' });
-    }, 5000);
+      this.toastQueue = this.toastQueue.filter((t) => t.id !== id);
+      this.notify();
+    }, TOAST_MS);
   }
 }
 
