@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import path from 'path';
 
 export default defineConfig({
@@ -6,6 +6,9 @@ export default defineConfig({
     environment: 'happy-dom',
     globals: true,
     include: ['**/*.test.ts', '**/*.test.tsx'],
+    // .claude/ holds git worktrees of this repo (gitignored); without this every
+    // run also executed each worktree's copy of the whole suite.
+    exclude: [...configDefaults.exclude, '.claude/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
