@@ -13,8 +13,20 @@ interface PluginInfo {
   path: string;
 }
 
+/**
+ * Subtitle rules by the language of the audio. Where a source serves Sub and
+ * Dub as separate streams, a Sub episode is Japanese audio that needs its
+ * subtitles and a Dub episode usually does not — one "default subtitles"
+ * setting could not say both.
+ */
+const SUBTITLE_RULES = [
+  { key: 'subtitleMode', label: 'Subtitles for Sub (original audio)', fallback: 'embed' },
+  { key: 'subtitleModeForDub', label: 'Subtitles for Dub', fallback: 'none' },
+] as const;
+
 export function YtDlpSettings({ settings, onSettingsChange }: YtDlpSettingsProps) {
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
+  const [customArgs, setCustomArgs] = useState(settings.ytdlpOptions?.customArgs ?? '');
 
   useEffect(() => {
     // Call the PLUGINS_LIST IPC via the dedicated preload API
@@ -39,12 +51,9 @@ export function YtDlpSettings({ settings, onSettingsChange }: YtDlpSettingsProps
     });
   };
 
-  const opts = settings.ytdlpOptions || {
-    subtitleMode: 'embed' as const,
-    embedMetadata: true,
-    sponsorBlock: false,
-    customArgs: '',
-  };
+  // Defaults come from the main process (persistence.ts); this only covers
+  // the render before settings have loaded.
+  const opts = settings.ytdlpOptions ?? {};
 
   return (
     <section className="card card-pad">
@@ -52,24 +61,28 @@ export function YtDlpSettings({ settings, onSettingsChange }: YtDlpSettingsProps
       <p className="mt-0.5 mb-4 text-xs text-text-secondary">Configure low-level download engine behavior.</p>
 
       <div className="space-y-4 border-t border-border-subtle pt-3">
-        <div>
-          <label htmlFor="default-subtitle-mode" className="mb-1.5 block text-sm font-medium text-text-primary">
-            Default subtitles
-          </label>
-          <select
-            id="default-subtitle-mode"
-            className="select-field w-full"
-            value={opts.subtitleMode ?? 'embed'}
-            onChange={(e) => updateYtdlpOption('subtitleMode', e.target.value)}
-          >
-            <option value="none">None</option>
-            <option value="sidecar">Separate file</option>
-            <option value="embed">Embed in video</option>
-            <option value="both">Both</option>
-          </select>
-          <p className="mt-1.5 text-xs text-text-secondary">
-            Starting point for new downloads. Each download can still choose its own —
-            this no longer overrides that choice.
+        <div className="grid gap-3 sm:grid-cols-2">
+          {SUBTITLE_RULES.map((rule) => (
+            <div key={rule.key}>
+              <label htmlFor={rule.key} className="mb-1.5 block text-sm font-medium text-text-primary">
+                {rule.label}
+              </label>
+              <select
+                id={rule.key}
+                className="select-field w-full"
+                value={opts[rule.key] ?? rule.fallback}
+                onChange={(e) => updateYtdlpOption(rule.key, e.target.value)}
+              >
+                <option value="none">None</option>
+                <option value="sidecar">Separate file</option>
+                <option value="embed">Embedded in the video</option>
+                <option value="both">Both</option>
+              </select>
+            </div>
+          ))}
+          <p className="text-xs text-text-secondary sm:col-span-2">
+            Each download starts from the rule for its language, and can still be changed
+            on the Capture screen when the source offers subtitles.
           </p>
         </div>
         <Toggle
@@ -93,11 +106,12 @@ export function YtDlpSettings({ settings, onSettingsChange }: YtDlpSettingsProps
             type="text"
             className="input w-full font-mono text-xs"
             placeholder="e.g. --limit-rate 5M --no-mtime"
-            value={opts.customArgs || ''}
-            onChange={(e) => {
-              // Sanitize on input
-              const val = e.target.value.replace(/[;&|$()]/g, '');
-              updateYtdlpOption('customArgs', val);
+            value={customArgs}
+            onChange={(e) => setCustomArgs(e.target.value.replace(/[;&|$()]/g, ''))}
+            // Saved when the field is left, not on every keystroke: each save
+            // rewrites settings.json on the main process.
+            onBlur={() => {
+              if (customArgs !== (opts.customArgs ?? '')) updateYtdlpOption('customArgs', customArgs);
             }}
           />
           <p className="mt-1.5 text-[11px] text-text-secondary leading-snug">

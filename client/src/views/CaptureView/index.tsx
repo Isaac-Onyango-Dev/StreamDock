@@ -45,6 +45,8 @@ interface CaptureViewProps {
    * overriding it.
    */
   defaultSubtitleMode?: SubtitleMode;
+  /** The starting value for a dubbed download (Settings: "Subtitles for Dub"). */
+  dubSubtitleMode?: SubtitleMode;
   onError: (message: string) => void;
   onStarted: (info: { title: string; itemCount?: number }) => void;
 }
@@ -111,7 +113,7 @@ function selectedEpisodeUrls(
   return urls;
 }
 
-export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubtitleMode = 'embed', onError, onStarted }: CaptureViewProps) {
+export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubtitleMode = 'embed', dubSubtitleMode = 'none', onError, onStarted }: CaptureViewProps) {
   const [url, setUrl] = useState('');
   const [analysis, setAnalysis] = useState<UrlAnalysis | null>(null);
   const [probe, setProbe] = useState<PlaylistProbe | null>(null);
@@ -611,7 +613,9 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
           quality: quality || undefined,
           playlistItems: batchUrls.length > 1 ? undefined : playlistItems,
           audioPreference,
-          subtitleMode,
+          // A picker the user touched is theirs; otherwise the download starts
+          // from the rule for its language — Dub has its own, usually "none".
+          subtitleMode: subtitleModeChosen || selectedOption?.translation !== 'dub' ? subtitleMode : dubSubtitleMode,
           isPlaylist: isPlaylist && !playlistItems,
           folderHint,
           titleHint,

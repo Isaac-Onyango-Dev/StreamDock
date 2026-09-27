@@ -45,8 +45,6 @@ export interface DownloadRequest {
    *  name in the UI without that name being forced onto every file it
    *  contains — the queue row and the output template are different questions. */
   displayTitle?: string;
-  /** Whether to use browser cookies */
-  useCookies?: boolean;
   /** Browser to impersonate for TLS fingerprinting */
   impersonate?: string;
   /** Additional plugin directories */

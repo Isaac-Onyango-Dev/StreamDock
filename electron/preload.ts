@@ -2,28 +2,15 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC } from './ipc-channels';
 import type { DownloadRecord, DownloadRequest } from '../shared/downloads';
+import type { AppSettings as Settings } from '../shared/settings';
 import type { CaptureMode, UrlAnalysis } from './url-router';
 import type { UpdateState } from '../shared/update-state';
 
 type PluginInfo = { name: string; path: string };
 
-type Settings = {
-  downloadDir: string;
-  useCookies?: boolean;
-  maxConcurrent?: number;
-  scheduledStartTime?: string | null;
-  hasOnboarded?: boolean;
-  densityMode?: 'comfortable' | 'compact';
-  backgroundMode?: 'solid' | 'bing' | 'picsum' | 'gradient' | 'theme';
-  backgroundImageUrl?: string;
-  solidColorBg?: string;
-  backgroundTheme?: string;
-  bingRefreshInterval?: number;
-  clipboardWatcher?: boolean;
-};
 
 /** Everything but what main injects itself (the mode comes from the channel). */
-type StartRequest = Omit<DownloadRequest, 'mode' | 'useCookies'>;
+type StartRequest = Omit<DownloadRequest, 'mode'>;
 
 type Unsubscribe = () => void;
 type MenuCallback = (tab: string) => void;
@@ -40,7 +27,6 @@ const api = {
   getVersion: () => ipcRenderer.invoke(IPC.APP_GET_VERSION) as Promise<string>,
   onEngineVersionWarning: (callback: (warning: string) => void): Unsubscribe =>
     on<string>(IPC.APP_ENGINE_VERSION_WARNING, callback),
-  markOnboarded: () => ipcRenderer.invoke(IPC.APP_MARK_ONBOARDED) as Promise<void>,
 
   // Application update. Every one of these resolves to the resulting state, so
   // a caller that would rather await than subscribe still sees the outcome.
@@ -63,8 +49,6 @@ const api = {
   onWindowBlurred: (callback: () => void): Unsubscribe => on<void>(IPC.WINDOW_BLURRED, callback),
 
   // Notification & OS Badges
-  notifyDownloadComplete: (title: string) =>
-    ipcRenderer.invoke(IPC.NOTIFICATION_DOWNLOAD_COMPLETE, { title }) as Promise<void>,
 
   // Settings
   getSettings: () => ipcRenderer.invoke(IPC.SETTINGS_GET) as Promise<Settings>,

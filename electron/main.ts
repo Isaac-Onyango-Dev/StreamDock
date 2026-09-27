@@ -1,12 +1,12 @@
 // Role: StreamDock Electron main process — window lifecycle, IPC, logging, crash handling.
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell, nativeImage, Notification, Tray, net, protocol } from 'electron';
 import type { OpenDialogOptions, MenuItemConstructorOptions } from 'electron';
-import { existsSync, mkdirSync } from 'fs';
-import { basename, join } from 'path';
+import { existsSync, mkdirSync, readdirSync } from 'fs';
+import { join } from 'path';
 import { pathToFileURL } from 'url';
 import log from 'electron-log';
 import { IPC } from './ipc-channels';
-import { DownloadEngine, type DownloadRequest } from './download-engine';
+import { DownloadEngine, type DownloadRecord, type DownloadRequest } from './download-engine';
 import { analyzeUrl } from './url-router';
 import { inspectUrl } from './playlist-inspector';
 import { probeMediaTracks } from './media-track-probe';
@@ -181,17 +181,13 @@ function createWindow(): void {
     if (isQuitting) return;
     // Anything that would still happen if the app stayed open — running,
     // queued or scheduled — not just what holds a process right now.
-    const active = engine.pendingCount();
-    if (active > 0) {
-      e.preventDefault();
-      mainWindow?.hide();
-      if (process.platform === 'win32') {
-        tray?.displayBalloon({
-          title: 'StreamDock is still running',
-          content: `${active} download${active > 1 ? 's' : ''} continuing in background.`,
-        });
-      }
-    }
+    const pending = engine.pendingCount();
+    if (pending === 0) return;
+    e.preventDefault();
+    const behavior = persistence.getSettings().closeBehavior ?? 'tray-when-active';
+    if (behavior === 'quit') quitPausingDownloads();
+    else if (behavior === 'ask') void askOnClose(pending);
+    else hideToTray(pending);
   });
 
   mainWindow.on('closed', () => { mainWindow = null; });
@@ -235,14 +231,17 @@ function setupIpc(): void {
     return next;
   });
 
+  // The plugin *packages*, one per folder under each root. resolvePluginDirs()
+  // returns roots since session 13 (yt-dlp globs <root>/<package>/yt_dlp_plugins
+  // itself), so listing its entries showed "plugins" and "plugins-win" as if
+  // they were plugins.
   ipcMain.handle(IPC.PLUGINS_LIST, () => {
     try {
-      const dirs = resolvePluginDirs();
-      return dirs.map(dir => {
-        // Assume plugin name is the folder name (e.g., 'plugins/foo' -> 'foo')
-        const name = basename(dir);
-        return { name, path: dir };
-      });
+      return resolvePluginDirs().flatMap((root) =>
+        readdirSync(root, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory() && existsSync(join(root, entry.name, 'yt_dlp_plugins')))
+          .map((entry) => ({ name: entry.name, path: join(root, entry.name) })),
+      );
     } catch {
       return [];
     }
@@ -318,15 +317,13 @@ function setupIpc(): void {
   // ── Download Lifecycle ─────────────────────────────────────────────────────
   ipcMain.handle(IPC.DOWNLOAD_START_VIDEO, async (_event, request: Omit<DownloadRequest, 'mode'>) => {
     try {
-      const settings = persistence.getSettings();
-      return engine.start({ ...request, mode: 'video', useCookies: settings.useCookies });
+      return engine.start({ ...request, mode: 'video' });
     } catch (e) { throw new Error(toUserError(e)); }
   });
 
   ipcMain.handle(IPC.DOWNLOAD_START_STREAM, async (_event, request: Omit<DownloadRequest, 'mode'>) => {
     try {
-      const settings = persistence.getSettings();
-      return engine.start({ ...request, mode: 'stream', useCookies: settings.useCookies });
+      return engine.start({ ...request, mode: 'stream' });
     } catch (e) { throw new Error(toUserError(e)); }
   });
 
@@ -445,15 +442,6 @@ function setupIpc(): void {
     return true;
   });
 
-  // ── Onboarding ─────────────────────────────────────────────────────────────
-  // Previously only flipped an in-memory flag that nothing ever read and that
-  // was lost on restart — calling markOnboarded() from the renderer had no
-  // durable effect. Persist it like every other setting instead.
-  ipcMain.handle(IPC.APP_MARK_ONBOARDED, () => {
-    persistence.updateSettings({ hasOnboarded: true });
-    return true;
-  });
-
   // ── Window controls ────────────────────────────────────────────────────────
   ipcMain.handle(IPC.WINDOW_MINIMIZE, () => mainWindow?.minimize());
   ipcMain.handle(IPC.WINDOW_MAXIMIZE_RESTORE, () => {
@@ -463,19 +451,6 @@ function setupIpc(): void {
   // The title-bar close button goes through the window's own close handler, so
   // there is one decision about hiding to the tray rather than two copies.
   ipcMain.handle(IPC.WINDOW_CLOSE, () => mainWindow?.close());
-
-  // ── Native Notification ────────────────────────────────────────────────────
-  ipcMain.handle(IPC.NOTIFICATION_DOWNLOAD_COMPLETE, (_event, { title }: { title: string }) => {
-    if (Notification.isSupported()) {
-      const n = new Notification({ title: 'Download Complete', body: title });
-      n.on('click', () => {
-        mainWindow?.show();
-        mainWindow?.focus();
-        mainWindow?.webContents.send('menu:focus-tab', 'transfers');
-      });
-      n.show();
-    }
-  });
 
   // ── Background ──────────────────────────────────────────────────────────────
   ipcMain.handle(IPC.WALLPAPER_ROTATE_NOW, async () => {
@@ -493,6 +468,30 @@ function setupIpc(): void {
  * every progress event — and counted by its own rule, which differed from the
  * one the close-to-tray decision used.
  */
+/**
+ * Tell the user a download finished when they cannot see it happen.
+ *
+ * A "Download Complete" notification existed, wired to an IPC channel no code
+ * ever called, so a tray-hidden app never said anything had finished — or
+ * failed. It now comes from the engine's own outcome, and only when the
+ * window is hidden or unfocused: an open window already shows the row.
+ */
+function notifyFinished(record: DownloadRecord): void {
+  if (!Notification.isSupported()) return;
+  if (mainWindow?.isVisible() && mainWindow.isFocused()) return;
+  const failed = record.status === 'failed';
+  const n = new Notification({
+    title: failed ? 'Download failed' : 'Download complete',
+    body: failed ? `${record.title}: ${record.error ?? 'see StreamDock for details'}` : record.title,
+  });
+  n.on('click', () => {
+    mainWindow?.show();
+    mainWindow?.focus();
+    mainWindow?.webContents.send('menu:focus-tab', 'transfers');
+  });
+  n.show();
+}
+
 function showPendingCount(count: number): void {
   if (process.platform === 'darwin') {
     app.dock?.setBadge(count > 0 ? count.toString() : '');
@@ -664,6 +663,64 @@ function prepareQuitForUpdate(): void {
   isQuitting = true;
 }
 
+/** Pause everything (it resumes on the next launch) and exit, without asking. */
+function quitPausingDownloads(): void {
+  engine.shutdown();
+  isQuitting = true;
+  app.quit();
+}
+
+/**
+ * Keep downloading with the window hidden.
+ *
+ * Says so the first time on every platform — it used to announce itself only
+ * through a Windows balloon, so on macOS and Linux the window simply vanished
+ * while downloads carried on. Where there is no tray to come back from (a Linux
+ * desktop without a tray host), the window is minimised instead of hidden, so
+ * it can never become unreachable.
+ */
+function hideToTray(pending: number): void {
+  if (!mainWindow) return;
+  if (!tray) {
+    mainWindow.minimize();
+    return;
+  }
+  mainWindow.hide();
+  const message = `${pending} download${pending === 1 ? '' : 's'} continuing in the background. Use the tray icon to reopen or quit StreamDock.`;
+  if (process.platform === 'win32') {
+    tray.displayBalloon({ title: 'StreamDock is still running', content: message });
+  } else if (!persistence.getSettings().trayHintShown && Notification.isSupported()) {
+    new Notification({ title: 'StreamDock is still running', body: message }).show();
+  }
+  if (!persistence.getSettings().trayHintShown) persistence.updateSettings({ trayHintShown: true });
+}
+
+/** The 'ask' close behaviour, with an option to stop asking. */
+async function askOnClose(pending: number): Promise<void> {
+  if (!mainWindow) return;
+  const { response, checkboxChecked } = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    title: 'Downloads in progress',
+    message: `${pending} download${pending === 1 ? ' is' : 's are'} still in progress.`,
+    buttons: ['Keep downloading in the tray', 'Pause and quit', 'Cancel downloads and quit'],
+    defaultId: 0,
+    cancelId: 0,
+    checkboxLabel: 'Remember my choice (change it in Settings)',
+  });
+  if (checkboxChecked && response < 2) {
+    persistence.updateSettings({ closeBehavior: response === 0 ? 'tray-when-active' : 'quit' });
+  }
+  if (response === 0) {
+    hideToTray(pending);
+  } else if (response === 1) {
+    quitPausingDownloads();
+  } else {
+    engine.stopAll('cancel');
+    isQuitting = true;
+    app.quit();
+  }
+}
+
 function setupBeforeQuit(): void {
   app.on('before-quit', async (e) => {
     if (isQuitting) return;
@@ -707,6 +764,7 @@ app.whenReady().then(async () => {
 
   engine = new DownloadEngine(() => mainWindow);
   engine.onPendingChange = showPendingCount;
+  engine.onFinished = notifyFinished;
 
   // Apply saved settings
   const settings = persistence.getSettings();

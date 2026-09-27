@@ -1307,6 +1307,33 @@ function verifyProbeLifecycle(): void {
   assert(/probesLanguages: matchesHost\(analysis\.host, ANIME_HOSTS\(\)\)/.test(router), 'the language-probe hosts are the configured anime hosts');
 }
 
+/**
+ * Settings do what they say (session 22, phase 5).
+ *
+ * "Use Chrome cookies" was stored and forwarded with every download and read
+ * by nothing; closing the window had no setting; the completion notification
+ * was wired to an IPC nothing called; settings.json was written in place, so a
+ * crash mid-write lost every preference; and the settings shape existed three
+ * times, already drifted.
+ */
+function verifySettingsAreReal(): void {
+  for (const path of ['electron/main.ts', 'electron/download-engine.ts', 'electron/persistence.ts', 'electron/preload.ts', 'shared/downloads.ts', 'shared/settings.ts', 'client/src/views/SettingsView/index.tsx', 'client/src/lib/types.ts']) {
+    assert(!/useCookies/.test(stripComments(readProjectFile(path))), `${path} carries no cookies setting that nothing reads`);
+  }
+  const main = stripComments(readProjectFile('electron/main.ts'));
+  const closeHandler = main.match(/mainWindow\.on\('close',[\s\S]*?\n {2}\}\);/)?.[0] ?? '';
+  assert(closeHandler.includes('closeBehavior'), 'closing the window follows the closeBehavior setting');
+  assert(/engine\.onFinished = notifyFinished/.test(main), 'finished and failed downloads raise an OS notification from main');
+  assert(!stripComments(readProjectFile('electron/ipc-channels.ts')).includes('NOTIFICATION_DOWNLOAD_COMPLETE'), 'no notification channel that nothing calls');
+  assert(/yt_dlp_plugins/.test(main), 'Installed Plugins lists plugin packages, not their root folders');
+
+  const persistence = stripComments(readProjectFile('electron/persistence.ts'));
+  assert(/renameSync\(tmp, this\.path\)/.test(persistence), 'settings.json is written through a temporary file and renamed');
+  assert(!/export interface AppSettings/.test(persistence), 'the settings shape is defined once, in shared/settings.ts');
+  const preload = stripComments(readProjectFile('electron/preload.ts'));
+  assert(!/type Settings = \{/.test(preload), 'the preload keeps no copy of the settings shape');
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
@@ -1332,5 +1359,6 @@ verifyFailureIsDecidedAtExit();
 verifySingleLifecycleOwner();
 verifyRendererIsProjection();
 verifyProbeLifecycle();
+verifySettingsAreReal();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);

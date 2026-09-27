@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { CheckCircle2, FolderOpen, RefreshCw, XCircle } from 'lucide-react';
-import type { EngineStatus, Settings } from '../../lib/types';
+import type { CloseBehavior, EngineStatus, Settings } from '../../lib/types';
 import { BackgroundSettings } from './BackgroundSettings';
 import { YtDlpSettings } from './YtDlpSettings';
 import { Toggle } from '../../components/Toggle';
@@ -74,17 +74,28 @@ export function SettingsView({
           </button>
 
           <div className="mt-4 space-y-3 border-t border-border-subtle pt-3">
-            <div className="flex items-center justify-between gap-3">
-              <Toggle
-                label="Use Chrome cookies"
-                ariaLabel="Use Chrome cookies for age-gated or login-protected sites"
-                enabled={settings.useCookies ?? false}
-                onChange={(val) => {
-                  void window.streamDock?.updateSettings({ useCookies: val }).then((next) => {
+            <div>
+              <label htmlFor="close-behavior" className="mb-1.5 block text-sm text-text-primary">
+                Closing the window while downloading
+              </label>
+              <select
+                id="close-behavior"
+                className="select-field w-full"
+                value={settings.closeBehavior ?? 'tray-when-active'}
+                onChange={(e) => {
+                  const closeBehavior = e.target.value as CloseBehavior;
+                  void window.streamDock?.updateSettings({ closeBehavior }).then((next) => {
                     if (next) onSettingsChange(next);
                   });
                 }}
-              />
+              >
+                <option value="tray-when-active">Keep downloading in the tray</option>
+                <option value="ask">Ask each time</option>
+                <option value="quit">Pause downloads and quit</option>
+              </select>
+              <p className="mt-1.5 text-xs text-text-secondary">
+                Paused downloads resume the next time StreamDock opens.
+              </p>
             </div>
 
             <div>

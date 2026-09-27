@@ -87,3 +87,11 @@ describe('background default on upgrade', () => {
     expect(new PersistenceGateway().getSettings().backgroundMode).toBe('gradient');
   });
 });
+
+describe('settings that do what they say (session 22)', () => {
+  it('defaults to keeping downloads running in the tray, and to no subtitles for Dub', () => {
+    const settings = new PersistenceGateway().getSettings();
+    expect(settings.closeBehavior).toBe('tray-when-active');
+    expect(settings.ytdlpOptions?.subtitleModeForDub).toBe('none');
+  });
+});

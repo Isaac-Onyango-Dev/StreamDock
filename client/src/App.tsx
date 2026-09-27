@@ -213,6 +213,7 @@ export default function App() {
                 outputDir={settings.downloadDir}
                 incomingUrl={incomingUrl}
                 defaultSubtitleMode={settings.ytdlpOptions?.subtitleMode ?? 'embed'}
+                dubSubtitleMode={settings.ytdlpOptions?.subtitleModeForDub ?? 'none'}
                 onError={setError}
                 onStarted={(info) => {
                   setError(null);

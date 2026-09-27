@@ -5,6 +5,7 @@ import type { LanguageConfidence, TranslationType } from '../../../shared/langua
 // Types that cross the IPC boundary are defined once, in shared/.
 export type { CaptureMode, DownloadRecord, DownloadRequest, DownloadStatus, UrlAnalysis } from '../../../shared/downloads';
 export type { DownloadPackagingMode } from '../../../shared/subtitle-args';
+export type { AppSettings as Settings, BackgroundMode, CloseBehavior } from '../../../shared/settings';
 
 export interface PlaylistProbeItem {
   id?: string;
@@ -108,31 +109,5 @@ export interface StreamOptionsProbeResult {
  * 'gradient' is the install site's own gradient and the app default;
  * 'theme' selects one of the ambient themes named by `backgroundTheme`.
  */
-export type BackgroundMode = 'solid' | 'bing' | 'picsum' | 'gradient' | 'theme';
-
-export interface Settings {
-  downloadDir: string;
-  useCookies?: boolean;
-  maxConcurrent?: number;
-  scheduledStartTime?: string | null;
-  hasOnboarded?: boolean;
-  densityMode?: 'comfortable' | 'compact';
-  backgroundMode?: BackgroundMode;
-  backgroundImageUrl?: string;
-  solidColorBg?: string;
-  /** Ambient theme id, used when backgroundMode is 'theme'. */
-  backgroundTheme?: string;
-  bingRefreshInterval?: number;
-  clipboardWatcher?: boolean;
-  ytdlpOptions?: {
-    /** Default for the per-download Subtitles picker (replaces embedSubs). */
-    subtitleMode?: 'none' | 'sidecar' | 'embed' | 'both';
-    /** @deprecated Migrated to subtitleMode on read. */
-    embedSubs?: boolean;
-    embedMetadata?: boolean;
-    sponsorBlock?: boolean;
-    customArgs?: string;
-  };
-}
 
 export type Tab = 'capture' | 'transfers' | 'settings';

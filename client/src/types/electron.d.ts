@@ -46,7 +46,7 @@ declare global {
       getEngineStatus: () => Promise<EngineStatus[]>;
       startDownload: (
         mode: CaptureMode,
-        request: Omit<DownloadRequest, 'mode' | 'useCookies'>,
+        request: Omit<DownloadRequest, 'mode'>,
       ) => Promise<DownloadRecord>;
       cancelDownload: (id: string) => Promise<boolean>;
       pauseDownload: (id: string) => Promise<boolean>;
@@ -71,9 +71,7 @@ declare global {
       onWindowFocused: (callback: () => void) => () => void;
       onWindowBlurred: (callback: () => void) => () => void;
       // Notifications & badge
-      notifyDownloadComplete: (title: string) => Promise<void>;
       // Onboarding
-      markOnboarded: () => Promise<void>;
       // Download events
       onDownloadProgress: (callback: (record: DownloadRecord) => void) => () => void;
       onDownloadComplete: (callback: (record: DownloadRecord) => void) => () => void;

@@ -191,6 +191,8 @@ export class DownloadEngine {
    * count and send it back over IPC on every single progress event.
    */
   onPendingChange: ((count: number) => void) | null = null;
+  /** Called once when a download completes or fails, for the OS notification. */
+  onFinished: ((record: DownloadRecord) => void) | null = null;
 
   constructor(private readonly getWindow: () => BrowserWindow | null) {
     this.stateStore = new StateStore();
@@ -1028,6 +1030,7 @@ export class DownloadEngine {
       this.networkRetries.delete(id);
       this.transition(record, 'completed', { progress: 100 });
       this.getWindow()?.webContents.send(IPC.EVENT_DOWNLOAD_COMPLETE, { ...record });
+      this.onFinished?.(record);
       log.info(`[engine] Download ${id} completed: ${record.title}`);
       this.pump();
       return;
@@ -1083,6 +1086,7 @@ export class DownloadEngine {
     this.networkRetries.delete(id);
     this.transition(record, 'failed', { error: message, errorDetail: detail ?? undefined });
     this.getWindow()?.webContents.send(IPC.EVENT_DOWNLOAD_ERROR, { ...record });
+    this.onFinished?.(record);
     this.pump();
   }
 
@@ -1190,11 +1194,11 @@ export class DownloadEngine {
       '--no-overwrites',
     ];
 
-    // NOTE: --cookies-from-browser chrome is intentionally omitted.
-    // On Windows, Chrome holds a lock on the SQLite cookie database via the
-    // Restart Manager (RmShutdown error 351), causing yt-dlp to crash every
-    // time Chrome is open. The useCookies flag is preserved for future use
-    // (e.g. exported cookies.txt), but browser-direct extraction is disabled.
+    // --cookies-from-browser is deliberately absent: on Windows Chrome holds a
+    // lock on its cookie database (Restart Manager, RmShutdown error 351), so
+    // yt-dlp crashed whenever Chrome was open. The "Use Chrome cookies" toggle
+    // that remained was read by nothing and was removed in session 22; if a
+    // site ever needs a login, the way back is an imported cookies.txt.
 
     // Add format-specific args from detector
     const formatArgs = buildFormatArgs(detection, request.quality);

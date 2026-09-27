@@ -1,13 +1,11 @@
-import { DEFAULT_SUBTITLE_MODE, type SubtitleMode } from '../shared/subtitle-args';
+import { DEFAULT_SUBTITLE_MODE } from '../shared/subtitle-args';
+import type { AppSettings } from '../shared/settings';
+
+export type { AppSettings, BackgroundMode, CloseBehavior } from '../shared/settings';
 import { app } from 'electron';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 
-/**
- * 'gradient' is the install site's own gradient and the app default;
- * 'theme' selects one of the ambient themes named by `backgroundTheme`.
- */
-export type BackgroundMode = 'solid' | 'bing' | 'picsum' | 'gradient' | 'theme';
 
 /**
  * The solid colour the app shipped as its default before the site gradient
@@ -16,44 +14,6 @@ export type BackgroundMode = 'solid' | 'bing' | 'picsum' | 'gradient' | 'theme';
  */
 const LEGACY_DEFAULT_SOLID_BG = '#0b1014';
 
-export interface AppSettings {
-  downloadDir: string;
-  useCookies?: boolean;
-  maxConcurrent?: number;
-  scheduledStartTime?: string | null;
-  hasOnboarded?: boolean;
-  densityMode?: 'comfortable' | 'compact';
-  backgroundMode?: BackgroundMode;
-  backgroundImageUrl?: string;
-  solidColorBg?: string;
-  /** Ambient theme id, used when backgroundMode is 'theme'. */
-  backgroundTheme?: string;
-  bingRefreshInterval?: number;
-  clipboardWatcher?: boolean;
-  ytdlpOptions?: {
-    /**
-     * Default for the per-download Subtitles picker.
-     *
-     * Replaces `embedSubs`, which was a global override applied *after* the
-     * per-download choice — so "None" still embedded. It is a default now, not
-     * an override.
-     */
-    subtitleMode?: SubtitleMode;
-    /** @deprecated Migrated to `subtitleMode` on read. Kept so old files still parse. */
-    embedSubs?: boolean;
-    embedMetadata?: boolean;
-    sponsorBlock?: boolean;
-    customArgs?: string;
-  };
-  /**
-   * The yt-dlp version that `-U` last confirmed was the newest release
-   * available. Age alone cannot tell whether a newer release exists — yt-dlp's
-   * gaps between stable releases have reached 84 days — so the mild staleness
-   * banner is suppressed for exactly the version yt-dlp itself called current.
-   * The severe (90-day) warning is never suppressed.
-   */
-  engineConfirmedLatest?: string;
-}
 
 export class PersistenceGateway {
   private path: string;
@@ -64,7 +24,7 @@ export class PersistenceGateway {
     this.fallback = {
       downloadDir: app.getPath('downloads'),
       maxConcurrent: 3,
-      hasOnboarded: false,
+      closeBehavior: 'tray-when-active',
       densityMode: 'comfortable',
       // The site's gradient is the product's default look; a fresh install
       // should look like the thing it was downloaded from.
@@ -74,6 +34,7 @@ export class PersistenceGateway {
       clipboardWatcher: true,
       ytdlpOptions: {
         subtitleMode: DEFAULT_SUBTITLE_MODE,
+        subtitleModeForDub: 'none',
         embedMetadata: true,
         sponsorBlock: false,
         customArgs: '',
@@ -145,8 +106,13 @@ export class PersistenceGateway {
     
     const dir = dirname(this.path);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    
-    writeFileSync(this.path, JSON.stringify(next, null, 2), 'utf-8');
+
+    // Write-then-rename, as the download state already does: a crash or a
+    // full disk mid-write left a truncated settings.json, which getSettings()
+    // then silently replaced with defaults — every preference lost.
+    const tmp = `${this.path}.tmp`;
+    writeFileSync(tmp, JSON.stringify(next, null, 2), 'utf-8');
+    renameSync(tmp, this.path);
     return next;
   }
 }

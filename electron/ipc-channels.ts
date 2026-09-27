@@ -4,7 +4,6 @@ export const IPC = {
   // App
   APP_GET_VERSION:              'app:get-version',
   APP_ENGINE_VERSION_WARNING:   'app:engine-version-warning',
-  APP_MARK_ONBOARDED:           'app:mark-onboarded',
 
   // Application update (electron-updater). The renderer owns the whole visible
   // surface — the main process only drives the phase and publishes it back, so
@@ -83,7 +82,6 @@ export const IPC = {
   // Active count update (renderer → main, for badge/tray)
 
   // Native notification
-  NOTIFICATION_DOWNLOAD_COMPLETE: 'notification:download-complete',
 
   // Background
   BACKGROUND_GET_BING_IMAGE: 'background:get-bing-image',
