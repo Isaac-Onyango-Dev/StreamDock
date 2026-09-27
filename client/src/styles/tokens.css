@@ -173,13 +173,22 @@
   cursor: text;
 }
 
-::-webkit-scrollbar { width: 5px; height: 5px; }
+/*
+ * The one scrollbar definition (a second copy lived in index.css as
+ * .custom-scrollbar). The thumb was surface-4 on a transparent track — nearly
+ * the colour of the panels behind it, and invisible over a wallpaper. Now a
+ * light, translucent 4px bar inside a 10px hit area: easy to see and to grab,
+ * still slim. Chromium ignores these rules if `scrollbar-color` is set, so
+ * that property is deliberately not used.
+ */
+::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-surface-4);
+  background: hsla(220, 12%, 72%, 0.38) padding-box;
+  border: 3px solid transparent;
   border-radius: var(--radius-full);
 }
-::-webkit-scrollbar-thumb:hover { background: hsla(220, 8%, 50%, 0.5); }
+::-webkit-scrollbar-thumb:hover { background-color: hsla(220, 12%, 80%, 0.62); }
 
 @keyframes shimmer {
   0%   { background-position: -200% center; }

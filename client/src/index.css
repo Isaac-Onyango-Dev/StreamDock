@@ -115,19 +115,16 @@
     @apply mb-1 block text-[length:var(--text-xs)] font-medium text-text-secondary;
   }
 
-  .custom-scrollbar::-webkit-scrollbar {
-    width: 5px;
-    height: 5px;
+  /*
+   * The Downloads list. A stable gutter keeps the scrollbar beside the rows
+   * rather than over their right edge, and the list does not shift sideways
+   * when it starts or stops needing to scroll.
+   */
+  .downloads-scroll {
+    scrollbar-gutter: stable;
+    padding-right: 2px;
   }
 
-  .custom-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: var(--color-surface-4);
-    border-radius: var(--radius-full);
-  }
 
   /* Semi-transparent chrome panels — opaque by default, transparent only in bing/wallpaper mode */
   .bg-chrome-rail    { background-color: var(--color-surface-1); }

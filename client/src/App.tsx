@@ -185,7 +185,7 @@ export default function App() {
       <AppChrome currentTab={currentTab} activeCount={activeCount} onTabChange={setCurrentTab}>
         <div
           className={`flex h-full min-h-0 flex-col px-4 py-4 ${
-            scrollableTab ? 'overflow-y-auto custom-scrollbar' : 'overflow-hidden'
+            scrollableTab ? 'overflow-y-auto' : 'overflow-hidden'
           }`}
         >
           <div className={`page-shell ${currentTab === 'transfers' ? 'min-h-0 flex-1' : ''}`}>

@@ -59,7 +59,7 @@ export function MediaLanguageSelectionModal({
                 </div>
 
                 {/* Content */}
-                <div className="flex-1 overflow-y-auto px-4 py-3 custom-scrollbar">
+                <div className="flex-1 overflow-y-auto px-4 py-3">
                     {/* The stream-language list used to live here as well as in the
                         main row, so the same choice had two owners and the modal's
                         copy was the one behind a button. The row owns it now; this

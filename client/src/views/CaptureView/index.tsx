@@ -962,7 +962,7 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
             )}
 
             {probe && (
-              <div className="max-h-72 space-y-1 overflow-y-auto custom-scrollbar pr-1">
+              <div className="max-h-72 space-y-1 overflow-y-auto pr-1">
                 {visiblePreview.map((item, offset) => {
                   const index = batchStart + offset;
                   return (

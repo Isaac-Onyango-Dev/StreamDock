@@ -219,6 +219,14 @@ function ProgressRowView({
                   {isQueued && queuePosition !== undefined && (
                     <span className="text-[10px] text-text-disabled">#{queuePosition + 1}</span>
                   )}
+                  {/* The language the source was *proven* to serve. A requested
+                      language that could not be proven fails the download
+                      instead (session 22), so this never shows a guess. */}
+                  {item.resolvedTranslation && (
+                    <span className="badge bg-surface-3 text-text-secondary">
+                      {item.resolvedTranslation.charAt(0).toUpperCase() + item.resolvedTranslation.slice(1)}
+                    </span>
+                  )}
                   {/* A skipped file exits 0 and used to read as a fresh download —
                       a 200MB episode "completing" in six seconds. Say which it was. */}
                   <span className={`badge ${statusTone(item.status)}`}>
@@ -270,7 +278,9 @@ function ProgressRowView({
               </div>
             )}
 
-            {item.error && (
+            {/* Only a failed row carries an error. Completed rows used to keep
+                one from a fragment yt-dlp had retried successfully. */}
+            {isFailed && item.error && (
               <div role="alert" className="mt-2 rounded-md bg-error-subtle px-2 py-1 text-xs text-error">
                 <div className="flex items-start gap-1.5">
                   <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
@@ -334,7 +344,7 @@ function ProgressRowView({
                   )}
                 </>
               )}
-              {isQueued && (
+              {(isQueued || item.status === 'scheduled') && (
                 <button type="button" onClick={() => onCancel(item.id)} className="btn-danger h-7 px-2 text-xs">
                   Cancel
                 </button>

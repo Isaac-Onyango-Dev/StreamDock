@@ -1,5 +1,5 @@
 import { Download, LayoutGrid, List, Pause, Play, Trash2 } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { ProgressRow } from '../../components/ProgressRow';
 import { useDownloadRecords } from '../../store/useDownloadStore';
 
@@ -39,25 +39,30 @@ export function TransferView({
   onResumeAll,
 }: TransferViewProps) {
   const items = useDownloadRecords();
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [scrollTop, setScrollTop] = useState(0);
+
+  // Rows present when the tab opens appear at once; only rows that arrive
+  // afterwards animate in. The entrance used to be delayed by 20ms per *index*,
+  // so row 50 was invisible for a second and row 300 for six — and every row
+  // scrolled back into view replayed it.
+  const seen = useRef<Set<string> | null>(null);
+  if (seen.current === null) seen.current = new Set(items.map((i) => i.id));
+  useEffect(() => {
+    for (const item of items) seen.current!.add(item.id);
+  }, [items]);
 
   const hasCompleted = useMemo(() => items.some((i) => i.status === 'completed'), [items]);
   const hasFailed = useMemo(() => items.some((i) => i.status === 'failed'), [items]);
   const hasActive = useMemo(() => items.some((i) => ['scheduled', 'queued', 'resolving', 'running'].includes(i.status)), [items]);
   const hasPaused = useMemo(() => items.some((i) => i.status === 'paused'), [items]);
   const hasCancelled = useMemo(() => items.some((i) => i.status === 'cancelled'), [items]);
-  const queueItems = useMemo(
-    () => items.filter((i) => i.status === 'queued').sort((a, b) => a.priority - b.priority),
-    [items],
-  );
+  // Position in the queue, looked up per row: a map built once per render. A
+  // findIndex per queued row made every progress event quadratic in the queue.
+  const queuePositions = useMemo(() => {
+    const positions = new Map<string, number>();
+    for (const item of items) if (item.status === 'queued') positions.set(item.id, positions.size);
+    return positions;
+  }, [items]);
 
-  const ITEM_HEIGHT = density === 'comfortable' ? 96 : 44;
-  const GAP = 8;
-  const VISIBLE_COUNT = Math.ceil(800 / (ITEM_HEIGHT + GAP)) + 5;
-  const startIndex = items.length > 20 ? Math.max(0, Math.floor(scrollTop / (ITEM_HEIGHT + GAP)) - 5) : 0;
-  const endIndex = items.length > 20 ? Math.min(items.length, startIndex + VISIBLE_COUNT + 10) : items.length;
-  const visibleItems = items.slice(startIndex, endIndex);
 
   return (
     <section className="flex min-h-0 flex-1 flex-col">
@@ -119,11 +124,19 @@ export function TransferView({
         )}
       </div>
 
-      <div
-        ref={scrollRef}
-        onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
-        className="min-h-0 flex-1 overflow-y-auto custom-scrollbar"
-      >
+      {/*
+        A plain list of memoised rows. The hand-rolled virtualiser that was here
+        assumed rows of 96px (44px compact) when a real row is ~200px and varies
+        with its error and stall notes, so the scroll height changed while
+        scrolling: rows jumped and the thumb resized under the pointer, and it
+        switched layout mode at the 21st item. content-visibility was tried and
+        rejected for the same reason in a milder form — off-screen rows are sized
+        from an estimate, so the list grew as you reached the bottom. Measured in
+        the production build (session 22): with 1000 rows a progress event costs
+        about 1ms of work, and opening the tab takes about 1s — ~50ms for a
+        53-episode queue — so windowing is not worth its bugs at this scale.
+      */}
+      <div className="downloads-scroll min-h-0 flex-1 overflow-y-auto">
         {items.length === 0 ? (
           <div
             aria-live="polite"
@@ -138,40 +151,29 @@ export function TransferView({
             </p>
           </div>
         ) : (
-          <div
-            className="relative w-full"
-            style={{ height: items.length > 20 ? `${items.length * (ITEM_HEIGHT + GAP)}px` : 'auto' }}
-          >
-            <div
-              className="absolute left-0 right-0 top-0 flex flex-col gap-2"
-              style={{ transform: items.length > 20 ? `translateY(${startIndex * (ITEM_HEIGHT + GAP)}px)` : 'none' }}
-            >
-              {visibleItems.map((item, idx) => {
-                const queuePosition = item.status === 'queued'
-                  ? queueItems.findIndex((qi) => qi.id === item.id)
-                  : undefined;
-                return (
-                  <div
-                    key={item.id}
-                    className="animate-entrance-row"
-                    style={{ animationDelay: `${(startIndex + idx) * 20}ms`, animationFillMode: 'backwards' }}
-                  >
-                    <ProgressRow
-                      item={item}
-                      density={density}
-                      onCancel={onCancel}
-                      onPause={onPause}
-                      onResume={onResume}
-                      onRetry={onRetry}
-                      onOpenFile={onOpenFile}
-                      onShowFolder={onShowFolder}
-                      onRemove={onRemoveItem}
-                      queuePosition={queuePosition}
-                    />
-                  </div>
-                );
-              })}
-            </div>
+          <div className="flex flex-col gap-2">
+            {items.map((item) => {
+              const queuePosition = queuePositions.get(item.id);
+              return (
+                <div
+                  key={item.id}
+                  className={`download-row ${seen.current!.has(item.id) ? '' : 'animate-entrance-row'}`}
+                >
+                  <ProgressRow
+                    item={item}
+                    density={density}
+                    onCancel={onCancel}
+                    onPause={onPause}
+                    onResume={onResume}
+                    onRetry={onRetry}
+                    onOpenFile={onOpenFile}
+                    onShowFolder={onShowFolder}
+                    onRemove={onRemoveItem}
+                    queuePosition={queuePosition}
+                  />
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

@@ -1334,6 +1334,26 @@ function verifySettingsAreReal(): void {
   assert(!/type Settings = \{/.test(preload), 'the preload keeps no copy of the settings shape');
 }
 
+/**
+ * The Downloads list stays still while it scrolls (session 22, phase 6).
+ *
+ * A virtualiser that assumed 96px rows (real rows are ~200px) changed the
+ * scroll height mid-scroll; the entrance animation was delayed 20ms per index
+ * (row 300 invisible for six seconds); and the scrollbar was defined twice and
+ * nearly invisible.
+ */
+function verifyDownloadsList(): void {
+  const list = stripComments(readProjectFile('client/src/views/TransferView/index.tsx'));
+  assert(!/ITEM_HEIGHT|translateY\(/.test(list), 'the Downloads list has no fixed-row-height virtualiser');
+  assert(!/animationDelay/.test(list), 'rows are not delayed by their index');
+  assert(!/findIndex\(/.test(list), 'queue positions are not looked up with a per-row scan');
+  const css = readProjectFile('client/src/index.css');
+  assert(!css.includes('.custom-scrollbar'), 'there is one scrollbar definition, not two');
+  assert(/\.downloads-scroll \{[^}]*scrollbar-gutter: stable/.test(css), 'the list keeps a gutter for its scrollbar');
+  const row = stripComments(readProjectFile('client/src/components/ProgressRow.tsx'));
+  assert(/\{isFailed && item\.error && \(/.test(row), 'a row shows an error only when the download failed');
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
@@ -1360,5 +1380,6 @@ verifySingleLifecycleOwner();
 verifyRendererIsProjection();
 verifyProbeLifecycle();
 verifySettingsAreReal();
+verifyDownloadsList();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);
