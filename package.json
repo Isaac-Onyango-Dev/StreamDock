@@ -88,14 +88,7 @@
     },
     "files": [
       "dist/**/*",
-      "dist-electron/**/*",
-      "assets/**/*",
-      "binaries/**/*",
-      "plugins/**/*",
-      "plugins-win/**/*"
-    ],
-    "asarUnpack": [
-      "binaries/**/*"
+      "dist-electron/**/*"
     ],
     "extraResources": [
       {

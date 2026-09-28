@@ -131,6 +131,9 @@ function isIntermediatePath(filePath: string): boolean {
   return /\.f\d+\.[a-z0-9]+$/i.test(base) || /\.(vtt|srt|ass|mka|opus|3gp|dash)$/i.test(base);
 }
 
+/** A "[download]  42.5% of …" progress line. */
+const PROGRESS_TICK = /^\[download\]\s+[\d.]+%/;
+
 /** yt-dlp phases that print no progress, so silence during them is not a stall. */
 const POSTPROCESS_LINE = /^\[(Merger|Fixup\w*|Metadata|MoveFiles|Embed\w*|ExtractAudio|\w*Convertor|ffmpeg|SponsorBlock|ModifyChapters)\]/;
 
@@ -909,7 +912,11 @@ export class DownloadEngine {
       const trimmed = line.trim();
       if (!trimmed) continue;
 
-      log.debug(`[engine:${id}] ${trimmed.substring(0, 200)}`);
+      // Everything yt-dlp says goes to the log except the progress ticks: those
+      // were ~95% of it (23,537 lines in one session, a 5MB log about to rotate
+      // away the evidence). The retried "Got error" lines that diagnosed the
+      // stale-error bug are kept.
+      if (!PROGRESS_TICK.test(trimmed)) log.debug(`[engine:${id}] ${trimmed.substring(0, 200)}`);
 
       if (POSTPROCESS_LINE.test(trimmed)) task.watch.idle();
 

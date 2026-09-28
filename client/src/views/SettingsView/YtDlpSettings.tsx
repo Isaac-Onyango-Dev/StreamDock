@@ -36,8 +36,8 @@ export function YtDlpSettings({ settings, onSettingsChange }: YtDlpSettingsProps
           const list = await window.streamDock.pluginsList();
           if (Array.isArray(list)) setPlugins(list);
         }
-      } catch (e) {
-        console.error('Failed to load plugins:', e);
+      } catch {
+        // The list is informational; an empty one reads as "No plugins detected".
       }
     };
     getPlugins();

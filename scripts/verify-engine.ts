@@ -1354,6 +1354,30 @@ function verifyDownloadsList(): void {
   assert(/\{isFailed && item\.error && \(/.test(row), 'a row shows an error only when the download failed');
 }
 
+/**
+ * Nothing shipped twice, nothing declared for no one (session 22, phase 7).
+ *
+ * build.files packaged the engines, plugins and assets into the app bundle
+ * (and asarUnpack unpacked the engines again) while extraResources copied them
+ * to resources/ — the only place the app reads them from. Installed builds
+ * carried 331MB of engines nothing opened.
+ */
+function verifyNoDeadWeight(): void {
+  const pkg = JSON.parse(readProjectFile('package.json')) as { build: { files: string[]; asarUnpack?: string[]; extraResources: Array<{ from: string }> } };
+  for (const dir of ['binaries', 'plugins', 'plugins-win', 'assets']) {
+    assert(!pkg.build.files.some((f) => f.startsWith(`${dir}/`)), `${dir}/ is not packaged into the app bundle as well as resources/`);
+    assert(pkg.build.extraResources.some((r) => r.from.replace(/\/$/, '') === dir), `${dir}/ is still shipped once, in resources/`);
+  }
+  assert(!pkg.build.asarUnpack, 'nothing is unpacked from the bundle a second time');
+
+  const channels = stripComments(readProjectFile('electron/ipc-channels.ts'));
+  for (const dead of ['WINDOW_PLATFORM', 'DIALOG_ACTIVE_DOWNLOADS', 'EVENT_STALL', 'EVENT_NETWORK_STATUS', 'EVENT_QUEUE_CHANGED', 'BACKGROUND_GET_BING', 'EVENT_ENGINE_STATUS', 'APP_GET_VERSION', 'APP_MARK_ONBOARDED']) {
+    assert(!channels.includes(dead), `no IPC channel ${dead} that nothing sends or handles`);
+  }
+  const engine = stripComments(readProjectFile('electron/download-engine.ts'));
+  assert(/if \(!PROGRESS_TICK\.test\(trimmed\)\) log\.debug/.test(engine), 'progress ticks are not written to the log file');
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
@@ -1381,5 +1405,6 @@ verifyRendererIsProjection();
 verifyProbeLifecycle();
 verifySettingsAreReal();
 verifyDownloadsList();
+verifyNoDeadWeight();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);

@@ -22,26 +22,22 @@ describe('format-detector', () => {
     it('detects direct MP4', () => {
       const result = detectFormat('https://example.com/video.mp4');
       expect(result.format).toBe('mp4');
-      expect(result.requiresRange).toBe(true);
     });
 
     it('detects direct MKV', () => {
       const result = detectFormat('https://example.com/video.mkv');
       expect(result.format).toBe('mkv');
-      expect(result.requiresRange).toBe(true);
     });
 
     it('detects direct WebM', () => {
       const result = detectFormat('https://example.com/video.webm');
       expect(result.format).toBe('webm');
-      expect(result.requiresRange).toBe(true);
     });
 
     it('detects audio files', () => {
       for (const ext of ['.mp3', '.m4a', '.opus', '.flac', '.wav', '.aac']) {
         const result = detectFormat(`https://example.com/audio${ext}`);
         expect(result.format).toBe('audio');
-        expect(result.requiresRange).toBe(true);
       }
     });
 
@@ -78,39 +74,39 @@ describe('format-detector', () => {
 
   describe('buildFormatArgs', () => {
     it('HLS: uses hls-prefer-native', () => {
-      const args = buildFormatArgs({ format: 'hls', isLive: false, requiresRange: false });
+      const args = buildFormatArgs({ format: 'hls', isLive: false });
       expect(args).toContain('--hls-use-mpegts');
       expect(args).toContain('--hls-prefer-native');
     });
 
     it('DASH: adds merge-output-format mp4', () => {
-      const args = buildFormatArgs({ format: 'dash', isLive: false, requiresRange: false });
+      const args = buildFormatArgs({ format: 'dash', isLive: false });
       expect(args).toContain('--merge-output-format');
       expect(args).toContain('mp4');
     });
 
     it('Direct files: uses concurrent-fragments', () => {
-      const args = buildFormatArgs({ format: 'mp4', isLive: false, requiresRange: true });
+      const args = buildFormatArgs({ format: 'mp4', isLive: false });
       expect(args).toContain('--concurrent-fragments');
       expect(args).toContain('4');
     });
 
     it('Audio: extracts to mp3', () => {
-      const args = buildFormatArgs({ format: 'audio', isLive: false, requiresRange: true });
+      const args = buildFormatArgs({ format: 'audio', isLive: false });
       expect(args).toContain('-x');
       expect(args).toContain('--audio-format');
       expect(args).toContain('mp3');
     });
 
     it('Live: uses live-from-start', () => {
-      const args = buildFormatArgs({ format: 'live', isLive: true, requiresRange: false });
+      const args = buildFormatArgs({ format: 'live', isLive: true });
       expect(args).toContain('--live-from-start');
       expect(args).toContain('--hls-use-mpegts');
     });
 
     it('Quality parameter overrides format selection', () => {
       const args = buildFormatArgs(
-        { format: 'hls', isLive: false, requiresRange: false },
+        { format: 'hls', isLive: false },
         'bestvideo[height<=720]+bestaudio'
       );
       expect(args).toContain('-f');

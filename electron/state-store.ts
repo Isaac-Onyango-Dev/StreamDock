@@ -92,15 +92,4 @@ export class StateStore {
       log.error('[state-store] Failed to save state:', err);
     }
   }
-
-  /** Clear all persisted state. */
-  clear(): void {
-    try {
-      if (existsSync(this.statePath)) {
-        writeFileSync(this.statePath, JSON.stringify({ version: STATE_VERSION, records: [], requests: [] }), 'utf-8');
-      }
-    } catch (err) {
-      log.error('[state-store] Failed to clear state:', err);
-    }
-  }
 }

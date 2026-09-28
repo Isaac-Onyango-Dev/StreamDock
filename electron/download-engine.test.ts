@@ -595,3 +595,18 @@ describe('events to the renderer', () => {
     expect(new Set(revisions).size).toBe(revisions.length);
   });
 });
+
+describe('log volume', () => {
+  it('keeps yt-dlp messages in the log but not its progress ticks', async () => {
+    vi.mocked(log.debug).mockClear();
+    const engine = newEngine();
+    startVideo(engine, YOUTUBE);
+    childFor(YOUTUBE).out(
+      '[download]  42.0% of   10.00MiB at    1.00MiB/s ETA 00:06',
+      '[download] Got error: Failed to perform, curl: (28) Connection timed out. Retrying (1/10)...',
+    );
+    const logged = vi.mocked(log.debug).mock.calls.map(([m]) => String(m));
+    expect(logged.some((m) => m.includes('42.0%'))).toBe(false);
+    expect(logged.some((m) => m.includes('Retrying (1/10)'))).toBe(true);
+  });
+});

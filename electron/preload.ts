@@ -24,7 +24,6 @@ const on = <T>(channel: string, callback: (payload: T) => void): Unsubscribe => 
 
 const api = {
   // App
-  getVersion: () => ipcRenderer.invoke(IPC.APP_GET_VERSION) as Promise<string>,
   onEngineVersionWarning: (callback: (warning: string) => void): Unsubscribe =>
     on<string>(IPC.APP_ENGINE_VERSION_WARNING, callback),
 

@@ -20,6 +20,7 @@ import { buildAudioChoices, hasLanguageStreams } from '../../lib/audio-choices';
 import { inferModeFromText } from '../../lib/url-routing';
 import { playDiscovery, playPop } from '../../lib/audio';
 import { useSourceProbes } from './useSourceProbes';
+import { downloadStore } from '../../store/DownloadStore';
 
 interface CaptureViewProps {
   mode: CaptureMode;
@@ -429,6 +430,18 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
         return null;
       }
       setAnalysis(result.data);
+      // Advisory only (source-status.ts): the reference index may list this
+      // host as retired, which is worth a word before a long download fails.
+      // It never blocks anything, and says nothing unless it is sure. The
+      // lookup was built in session 2 and its renderer call later lost.
+      if (result.data.probesLanguages) {
+        const host = result.data.host;
+        void window.streamDock?.checkSourceStatus?.(host).then((status) => {
+          if (status === 'retired') {
+            downloadStore.addToast(`${host} is listed as retired by the reference index, so downloads from it may fail.`, 'info');
+          }
+        });
+      }
       return result.data;
     } catch (error) {
       onError(error instanceof Error ? error.message : String(error));

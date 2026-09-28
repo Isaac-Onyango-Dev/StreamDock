@@ -14,7 +14,6 @@ export type MediaFormat =
 export interface FormatDetection {
   format: MediaFormat;
   isLive: boolean;
-  requiresRange: boolean;  // True for direct files — use range-request acceleration
   liveMessage?: string;    // Human-readable message for live streams
 }
 
@@ -30,7 +29,7 @@ export function detectFormat(url: string): FormatDetection {
   try {
     parsed = new URL(url);
   } catch {
-    return { format: 'unknown', isLive: false, requiresRange: false };
+    return { format: 'unknown', isLive: false };
   }
 
   const lower = url.toLowerCase();
@@ -39,10 +38,10 @@ export function detectFormat(url: string): FormatDetection {
 
   // ── Manifest formats ────────────────────────────────────────────────────────
   if (lower.includes('.m3u8') || lower.includes('/hls/') || lower.includes('/playlist.m3u8')) {
-    return { format: 'hls', isLive: false, requiresRange: false };
+    return { format: 'hls', isLive: false };
   }
   if (lower.includes('.mpd') || lower.includes('/dash/') || lower.includes('manifest.mpd')) {
-    return { format: 'dash', isLive: false, requiresRange: false };
+    return { format: 'dash', isLive: false };
   }
 
   // ── Fragmented MP4 (fMP4) detection ─────────────────────────────────────────
@@ -55,40 +54,37 @@ export function detectFormat(url: string): FormatDetection {
   // fragmented/init-segment stream and 'fmp4' deliberately doesn't request it.
   if (lower.includes('/fragment') || lower.includes('/seg') || lower.includes('fmp4') ||
       lower.includes('/init.mp4') || lower.includes('segment_duration')) {
-    return { format: 'fmp4', isLive: false, requiresRange: false };
+    return { format: 'fmp4', isLive: false };
   }
 
   // ── Direct file formats ──────────────────────────────────────────────────────
   if (path.endsWith('.mp4') || lower.includes('.mp4?')) {
-    return { format: 'mp4', isLive: false, requiresRange: true };
+    return { format: 'mp4', isLive: false };
   }
   if (path.endsWith('.mkv') || lower.includes('.mkv?')) {
-    return { format: 'mkv', isLive: false, requiresRange: true };
+    return { format: 'mkv', isLive: false };
   }
   if (path.endsWith('.webm') || lower.includes('.webm?')) {
-    return { format: 'webm', isLive: false, requiresRange: true };
+    return { format: 'webm', isLive: false };
   }
   if (path.endsWith('.mp3') || path.endsWith('.m4a') || path.endsWith('.opus') ||
       path.endsWith('.flac') || path.endsWith('.wav') || path.endsWith('.aac')) {
-    return { format: 'audio', isLive: false, requiresRange: true };
+    return { format: 'audio', isLive: false };
   }
 
   // ── Live stream hosts ────────────────────────────────────────────────────────
   const isLiveHost = LIVE_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
   const isLivePath = LIVE_PATH_PATTERNS.some((p) => path.includes(p));
-  const isYouTubeLive =
-    (host === 'youtube.com' || host.endsWith('.youtube.com')) &&
-    (path.includes('/live') || parsed.searchParams.has('v'));
+  const isYouTubeLive = (host === 'youtube.com' || host.endsWith('.youtube.com')) && path.includes('/live');
 
   // Check the YouTube-specific case FIRST: youtube.com is also in LIVE_HOSTS, so
   // the generic isLiveHost branch below would otherwise always match first for
   // youtube.com/live/... URLs and this more specific, more informative message
   // ("YouTube Live detected — recording from start.") would never be reachable.
-  if (isYouTubeLive && path.includes('/live')) {
+  if (isYouTubeLive) {
     return {
       format: 'live',
       isLive: true,
-      requiresRange: false,
       liveMessage: 'YouTube Live detected — recording from start.',
     };
   }
@@ -97,12 +93,11 @@ export function detectFormat(url: string): FormatDetection {
     return {
       format: 'live',
       isLive: true,
-      requiresRange: false,
       liveMessage: 'Live stream detected — recording mode active.',
     };
   }
 
-  return { format: 'unknown', isLive: false, requiresRange: false };
+  return { format: 'unknown', isLive: false };
 }
 
 /** Build yt-dlp arguments specific to the detected format. */

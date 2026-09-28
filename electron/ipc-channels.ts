@@ -2,7 +2,6 @@
 
 export const IPC = {
   // App
-  APP_GET_VERSION:              'app:get-version',
   APP_ENGINE_VERSION_WARNING:   'app:engine-version-warning',
 
   // Application update (electron-updater). The renderer owns the whole visible
@@ -22,11 +21,9 @@ export const IPC = {
   // Window focus/blur events (main → renderer)
   WINDOW_FOCUSED:  'window:focused',
   WINDOW_BLURRED:  'window:blurred',
-  WINDOW_PLATFORM: 'window:platform',
 
   // Dialog
   DIALOG_SELECT_DOWNLOAD_FOLDER: 'dialog:select-download-folder',
-  DIALOG_ACTIVE_DOWNLOADS:       'dialog:active-downloads',
 
   // Clipboard
   CLIPBOARD_READ_TEXT: 'clipboard:read-text',
@@ -66,10 +63,6 @@ export const IPC = {
   EVENT_DOWNLOAD_ERROR:     'event:download-error',
   /** Ids the engine deleted; the renderer drops them and ignores late events. */
   EVENT_DOWNLOAD_REMOVED:   'event:download-removed',
-  EVENT_ENGINE_STATUS:      'event:engine-status',
-  EVENT_STALL:              'event:stall',
-  EVENT_NETWORK_STATUS:     'event:network-status',
-  EVENT_QUEUE_CHANGED:      'event:queue-changed',
   EVENT_UPDATE_STATE:       'event:update-state',
 
   // Engine management
@@ -79,13 +72,7 @@ export const IPC = {
   MENU_POPUP:           'menu:popup',
   ENGINE_STATUS:        'engine:status',
 
-  // Active count update (renderer → main, for badge/tray)
-
-  // Native notification
-
   // Background
-  BACKGROUND_GET_BING_IMAGE: 'background:get-bing-image',
-  BACKGROUND_GET_BING_INFO:  'background:get-bing-info',
   WALLPAPER_ROTATE_NOW:      'wallpaper:rotate-now',
   EVENT_WALLPAPER_UPDATED:   'event:wallpaper-updated',
 
@@ -95,4 +82,3 @@ export const IPC = {
   EVENT_CLIPBOARD_URL: 'event:clipboard-url',
 } as const;
 
-export type IpcChannel = (typeof IPC)[keyof typeof IPC];

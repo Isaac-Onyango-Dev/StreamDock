@@ -16,7 +16,6 @@ export {};
 declare global {
   interface Window {
     streamDock?: {
-      getVersion: () => Promise<string>;
       // Application update. The renderer owns the visible flow; these drive it.
       getUpdateState: () => Promise<UpdateState>;
       checkForAppUpdate: () => Promise<UpdateState>;

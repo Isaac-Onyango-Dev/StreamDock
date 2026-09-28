@@ -201,7 +201,6 @@ function createWindow(): void {
 
 function setupIpc(): void {
   // ── App ────────────────────────────────────────────────────────────────────
-  ipcMain.handle(IPC.APP_GET_VERSION, () => app.getVersion());
 
   // Application update. The renderer draws the whole flow (see
   // components/UpdateBanner.tsx); these only drive it. Each resolves to the
@@ -311,8 +310,6 @@ function setupIpc(): void {
 
   // ── Engine Status ──────────────────────────────────────────────────────────
   ipcMain.handle(IPC.ENGINE_STATUS, () => getBinaryStatus());
-  // Legacy channel name
-  ipcMain.handle(IPC.EVENT_ENGINE_STATUS, () => getBinaryStatus());
 
   // ── Download Lifecycle ─────────────────────────────────────────────────────
   ipcMain.handle(IPC.DOWNLOAD_START_VIDEO, async (_event, request: Omit<DownloadRequest, 'mode'>) => {
@@ -813,14 +810,14 @@ app.whenReady().then(async () => {
         const filename = raw.replace(/[/\\]/g, '');
 
         if (!filename || filename !== raw || filename.includes('..')) {
-          console.error(`[wallpaper] Invalid wallpaper URL: ${request.url}`);
+          log.warn(`[wallpaper] Invalid wallpaper URL: ${request.url}`);
           return new Response('Invalid wallpaper URL', { status: 400 });
         }
 
         const filePath = join(CACHE_DIR, filename);
 
         if (!existsSync(filePath)) {
-          console.error(`[wallpaper] File not found: ${filePath}`);
+          log.warn(`[wallpaper] File not found: ${filePath}`);
           return new Response('Not found', { status: 404 });
         }
 
@@ -830,7 +827,7 @@ app.whenReady().then(async () => {
       } catch (err) {
         // A failure serving one wallpaper request must degrade to a plain
         // 404/500 response, never crash the main process.
-        console.error('[wallpaper] protocol handler request failed:', err);
+        log.error('[wallpaper] protocol handler request failed:', err);
         return new Response('Internal error', { status: 500 });
       }
     });
