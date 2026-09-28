@@ -1424,6 +1424,52 @@ function verifyPlayerSubtitlesDelivered(): void {
   }
 }
 
+/**
+ * The Windows installer looks like StreamDock.
+ *
+ * It had no artwork of its own, so its Welcome and Finish pages showed NSIS's
+ * stock blue nsis3-metro.bmp, and the window was bitmap-stretched (blurry) at
+ * 125% scaling. electron-builder finds the art by name in build/; a renamed or
+ * resized file silently brings the stock look back.
+ */
+async function verifyInstallerLooksLikeTheApp(): Promise<void> {
+  const { SIDEBAR, HEADER } = await import('./generate-installer-art');
+  for (const [name, size] of [['installerSidebar.bmp', SIDEBAR], ['installerHeader.bmp', HEADER]] as const) {
+    const bmp = readFileSync(join(root, 'build', name));
+    assert(
+      bmp.toString('ascii', 0, 2) === 'BM' && bmp.readUInt16LE(28) === 24 && bmp.readUInt32LE(30) === 0,
+      `build/${name} is an uncompressed 24-bit BMP, the format NSIS loads`,
+    );
+    assert(
+      bmp.readInt32LE(18) === size.width && bmp.readInt32LE(22) === size.height,
+      `build/${name} is ${size.width}x${size.height}, the size Modern UI lays out`,
+    );
+  }
+
+  const nsh = readProjectFile('build/installer.nsh');
+  const ink = (JSON.parse(readProjectFile('design/tokens.json')) as { colors: { ink: string } }).colors.ink.slice(1);
+  assert(new RegExp(`!define MUI_BGCOLOR "${ink}"`, 'i').test(nsh), 'the installer pages use the brand ink from design/tokens.json');
+  assert(/!define MUI_FORCECLASSICCONTROLS/.test(nsh), 'the Finish page checkbox text stays readable on the dark page');
+  assert(
+    ['MUI_WELCOMEFINISHPAGE_BITMAP_STRETCH', 'MUI_UNWELCOMEFINISHPAGE_BITMAP_STRETCH', 'MUI_HEADERIMAGE_BITMAP_STRETCH']
+      .every((define) => new RegExp(`!define ${define} "NoStretchNoCrop"`).test(nsh)),
+    'the artwork is drawn 1:1, never stretched jagged',
+  );
+  assert(/^ManifestDPIAware true/m.test(nsh), 'the installer is DPI-aware, so its text is not bitmap-stretched');
+
+  const pkg = JSON.parse(readProjectFile('package.json')) as { build: { appId: string; nsis: { oneClick?: boolean } } };
+  assert(pkg.build.nsis.oneClick === false, 'the installer is the assisted one, the only kind that shows the artwork');
+
+  // "Run StreamDock" through the Start Menu shortcut failed on Windows 11 with
+  // "Windows cannot find ...\StreamDock.lnk"; the exe itself launches.
+  assert(/!macro customInstall[\s\S]*?StrCpy \$launchLink "\$appExe"[\s\S]*?!macroend/.test(nsh), 'the Finish page launches StreamDock.exe, not the shortcut Explorer cannot open');
+  const main = stripComments(readProjectFile('electron/main.ts'));
+  assert(
+    main.includes(`app.setAppUserModelId('${pkg.build.appId}')`),
+    'the app sets the same AppUserModelID as its shortcut, so a launch from the exe groups and notifies the same',
+  );
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
@@ -1453,5 +1499,6 @@ verifySettingsAreReal();
 verifyDownloadsList();
 verifyNoDeadWeight();
 verifyPlayerSubtitlesDelivered();
+await verifyInstallerLooksLikeTheApp();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);

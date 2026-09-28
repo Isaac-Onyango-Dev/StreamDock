@@ -18,6 +18,7 @@
     "tokens:build": "tsx scripts/generate-tokens.ts",
     "icons:build": "tsx scripts/generate-icons.ts",
     "screenshots:build": "tsx scripts/optimize-screenshots.ts",
+    "installer:art": "tsx scripts/generate-installer-art.ts",
     "build": "tsx scripts/generate-tokens.ts && tsx scripts/build.ts && electron-builder",
     "build:app": "tsx scripts/generate-tokens.ts && tsx scripts/build.ts",
     "typecheck": "tsc --noEmit -p tsconfig.renderer.json && tsc --noEmit -p tsconfig.electron.json",

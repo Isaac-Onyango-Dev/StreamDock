@@ -99,6 +99,12 @@ installCrashReporter();
 if (!app.requestSingleInstanceLock()) {
   app.exit(0);
 }
+
+// The identity Windows groups taskbar buttons and notifications under. It is
+// build.appId, which the installer also stamps on the Start Menu shortcut; set
+// here, a launch from StreamDock.exe itself (the installer's "Run StreamDock")
+// is the same app as a launch from the shortcut.
+if (process.platform === 'win32') app.setAppUserModelId('com.streamdock.app');
 app.on('second-instance', () => {
   if (!mainWindow) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
