@@ -1,10 +1,9 @@
 // Role: discover dubbed audio and subtitle tracks from manifests and yt-dlp metadata.
 
-import { net } from 'electron';
-import { spawn } from 'child_process';
 import log from 'electron-log';
 import { buildPluginDirArgs, resolveYtDlpCommand } from './binary-resolver';
 import { extractManifest } from './manifest-extractor';
+import { fetchWithDeadline, removeTempFile, runProbeChild } from './probe-support';
 import { getLanguageName, isOriginalLanguageHint, normalizeLanguageCode } from './language-registry';
 import {
   parseManifestContent,
@@ -34,34 +33,13 @@ export interface ProbeMediaTracksRequest {
   referer?: string;
 }
 
-const SPOOF_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36';
-
-function fetchText(url: string, referer?: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    try {
-      const request = net.request({
-        method: 'GET',
-        url,
-        headers: {
-          'User-Agent': SPOOF_UA,
-          Accept: '*/*',
-          ...(referer ? { Referer: referer } : {}),
-        },
-      });
-      let body = '';
-      request.on('response', (response) => {
-        response.on('data', (chunk: Buffer) => { body += chunk.toString(); });
-        response.on('end', () => resolve(body || null));
-        response.on('error', () => resolve(null));
-      });
-      request.on('error', () => resolve(null));
-      request.end();
-    } catch {
-      resolve(null);
-    }
-  });
-}
+/**
+ * A manifest is a few kilobytes; a server that has said nothing in this long
+ * is not going to. The fetch had no deadline, so one silent CDN left the
+ * track picker's spinner running forever.
+ */
+const MANIFEST_FETCH_TIMEOUT_MS = 20_000;
+const YTDLP_TRACK_PROBE_TIMEOUT_MS = 25_000;
 
 function mergeTracks(
   primary: ParsedManifestTracks | null,
@@ -146,7 +124,10 @@ function audioTrackKey(fmt: NonNullable<YtDlpJson['formats']>[number], fallbackI
   return `format:${fmt.format_id || fallbackIndex}`;
 }
 
-async function probeWithYtDlp(url: string): Promise<{ audio: AudioTrackInfo[]; subs: SubtitleTrackInfo[]; notes: string[] }> {
+async function probeWithYtDlp(
+  url: string,
+  signal?: AbortSignal,
+): Promise<{ audio: AudioTrackInfo[]; subs: SubtitleTrackInfo[]; notes: string[] }> {
   const notes: string[] = [];
   const audio: AudioTrackInfo[] = [];
   const subs: SubtitleTrackInfo[] = [];
@@ -170,24 +151,8 @@ async function probeWithYtDlp(url: string): Promise<{ audio: AudioTrackInfo[]; s
     url,
   ];
 
-  const jsonText = await new Promise<string | null>((resolve) => {
-    const child = spawn(ytDlpCmd.command, args, { windowsHide: true });
-    let stdout = '';
-    let settled = false;
-    const finish = (value: string | null) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(value);
-    };
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      finish(null);
-    }, 25_000);
-    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-    child.on('error', () => finish(null));
-    child.on('close', (code) => finish(code === 0 && stdout.trim() ? stdout : null));
-  });
+  const result = await runProbeChild(ytDlpCmd.command, args, { timeoutMs: YTDLP_TRACK_PROBE_TIMEOUT_MS, signal });
+  const jsonText = result.code === 0 && result.stdout.trim() ? result.stdout : null;
 
   if (!jsonText) {
     notes.push('yt-dlp metadata probe returned no data.');
@@ -270,10 +235,15 @@ async function probeWithYtDlp(url: string): Promise<{ audio: AudioTrackInfo[]; s
 
 async function probeManifestUrl(
   manifestUrl: string,
-  referer?: string,
+  referer: string | undefined,
+  signal: AbortSignal | undefined,
 ): Promise<{ parsed: ParsedManifestTracks | null; notes: string[] }> {
   const notes: string[] = [];
-  const body = await fetchText(manifestUrl, referer);
+  const { body } = await fetchWithDeadline(manifestUrl, {
+    headers: { Accept: '*/*', ...(referer ? { Referer: referer } : {}) },
+    timeoutMs: MANIFEST_FETCH_TIMEOUT_MS,
+    signal,
+  });
   if (!body) {
     notes.push('Could not fetch manifest for track parsing.');
     return { parsed: null, notes };
@@ -289,7 +259,14 @@ async function probeManifestUrl(
   return { parsed, notes };
 }
 
-export async function probeMediaTracks(request: ProbeMediaTracksRequest): Promise<MediaTrackProbe> {
+/**
+ * Describe the audio and subtitle tracks a page or manifest offers.
+ *
+ * Rejects with the signal's reason when `signal` aborts; any hidden window or
+ * yt-dlp child it started is stopped first.
+ */
+export async function probeMediaTracks(request: ProbeMediaTracksRequest, signal?: AbortSignal): Promise<MediaTrackProbe> {
+  signal?.throwIfAborted();
   const notes: string[] = [];
   let manifestUrl = request.manifestUrl;
   let referer = request.referer;
@@ -302,7 +279,12 @@ export async function probeMediaTracks(request: ProbeMediaTracksRequest): Promis
       manifestType = directType;
     } else {
       log.info(`[media-track-probe] Resolving manifest for ${request.pageUrl}`);
-      const manifest = await extractManifest(request.pageUrl);
+      const manifest = await extractManifest(request.pageUrl, undefined, signal);
+      // Nothing here hands the cookie jar to anything — the manifest fetch and
+      // the yt-dlp probe below both run without it — so it was simply left on
+      // disk, one file per probe.
+      removeTempFile(manifest?.cookiesFile);
+      signal?.throwIfAborted();
       if (manifest) {
         manifestUrl = manifest.manifestUrl;
         referer = manifest.referer || referer;
@@ -316,13 +298,14 @@ export async function probeMediaTracks(request: ProbeMediaTracksRequest): Promis
 
   let parsed: ParsedManifestTracks | null = null;
   if (manifestUrl) {
-    const manifestProbe = await probeManifestUrl(manifestUrl, referer || request.pageUrl);
+    const manifestProbe = await probeManifestUrl(manifestUrl, referer || request.pageUrl, signal);
+    signal?.throwIfAborted();
     notes.push(...manifestProbe.notes);
     parsed = manifestProbe.parsed;
     manifestType = parsed?.manifestType || manifestType;
   }
 
-  const ytdlp = await probeWithYtDlp(manifestUrl || request.pageUrl);
+  const ytdlp = await probeWithYtDlp(manifestUrl || request.pageUrl, signal);
   notes.push(...ytdlp.notes);
 
   const merged = mergeTracks(parsed, ytdlp);

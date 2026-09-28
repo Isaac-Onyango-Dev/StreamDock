@@ -1,7 +1,6 @@
 // Role: safe metadata probe for single videos, playlists, and stream pages.
-import { spawn } from 'child_process';
-import { get as httpsGet } from 'https';
 import { buildPluginDirArgs, resolveBinary, resolveYtDlpCommand } from './binary-resolver';
+import { fetchWithDeadline, runProbeChild } from './probe-support';
 import { ANIME_HOSTS, EPISODE_PATTERNS, MANIFEST_PROBE_HOSTS, PLUGIN_EXTRACTOR_HOSTS, REFERENCE_HOSTS } from './url-router';
 
 export type ProbeSupport = 'direct' | 'playlist' | 'episode-range' | 'manifest-probe' | 'unknown';
@@ -192,48 +191,22 @@ interface SeriesInfo {
   thumbnail?: string;
 }
 
-/** Fetch a page as text, following redirects. Resolves to null on any failure. */
-function fetchPage(url: string, redirectsLeft = 3): Promise<string | null> {
-  return new Promise((resolve) => {
-    const request = httpsGet(
-      url,
-      {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-            '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-          'Accept-Language': 'en-US,en;q=0.9',
-        },
-      },
-      (response) => {
-        const status = response.statusCode ?? 0;
-        const location = response.headers.location;
-        if (status >= 300 && status < 400 && location && redirectsLeft > 0) {
-          response.resume();
-          resolve(fetchPage(new URL(location, url).toString(), redirectsLeft - 1));
-          return;
-        }
-        if (status !== 200) {
-          response.resume();
-          resolve(null);
-          return;
-        }
-        let body = '';
-        response.setEncoding('utf-8');
-        response.on('data', (chunk: string) => {
-          // Series metadata lives in the document head/meta block; no need to
-          // buffer megabytes of episode-grid markup to find it.
-          if (body.length < 512_000) body += chunk;
-        });
-        response.on('end', () => resolve(body));
-      },
-    );
-    request.on('error', () => resolve(null));
-    request.setTimeout(PAGE_FETCH_TIMEOUT_MS, () => {
-      request.destroy();
-      resolve(null);
-    });
+/**
+ * Fetch a page as text, following redirects. Resolves to null on any failure.
+ *
+ * It had an idle timeout only — a server trickling bytes could hold it for
+ * ever — and no handler for a response that died mid-body. The shared fetch
+ * carries a total deadline and settles on every way a response can end.
+ */
+async function fetchPage(url: string, signal?: AbortSignal): Promise<string | null> {
+  const { status, body } = await fetchWithDeadline(url, {
+    timeoutMs: PAGE_FETCH_TIMEOUT_MS,
+    signal,
+    // Series metadata lives in the document head/meta block; no need to
+    // buffer megabytes of episode-grid markup to find it.
+    maxBytes: 512_000,
   });
+  return status === 200 ? body : null;
 }
 
 /** Read the real episode total, series title and poster out of a series page. */
@@ -328,6 +301,7 @@ export function parseSeriesApiCount(body: string): number | undefined {
 async function resolveTotalFromSeriesApi(
   html: string,
   pattern: EpisodePattern,
+  signal?: AbortSignal,
 ): Promise<number | undefined> {
   if (!pattern.seriesIdPattern || !pattern.seriesApi) return undefined;
 
@@ -341,16 +315,18 @@ async function resolveTotalFromSeriesApi(
   const seriesId = idMatch?.[1];
   if (!seriesId) return undefined;
 
-  const body = await fetchPage(pattern.seriesApi.replace('{id}', encodeURIComponent(seriesId)));
+  const body = await fetchPage(pattern.seriesApi.replace('{id}', encodeURIComponent(seriesId)), signal);
   return body ? parseSeriesApiCount(body) : undefined;
 }
 
-async function episodeRangeProbe(url: string, pattern: EpisodePattern): Promise<PlaylistProbe> {
-  const html = await fetchPage(url);
+async function episodeRangeProbe(url: string, pattern: EpisodePattern, signal?: AbortSignal): Promise<PlaylistProbe> {
+  const html = await fetchPage(url, signal);
+  signal?.throwIfAborted();
   const series = html ? parseSeriesInfo(html) : {};
   const seriesTitle = series.title || pattern.title;
   // Prefer a count the page states; otherwise ask the site's own series API.
-  const total = series.totalEpisodes ?? (html ? await resolveTotalFromSeriesApi(html, pattern) : undefined);
+  const total = series.totalEpisodes ?? (html ? await resolveTotalFromSeriesApi(html, pattern, signal) : undefined);
+  signal?.throwIfAborted();
 
   const notes: string[] = [];
   let episodes: number[];
@@ -437,7 +413,7 @@ function extractQualityOptions(info: YtDlpInfo): QualityOption[] | undefined {
   return sorted.map((height) => ({ height, label: `${height}p` }));
 }
 
-async function fallbackProbe(url: string, reason: string): Promise<PlaylistProbe> {
+async function fallbackProbe(url: string, reason: string, signal?: AbortSignal): Promise<PlaylistProbe> {
   const host = hostFromUrl(url);
   if (matchesHost(host, REFERENCE_HOSTS())) {
     return {
@@ -453,7 +429,7 @@ async function fallbackProbe(url: string, reason: string): Promise<PlaylistProbe
   }
 
   const episodePattern = detectEpisodePattern(url);
-  if (episodePattern) return episodeRangeProbe(url, episodePattern);
+  if (episodePattern) return episodeRangeProbe(url, episodePattern, signal);
 
   if (host === 'open.spotify.com' || host === 'spotify.com') {
     return {
@@ -498,15 +474,15 @@ function hasListParam(url: string): boolean {
 
 interface ProbeResult {
   probe: PlaylistProbe | null;
-  stdout: string;
   stderr: string;
 }
 
-function spawnProbe(
+async function spawnProbe(
   url: string,
   flat: boolean,
   timeoutMs: number,
-  ytDlpCmd?: { command: string; args: string[] },
+  ytDlpCmd: { command: string; args: string[] } | undefined,
+  signal: AbortSignal | undefined,
 ): Promise<ProbeResult> {
   const resolvedCmd = ytDlpCmd ?? (() => {
     const path = resolveBinary('yt-dlp');
@@ -526,39 +502,11 @@ function spawnProbe(
     url,
   ];
 
-  return new Promise((resolve) => {
-    const child = spawn(resolvedCmd.command, args, { windowsHide: true });
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-
-    const finish = (probe: PlaylistProbe | null) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      resolve({ probe, stdout, stderr });
-    };
-
-    const timeout = setTimeout(() => {
-      child.kill('SIGTERM');
-      finish(null);
-    }, timeoutMs);
-
-    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
-    child.on('error', () => finish(null));
-    child.on('close', (code) => {
-      if (settled) return;
-      if (code === 0 && stdout.trim()) {
-        finish(tryParse(url, stdout, stderr));
-        return;
-      }
-      finish(null);
-    });
-  });
+  const { code, stdout, stderr } = await runProbeChild(resolvedCmd.command, args, { timeoutMs, signal });
+  return { probe: code === 0 ? tryParse(url, stdout) : null, stderr };
 }
 
-function tryParse(url: string, stdout: string, _stderr: string): PlaylistProbe | null {
+function tryParse(url: string, stdout: string): PlaylistProbe | null {
   if (!stdout.trim()) return null;
   try {
     return parseInfo(url, stdout);
@@ -593,7 +541,12 @@ function shouldSkipYtDlpProbe(url: string): boolean {
   }
 }
 
-export async function inspectUrl(url: string): Promise<PlaylistProbe> {
+/**
+ * Describe what a URL holds. Rejects with the signal's reason when `signal`
+ * aborts, after stopping any yt-dlp probe it started.
+ */
+export async function inspectUrl(url: string, signal?: AbortSignal): Promise<PlaylistProbe> {
+  signal?.throwIfAborted();
   // Reference-index hosts (EverythingMoe and similar) must short-circuit here,
   // unconditionally and before any other check — previously this only worked
   // by coincidence (they also happened to match MANIFEST_PROBE_HOSTS below), and
@@ -606,7 +559,7 @@ export async function inspectUrl(url: string): Promise<PlaylistProbe> {
   }
 
   if (shouldSkipYtDlpProbe(url)) {
-    return await fallbackProbe(url, 'This page will be probed in a hidden browser when the download starts.');
+    return await fallbackProbe(url, 'This page will be probed in a hidden browser when the download starts.', signal);
   }
 
   // Known anime sites rely on bundled/local yt-dlp plugins. Prefer the bundled
@@ -623,7 +576,7 @@ export async function inspectUrl(url: string): Promise<PlaylistProbe> {
   }
 
   // Fast pass: try with --flat-playlist first
-  let result = await spawnProbe(url, true, PROBE_TIMEOUT_MS, ytDlpCmd);
+  let result = await spawnProbe(url, true, PROBE_TIMEOUT_MS, ytDlpCmd, signal);
   let probe = result.probe;
 
   // If the URL has a list= parameter but the probe returned only 1 entry
@@ -636,10 +589,10 @@ export async function inspectUrl(url: string): Promise<PlaylistProbe> {
       !probe.qualityOptions?.length
     )
   ) {
-    result = await spawnProbe(url, false, FULL_PROBE_TIMEOUT_MS, ytDlpCmd);
+    result = await spawnProbe(url, false, FULL_PROBE_TIMEOUT_MS, ytDlpCmd, signal);
     if (result.probe) probe = result.probe;
   }
 
   if (probe) return probe;
-  return await fallbackProbe(url, result.stderr.trim() || 'The metadata probe failed. You can still try starting the download.');
+  return await fallbackProbe(url, result.stderr.trim() || 'The metadata probe failed. You can still try starting the download.', signal);
 }
