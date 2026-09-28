@@ -1,17 +1,23 @@
 // Role: loads a page in a hidden BrowserWindow to intercept .m3u8 / .mpd manifest
 // URLs that are only reachable through JavaScript-based video players.
 
-import { app, BrowserWindow, net, session } from 'electron';
 import log from 'electron-log';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { randomUUID } from 'crypto';
-import { promisify } from 'util';
-import { execFile } from 'child_process';
 import { resolveYtDlpCommand } from './binary-resolver';
 import { getProbeStrategy } from './url-router';
+import {
+  SPOOF_UA,
+  SUBTITLE_PATTERN,
+  fetchWithDeadline,
+  mediaTypeFromUrl,
+  openHiddenProbe,
+  removeTempFile,
+  runInPage,
+  runProbeChild,
+  writeCookiesFile,
+  type StreamType,
+} from './probe-support';
 
-const execFileAsync = promisify(execFile);
+export { sweepProbeTempFiles } from './probe-support';
 
 /**
  * `--dump-json` for a single YouTube video is routinely several megabytes —
@@ -20,6 +26,9 @@ const execFileAsync = promisify(execFile);
  * which is what silently cost the UI its title and thumbnail on YouTube.
  */
 const PROBE_MAX_BUFFER = 64 * 1024 * 1024;
+
+/** A full `--dump-json` can take a while; it can no longer take forever. */
+const YTDLP_PROBE_TIMEOUT_MS = 60_000;
 
 export interface StreamManifest {
   title: string;
@@ -34,20 +43,23 @@ export interface StreamManifest {
   }>;
 }
 
-export async function probeViaYtDlp(url: string): Promise<StreamManifest> {
+export async function probeViaYtDlp(url: string, signal?: AbortSignal): Promise<StreamManifest> {
   const ytDlpCmd = resolveYtDlpCommand();
-  // execFile with an argument array rather than a shell string: no quoting to
-  // get wrong, and a URL containing shell metacharacters cannot be interpreted
-  // as anything but an argument. `--` ends option parsing.
-  const result = await execFileAsync(
+  // An argument array rather than a shell string: no quoting to get wrong, and
+  // a URL containing shell metacharacters cannot be interpreted as anything but
+  // an argument. `--` ends option parsing.
+  const result = await runProbeChild(
     ytDlpCmd.command,
     // --no-playlist because this probe describes ONE media item. Without it a
     // URL carrying `list=` (every YouTube radio mix, every "watch later" link)
     // makes yt-dlp emit one JSON object per entry — for a radio mix, an
     // effectively endless stream of them that no buffer size can absorb.
     [...ytDlpCmd.args, '--dump-json', '--no-playlist', '--no-download', '--no-warnings', '--', url],
-    { windowsHide: true, maxBuffer: PROBE_MAX_BUFFER, encoding: 'utf-8' },
+    { timeoutMs: YTDLP_PROBE_TIMEOUT_MS, signal, maxBytes: PROBE_MAX_BUFFER },
   );
+  if (result.code !== 0) {
+    throw new Error(`yt-dlp probe failed (exit ${result.code ?? 'none'}): ${result.stderr.trim().slice(-500)}`);
+  }
   const data = JSON.parse(result.stdout);
   return {
     title: data.title,
@@ -72,10 +84,19 @@ interface YtDlpRawFormat {
   url: string;
 }
 
+/** A subtitle file the page's player requested while the stream loaded. */
+export interface CapturedSubtitle {
+  url: string;
+  language?: string;
+  label?: string;
+  /** The referer the player sent; the subtitle host may insist on it. */
+  referer?: string;
+}
+
 export interface ManifestResult {
   originalUrl: string;
   manifestUrl: string;
-  type: 'm3u8' | 'mpd' | 'mp4';
+  type: StreamType;
   referer?: string;
   /** Path to a Netscape-format cookies.txt for this CDN domain, if available. */
   cookiesFile?: string;
@@ -92,6 +113,15 @@ export interface ManifestResult {
   languageOutcome?: 'selected' | 'absent' | 'unconfirmed';
   /** The translation proven to be selected — set only with 'selected'. */
   translation?: string;
+  /**
+   * Subtitle tracks the player requested while the page loaded.
+   *
+   * anikoto's Sub stream carries its English subtitles as a separate .vtt the
+   * player fetches next to the manifest (measured: the .vtt request lands
+   * ~100ms before master.m3u8). yt-dlp is handed only the manifest, so every
+   * Sub episode used to arrive as Japanese audio with no subtitles at all.
+   */
+  subtitles?: CapturedSubtitle[];
 }
 
 export interface ApiProbeResult {
@@ -100,10 +130,6 @@ export interface ApiProbeResult {
   /** Path to a Netscape-format cookies.txt written from the embed-page response cookies. */
   cookiesFile?: string;
 }
-
-/** Look for manifest URLs and segment patterns that indicate an HLS/DASH stream. */
-const MANIFEST_PATTERN = /\.(m3u8|mpd|mp4)(\?|$)/i;
-const SEGMENT_PATTERN = /\/hls\/|hls\/\d+|[?&]hls|\.m3u8(?:\?|$)|\.mpd(?:\?|$)|\.ts(?:\?|$)|\.m4s(?:\?|$)|manifest(?:\.[a-z]+)?\?(?:.*&)?(?:type|fmt|file)/i;
 
 /** Known API domains whose JSON responses often contain manifest URLs. */
 const API_DOMAINS = ['anikotoapi.site', 'anikotoapi.com', 'nekostream.site'];
@@ -120,15 +146,17 @@ const KNOWN_CDNS = [
   'rapid-cloud.co',
 ];
 
-function mediaTypeFromUrl(url: string): ManifestResult['type'] | null {
-  const match = url.match(/\.(m3u8|mpd|mp4)(?:\?|$)/i);
-  return match ? match[1].toLowerCase() as ManifestResult['type'] : null;
-}
-
 function isPlayableUrl(url: string): boolean {
   return Boolean(mediaTypeFromUrl(url)) || KNOWN_CDNS.some((cdn) => url.includes(cdn));
 }
 
+/** What a network request is, as far as the gate is concerned. */
+function streamTypeOf(url: string): StreamType | null {
+  const type = mediaTypeFromUrl(url);
+  if (type) return type;
+  // Known CDNs sometimes serve HLS from an extension-less `/hls/` path.
+  return KNOWN_CDNS.some((cdn) => url.includes(cdn)) && url.includes('/hls/') ? 'm3u8' : null;
+}
 
 /**
  * Timeout in milliseconds for manifest discovery. If no manifest is found
@@ -148,27 +176,15 @@ const LANGUAGE_WAIT_MS = 8_000;
  */
 const POST_LOAD_WAIT_MS = 10_000;
 
-/**
- * Chrome-like user-agent to avoid headless detection.
- * Matches the user's real Chrome 148 on Windows.
- */
-const SPOOF_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36';
+/** Pause before re-trying a main-frame load that failed on the network. */
+const NETWORK_RETRY_DELAY_MS = 2_000;
 
 /**
- * Preload script injected into the BrowserWindow to spoof automation
- * detection properties that sites use to block headless browsers.
+ * Main-frame load failures worth one more attempt: DNS, a dropped or reset
+ * connection, a network change. ERR_ABORTED (-3) is deliberately absent — it
+ * means a newer navigation replaced this one, which is already loading.
  */
-const PRELOAD_SPOOF = `
-// Override navigator properties that bots expose
-Object.defineProperty(navigator, 'webdriver', { get: () => false });
-Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
-Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-// Override chrome.runtime to look like a real extension is present
-if (window.chrome) {
-  Object.defineProperty(chrome, 'runtime', { get: () => ({}) });
-}
-`;
+const RETRYABLE_LOAD_ERRORS = new Set([-2, -7, -21, -100, -101, -105, -106, -118]);
 
 /**
  * JavaScript snippet injected after page load to extract manifest URLs from
@@ -258,156 +274,110 @@ const EXTRACT_JS = `
 })();
 `;
 
-/** Fetch a URL from the main process and parse its body for manifest URLs. */
-function fetchAndFindManifest(pageUrl: string, apiUrl: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    try {
-      const request = net.request({
-        method: 'GET',
-        url: apiUrl,
-        headers: {
-          'User-Agent': SPOOF_UA,
-          Referer: pageUrl,
-          Accept: 'application/json, text/plain, */*',
-        },
-      });
-      let body = '';
-      request.on('response', (response) => {
-        response.on('data', (chunk: Buffer) => { body += chunk.toString(); });
-        response.on('end', () => {
-          if (!body.trim()) { resolve(null); return; }
-          // Try parsing as JSON and extract any URL-like string values
-          let foundUrl: string | null = null;
-          try {
-            const parsed = JSON.parse(body);
-            // Walk JSON values looking for URLs
-            const walk = (obj: unknown, depth = 0): void => {
-              if (depth > 5 || foundUrl) return;
-              if (typeof obj === 'string') {
-                if (obj.startsWith('http') && isPlayableUrl(obj) && !foundUrl) foundUrl = obj;
-              } else if (Array.isArray(obj)) {
-                obj.forEach((v) => walk(v, depth + 1));
-              } else if (obj && typeof obj === 'object') {
-                for (const val of Object.values(obj as Record<string, unknown>)) {
-                  walk(val, depth + 1);
-                  if (foundUrl) break;
-                }
-              }
-            };
-            walk(parsed);
-          } catch { /* not JSON, fall through */ }
-
-          if (foundUrl) return resolve(foundUrl);
-
-          // Fallback: regex search for .m3u8 / .mpd URLs
-          let text = body;
-          try { text = JSON.stringify(JSON.parse(body)); } catch { /* use raw */ }
-          const m = text.match(/(https?:\/\/[^\s"'<>",}]+?\.(?:m3u8|mpd|mp4)[^\s"'<>",}]*)/i);
-          resolve(m ? m[1] : null);
+/**
+ * Start the page's player: click play buttons and player containers, and
+ * force-play any paused <video>, every 500ms for 20s.
+ *
+ * With a language requested it leaves anything inside a `[data-type]`
+ * container alone. Those are the language servers; `button` matches a server
+ * rendered as a <button>, and forty rounds of clicking every one of them ends
+ * on whichever came last — usually not the language that was asked for.
+ * (anikoto renders its servers as <li>, which none of these selectors match —
+ * checked against the live page — so this guards the other shape.)
+ */
+function autoClickScript(sparesLanguageControls: boolean): string {
+  return `
+    (() => {
+      const spare = ${sparesLanguageControls};
+      const tryClick = (sel) => {
+        document.querySelectorAll(sel).forEach(el => {
+          if (spare && el.closest && el.closest('[data-type]')) return;
+          if (el && typeof el.click === 'function') {
+            try { el.click(); } catch {}
+          }
         });
-        response.on('error', () => resolve(null));
-      });
-      request.on('error', () => resolve(null));
-      request.end();
-    } catch { resolve(null); }
-  });
-}
-
-/**
- * Make a plain HTTP GET request using Electron's net module (bypasses
- * BrowserWindow and reCAPTCHA entirely). Returns the response body text
- * or `null` on failure.
- */
-interface FetchResult {
-  body: string | null;
-  /** Raw Set-Cookie header values from the response. */
-  setCookies: string[];
-}
-
-/**
- * Low-level fetch that returns the response body AND any Set-Cookie headers.
- * Used by tryResolveEmbedUrl so we can export session cookies to yt-dlp.
- */
-function fetchUrlRaw(url: string, extraHeaders: Record<string, string>): Promise<FetchResult> {
-  return new Promise((resolve) => {
-    try {
-      const request = net.request({
-        method: 'GET',
-        url,
-        headers: {
-          'User-Agent': SPOOF_UA,
-          'Accept-Language': 'en-US,en;q=0.9',
-          ...extraHeaders,
-        },
-      });
-      let body = '';
-      let setCookies: string[] = [];
-      // A server that accepts the connection and then never answers left this
-      // promise pending forever, with no timeout anywhere above it.
-      let done = false;
-      const settle = (result: FetchResult): void => {
-        if (done) return;
-        done = true;
-        clearTimeout(deadline);
-        resolve(result);
       };
-      const deadline = setTimeout(() => {
-        try { request.abort(); } catch { /* already finished */ }
-        settle({ body: null, setCookies: [] });
-      }, FETCH_TIMEOUT_MS);
 
-      request.on('response', (response) => {
-        const raw = response.headers['set-cookie'];
-        if (Array.isArray(raw)) setCookies = raw;
-        else if (typeof raw === 'string') setCookies = [raw];
-        response.on('data', (chunk: Buffer) => { body += chunk.toString(); });
-        response.on('end', () => settle({ body: body || null, setCookies }));
-        response.on('error', () => settle({ body: null, setCookies: [] }));
-      });
-      request.on('error', () => settle({ body: null, setCookies: [] }));
-      request.end();
-    } catch { resolve({ body: null, setCookies: [] }); }
-  });
+      window.__sd_clicks = window.__sd_clicks || 0;
+      const clickInterval = setInterval(() => {
+        if (window.__sd_clicks++ > 40) {
+          clearInterval(clickInterval);
+          return;
+        }
+        // Generic play buttons
+        tryClick('button, .play, .vjs-big-play-button, .jw-video, .plyr__control--overlaid');
+        tryClick('[class*="play"], [class*="Play"], [id*="play"], [id*="Play"]');
+        tryClick('[class*="player"], [class*="Player"], [class*="video"], [class*="Video"]');
+
+        // Force-play any paused <video>
+        document.querySelectorAll('video').forEach(v => {
+          if (v.paused) v.play().catch(() => {});
+          // Set source again as a fallback
+          const src = v.getAttribute('data-src') || v.getAttribute('data-url');
+          if (src && !v.src.includes(src)) { v.src = src; v.play().catch(() => {}); }
+        });
+
+        // Look for iframes and click inside them
+        document.querySelectorAll('iframe').forEach(iframe => {
+          try {
+            const doc = iframe.contentDocument || iframe.contentWindow?.document;
+            if (doc) {
+              doc.querySelectorAll('button, video').forEach(el => {
+                if (typeof el.click === 'function') el.click();
+                if (el.tagName === 'VIDEO' && el.paused) el.play().catch(() => {});
+              });
+            }
+          } catch {}
+        });
+      }, 500);
+
+      // Scroll to trigger lazy-loaded content
+      window.scrollTo({ top: document.body.scrollHeight * 0.4, behavior: 'instant' });
+      setTimeout(() => window.scrollTo({ top: 0, behavior: 'instant' }), 1500);
+    })();
+  `;
 }
 
-/**
- * Convert an array of raw Set-Cookie header strings into a Netscape-format
- * cookies.txt that yt-dlp can consume via --cookies.
- */
-function parseSetCookieToNetscape(setCookies: string[], baseUrl: string): string {
-  const lines = ['# Netscape HTTP Cookie File', '# Generated by StreamDock manifest-extractor'];
+interface ApiScan {
+  manifestUrl: string | null;
+  subtitles: string[];
+}
+
+/** Fetch a URL from the main process and parse its body for manifest URLs. */
+async function fetchAndFindManifest(pageUrl: string, apiUrl: string, signal?: AbortSignal): Promise<ApiScan> {
+  const { body } = await fetchWithDeadline(apiUrl, {
+    headers: { Referer: pageUrl, Accept: 'application/json, text/plain, */*' },
+    timeoutMs: FETCH_TIMEOUT_MS,
+    signal,
+  });
+  const scan: ApiScan = { manifestUrl: null, subtitles: [] };
+  if (!body?.trim()) return scan;
+
+  // Try parsing as JSON and extract any URL-like string values. A player's
+  // sources JSON lists its subtitle `tracks` beside the stream, so .vtt/.srt
+  // files are collected on the same walk.
   try {
-    const defaultDomain = new URL(baseUrl).hostname;
-    for (const cookie of setCookies) {
-      const [nameValue, ...attrs] = cookie.split(/;\s*/);
-      const eqIdx = nameValue.indexOf('=');
-      if (eqIdx === -1) continue;
-      const name = nameValue.substring(0, eqIdx).trim();
-      const value = nameValue.substring(eqIdx + 1).trim();
-      let domain = defaultDomain;
-      let path = '/';
-      let secure = false;
-      let expiry = 0;
-      for (const attr of attrs) {
-        const eqPos = attr.indexOf('=');
-        const k = (eqPos !== -1 ? attr.substring(0, eqPos) : attr).trim().toLowerCase();
-        const v = eqPos !== -1 ? attr.substring(eqPos + 1).trim() : '';
-        if (k === 'domain' && v) domain = v;
-        else if (k === 'path' && v) path = v;
-        else if (k === 'secure') secure = true;
-        else if (k === 'expires' && v) {
-          const d = new Date(v);
-          if (!isNaN(d.getTime())) expiry = Math.floor(d.getTime() / 1000);
-        } else if (k === 'max-age' && v) {
-          const maxAge = parseInt(v, 10);
-          if (!isNaN(maxAge)) expiry = Math.floor(Date.now() / 1000) + maxAge;
-        }
+    const walk = (obj: unknown, depth = 0): void => {
+      if (depth > 5) return;
+      if (typeof obj === 'string') {
+        if (!obj.startsWith('http')) return;
+        if (SUBTITLE_PATTERN.test(obj)) scan.subtitles.push(obj);
+        else if (!scan.manifestUrl && isPlayableUrl(obj)) scan.manifestUrl = obj;
+      } else if (Array.isArray(obj)) {
+        obj.forEach((v) => walk(v, depth + 1));
+      } else if (obj && typeof obj === 'object') {
+        for (const val of Object.values(obj as Record<string, unknown>)) walk(val, depth + 1);
       }
-      const flag = domain.startsWith('.') ? 'TRUE' : 'FALSE';
-      lines.push(`${domain}\t${flag}\t${path}\t${secure ? 'TRUE' : 'FALSE'}\t${expiry}\t${name}\t${value}`);
-    }
-  } catch { /* ignore malformed cookies */ }
-  return lines.join('\n');
+    };
+    walk(JSON.parse(body));
+  } catch { /* not JSON, fall through */ }
+
+  if (!scan.manifestUrl) {
+    // Fallback: regex search for .m3u8 / .mpd URLs
+    const m = body.match(/(https?:\/\/[^\s"'<>",}]+?\.(?:m3u8|mpd|mp4)[^\s"'<>",}]*)/i);
+    if (m) scan.manifestUrl = m[1];
+  }
+  return scan;
 }
 
 /**
@@ -423,9 +393,13 @@ function extractEpisodeNumber(url: string): number | null {
  * Try to extract a video / manifest URL directly from the backend API that
  * anikoto.cz uses. This avoids the BrowserWindow (and reCAPTCHA) entirely.
  */
-async function tryAnikotoApi(pageUrl: string): Promise<ApiProbeResult | null> {
+async function tryAnikotoApi(pageUrl: string, signal?: AbortSignal): Promise<ApiProbeResult | null> {
   // --- Step 1: Fetch the page HTML AND capture cookies ---
-  const { body: pageHtml, setCookies: pageCookies } = await fetchUrlRaw(pageUrl, { Referer: 'https://anikoto.cz/' });
+  const { body: pageHtml, setCookies: pageCookies } = await fetchWithDeadline(pageUrl, {
+    headers: { Referer: 'https://anikoto.cz/' },
+    timeoutMs: FETCH_TIMEOUT_MS,
+    signal,
+  });
   if (!pageHtml) {
     log.warn('[manifest-extractor] anikoto: failed to fetch page');
     return null;
@@ -458,7 +432,11 @@ async function tryAnikotoApi(pageUrl: string): Promise<ApiProbeResult | null> {
   log.info(`[manifest-extractor] anikoto: using episode list URL: ${epListUrl}`);
 
   // --- Step 2: Fetch the episode list AND capture cookies ---
-  const { body: epListHtml, setCookies: epListCookies } = await fetchUrlRaw(epListUrl, { Referer: pageUrl });
+  const { body: epListHtml, setCookies: epListCookies } = await fetchWithDeadline(epListUrl, {
+    headers: { Referer: pageUrl },
+    timeoutMs: FETCH_TIMEOUT_MS,
+    signal,
+  });
   if (!epListHtml) return null;
 
   // --- Step 3: Find the active episode ---
@@ -479,7 +457,7 @@ async function tryAnikotoApi(pageUrl: string): Promise<ApiProbeResult | null> {
       const allCookies = [...pageCookies, ...epListCookies];
       if (malId && epSlug) {
         log.info(`[manifest-extractor] anikoto: found mal=${malId}, slug=${epSlug}, ts=${timestamp || '0'}`);
-        return fetchMapperApi(pageUrl, malId, epSlug, timestamp || '0', allCookies);
+        return fetchMapperApi(pageUrl, malId, epSlug, timestamp || '0', allCookies, signal);
       }
     }
   }
@@ -496,86 +474,71 @@ async function fetchMapperApi(
   malId: string,
   epSlug: string,
   timestamp: string,
-  incomingCookies: string[] = [],
+  incomingCookies: string[],
+  signal?: AbortSignal,
 ): Promise<ApiProbeResult | null> {
   const mapperUrl = `https://mapper.nekostream.site/api/mal/${malId}/${epSlug}/${timestamp}`;
-  const { body: json, setCookies: mapperCookies } = await fetchUrlRaw(mapperUrl, {
-    Referer: pageUrl,
-    Accept: 'application/json, text/plain, */*',
+  const { body: json, setCookies: mapperCookies } = await fetchWithDeadline(mapperUrl, {
+    headers: { Referer: pageUrl, Accept: 'application/json, text/plain, */*' },
+    timeoutMs: FETCH_TIMEOUT_MS,
+    signal,
   });
   if (!json) return null;
 
   // Combine incoming cookies with mapper API cookies
   const allCookies = [...incomingCookies, ...mapperCookies];
 
- try {
-     const data = JSON.parse(json);
-     // Recursive search for anything that looks like a playable URL
-     let foundUrl: string | null = null;
+  try {
+    const data = JSON.parse(json);
+    // Recursive search for anything that looks like a playable URL
+    let foundUrl: string | null = null;
 
-     const findMedia = (obj: unknown): void => {
-       if (!obj || foundUrl) return;
-       if (typeof obj === 'string') {
-         if (/m3u8|mpd|mp4/i.test(obj) && obj.startsWith('http')) {
-           foundUrl = obj;
-         }
-         return;
-       }
-       if (Array.isArray(obj)) {
-         obj.forEach(findMedia);
-         return;
-       }
-       if (typeof obj === 'object') {
-         const record = obj as Record<string, unknown>;
-         // Prioritize known keys
-         for (const key of ['url', 'file', 'src', 'data', 'link']) {
-           const val = record[key];
-           if (typeof val === 'string' && val.startsWith('http') && /m3u8|mpd|mp4/i.test(val)) {
-             foundUrl = val;
-             return;
-           }
-         }
-         Object.values(record).forEach(findMedia);
-       }
-     };
-
-     findMedia(data);
-
-     if (foundUrl) {
-       log.info(`[manifest-extractor] anikoto: found media URL via API: ${foundUrl}`);
-// If it's an embed page, resolve it
-        if (!MANIFEST_PATTERN.test(foundUrl) && !KNOWN_CDNS.some(c => foundUrl!.includes(c))) {
-          const resolved = await tryResolveEmbedUrl(foundUrl, 'https://anikoto.cz/', allCookies);
-          if (resolved) {
-            try {
-              const embedOrigin = new URL(foundUrl).origin + '/';
-              return { url: resolved.url, referer: embedOrigin, cookiesFile: resolved.cookiesFile };
-            } catch {
-              return { url: resolved.url, referer: foundUrl, cookiesFile: resolved.cookiesFile };
-            }
-          }
-          return null;
+    const findMedia = (obj: unknown): void => {
+      if (!obj || foundUrl) return;
+      if (typeof obj === 'string') {
+        if (/m3u8|mpd|mp4/i.test(obj) && obj.startsWith('http')) {
+          foundUrl = obj;
         }
-        // For direct manifest URLs, pass the accumulated cookies
-        if (allCookies.length > 0) {
-          try {
-            const cookieDir = join(app.getPath('userData'), 'manifest-probe');
-            if (!existsSync(cookieDir)) mkdirSync(cookieDir, { recursive: true });
-            const cookiePath = join(cookieDir, `cookies-${Date.now()}.txt`);
-            writeFileSync(cookiePath, parseSetCookieToNetscape(allCookies, pageUrl), 'utf-8');
-            log.info(`[manifest-extractor] Wrote ${allCookies.length} combined cookie(s) → ${cookiePath}`);
-            return { url: foundUrl, referer: 'https://anikoto.cz/', cookiesFile: cookiePath };
-          } catch (err) {
-            log.warn('[manifest-extractor] Could not write cookies file:', err);
+        return;
+      }
+      if (Array.isArray(obj)) {
+        obj.forEach(findMedia);
+        return;
+      }
+      if (typeof obj === 'object') {
+        const record = obj as Record<string, unknown>;
+        // Prioritize known keys
+        for (const key of ['url', 'file', 'src', 'data', 'link']) {
+          const val = record[key];
+          if (typeof val === 'string' && val.startsWith('http') && /m3u8|mpd|mp4/i.test(val)) {
+            foundUrl = val;
+            return;
           }
         }
-        return { url: foundUrl, referer: 'https://anikoto.cz/' };
-     }
+        Object.values(record).forEach(findMedia);
+      }
+    };
 
-     return null;
-   } catch {
-     return null;
-   }
+    findMedia(data);
+    if (!foundUrl) return null;
+    const mediaUrl: string = foundUrl;
+
+    log.info(`[manifest-extractor] anikoto: found media URL via API: ${mediaUrl}`);
+    // If it's an embed page, resolve it
+    if (!mediaTypeFromUrl(mediaUrl) && !KNOWN_CDNS.some((c) => mediaUrl.includes(c))) {
+      const resolved = await tryResolveEmbedUrl(mediaUrl, 'https://anikoto.cz/', allCookies, signal);
+      if (!resolved) return null;
+      try {
+        return { url: resolved.url, referer: new URL(mediaUrl).origin + '/', cookiesFile: resolved.cookiesFile };
+      } catch {
+        return { url: resolved.url, referer: mediaUrl, cookiesFile: resolved.cookiesFile };
+      }
+    }
+    // For direct manifest URLs, pass the accumulated cookies
+    return { url: mediaUrl, referer: 'https://anikoto.cz/', cookiesFile: writeCookiesFile(allCookies, pageUrl) };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -586,18 +549,19 @@ async function fetchMapperApi(
 async function tryResolveEmbedUrl(
   embedUrl: string,
   referer: string,
-  incomingCookies: string[] = [],
+  incomingCookies: string[],
+  signal?: AbortSignal,
 ): Promise<{ url: string; cookiesFile?: string } | null> {
-  // Rate-limit sequential embed-page CDN requests (secondary safeguard alongside
-  // the serialized extraction mutex in the engine).
+  // Space out back-to-back requests to the embed CDN.
   await new Promise(resolve => setTimeout(resolve, 500));
 
-  // Use fetchUrlRaw so we can capture Set-Cookie headers from the embed CDN.
-  const { body: html, setCookies } = await fetchUrlRaw(embedUrl, { Referer: referer });
+  // Set-Cookie headers from the embed CDN are exported to yt-dlp below.
+  const { body: html, setCookies } = await fetchWithDeadline(embedUrl, {
+    headers: { Referer: referer },
+    timeoutMs: FETCH_TIMEOUT_MS,
+    signal,
+  });
   if (!html) return null;
-
-  // Combine incoming cookies with embed page cookies
-  const allCookies = [...incomingCookies, ...setCookies];
 
   let manifestUrl: string | null = null;
 
@@ -633,60 +597,21 @@ async function tryResolveEmbedUrl(
 
   // Export combined cookies (from anikoto + embed CDN) so yt-dlp can
   // present them when it fetches the manifest segments.
-  let cookiesFile: string | undefined;
-  if (allCookies.length > 0) {
-    try {
-      const cookieDir = join(app.getPath('userData'), 'manifest-probe');
-      if (!existsSync(cookieDir)) mkdirSync(cookieDir, { recursive: true });
-      const cookiePath = join(cookieDir, `cookies-${Date.now()}.txt`);
-      writeFileSync(cookiePath, parseSetCookieToNetscape(allCookies, embedUrl), 'utf-8');
-      cookiesFile = cookiePath;
-      log.info(`[manifest-extractor] Wrote ${allCookies.length} combined cookie(s) → ${cookiePath}`);
-    } catch (err) {
-      log.warn('[manifest-extractor] Could not write cookies file:', err);
-    }
-  }
-
-  return { url: manifestUrl, cookiesFile };
+  return { url: manifestUrl, cookiesFile: writeCookiesFile([...incomingCookies, ...setCookies], embedUrl) };
 }
 
 /**
  * Try to resolve a manifest URL via direct HTTP API calls instead of a
  * BrowserWindow. Handles known API-based sites like anikoto.cz.
  */
-async function tryApiProbe(pageUrl: string): Promise<ApiProbeResult | null> {
+async function tryApiProbe(pageUrl: string, signal?: AbortSignal): Promise<ApiProbeResult | null> {
   try {
     const host = new URL(pageUrl).hostname.toLowerCase().replace(/^www\./, '');
-    if (host === 'anikoto.cz') return tryAnikotoApi(pageUrl);
+    if (host === 'anikoto.cz') return await tryAnikotoApi(pageUrl, signal);
     return null;
   } catch { return null; }
 }
 
-/**
- * Loads `pageUrl` in an off-screen Electron BrowserWindow, intercepts every
- * network request, and returns the first `.m3u8` or `.mpd` URL it sees.
- *
- * If the first full page load + wait completes without finding a manifest,
- * the page is reloaded once (some sites need a second pass to initialise the
- * video player).
- *
- * Returns `null` if no manifest is discovered before the timeout.
- */
-/**
- * The referer the manifest's CDN will expect.
- *
- * Every interception site used to return the page URL the user pasted, and the
- * engine handed that to yt-dlp. The manifest is requested by the *player*,
- * which lives on a different origin, and anikoto's CDN serves it only to that
- * origin — the page URL gets a flat 403. Measured against the live CDN:
- * `Referer: https://megaplay.buzz/` returns 200 while the anikoto page URL, the
- * CDN's own origin and an unrelated referer all return 403.
- *
- * Chromium's default referrer policy sends the bare origin cross-origin, which
- * is exactly the form the CDN wants. Reading it from the intercepted request
- * keeps this correct for any host instead of hardcoding one embed provider —
- * anikoto has already moved from megaplay to vidtube once.
- */
 /**
  * Pick a language on a page that serves each one as its own stream.
  *
@@ -724,6 +649,21 @@ function languageClickScript(translation: string): string {
   `;
 }
 
+/**
+ * The referer the manifest's CDN will expect.
+ *
+ * Every interception site used to return the page URL the user pasted, and the
+ * engine handed that to yt-dlp. The manifest is requested by the *player*,
+ * which lives on a different origin, and anikoto's CDN serves it only to that
+ * origin — the page URL gets a flat 403. Measured against the live CDN:
+ * `Referer: https://megaplay.buzz/` returns 200 while the anikoto page URL, the
+ * CDN's own origin and an unrelated referer all return 403.
+ *
+ * Chromium's default referrer policy sends the bare origin cross-origin, which
+ * is exactly the form the CDN wants. Reading it from the intercepted request
+ * keeps this correct for any host instead of hardcoding one embed provider —
+ * anikoto has already moved from megaplay to vidtube once.
+ */
 function refererForRequest(
   details: { referrer?: string; frame?: { url?: string } | null },
   pageUrl: string,
@@ -749,7 +689,7 @@ export async function extractManifest(
   if (getProbeStrategy(pageUrl) === 'ytdlp') {
     try {
       log.info(`[manifest-extractor] Routing to yt-dlp probe: ${pageUrl}`);
-      const manifest = await probeViaYtDlp(pageUrl);
+      const manifest = await probeViaYtDlp(pageUrl, signal);
       const hlsFormat = manifest.formats.find(f => f.ext === 'mp4' && f.url.includes('m3u8'))
                      || manifest.formats.find(f => f.url.includes('m3u8') || f.url.includes('mpd'));
       if (hlsFormat) {
@@ -758,7 +698,7 @@ export async function extractManifest(
       }
       return null;
     } catch (e) {
-      log.warn(`[manifest-extractor] yt-dlp probe failed: ${e}`);
+      if (!signal?.aborted) log.warn(`[manifest-extractor] yt-dlp probe failed: ${e}`);
       return null;
     }
   }
@@ -767,8 +707,11 @@ export async function extractManifest(
   // Skipped when a language is requested: the API path returns whichever
   // stream the mapper hands back and cannot select sub or dub, so its answer
   // would arrive unproven every time.
-  const apiResult = wantsLanguage ? null : await tryApiProbe(pageUrl);
-  if (signal?.aborted) return null;
+  const apiResult = wantsLanguage ? null : await tryApiProbe(pageUrl, signal);
+  if (signal?.aborted) {
+    removeTempFile(apiResult?.cookiesFile);
+    return null;
+  }
   if (apiResult) {
     const type = mediaTypeFromUrl(apiResult.url) || 'm3u8';
     log.info(`[manifest-extractor] Returning URL from direct API probe: ${apiResult.url}`);
@@ -776,52 +719,38 @@ export async function extractManifest(
   }
 
   // --- Fall back to hidden BrowserWindow for JavaScript-rendered video players ---
-  const partitionName = `manifest-probe-${Date.now()}`;
-  // Use persistent session so cookies/localStorage are available
-  const probeSession = session.fromPartition(partitionName, { cache: true });
-
-  // Write the preload spoof script to disk so it runs before any page JS
-  const preloadDir = join(app.getPath('userData'), 'manifest-probe');
-  if (!existsSync(preloadDir)) mkdirSync(preloadDir, { recursive: true });
-  const preloadPath = join(preloadDir, `spoof-${randomUUID()}.js`);
-  writeFileSync(preloadPath, PRELOAD_SPOOF, 'utf-8');
-
-  const win = new BrowserWindow({
-    show: false,
-    width: 1280,
-    height: 720,
-    webPreferences: {
-      session: probeSession,
-      preload: preloadPath,
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      autoplayPolicy: 'no-user-gesture-required',
-    },
-  });
-
-  // Priority 1: Mute audio immediately (before loadURL)
-  win.webContents.setAudioMuted(true);
-
-  // Priority 2: Prevent ad popups
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-
-  return probeOnce(win, probeSession, pageUrl, preloadPath, false, wantedTranslation, signal);
+  return probePage(pageUrl, wantedTranslation, signal);
 }
 
-async function probeOnce(
-  win: BrowserWindow,
-  probeSession: Electron.Session,
+/**
+ * Loads `pageUrl` in an off-screen BrowserWindow, intercepts every network
+ * request, and returns the first `.m3u8` or `.mpd` manifest the player asks
+ * for. An `.mp4` is kept only as a last resort, because that is also what an
+ * ad creative looks like.
+ *
+ * If the page settles without a manifest it is reloaded once (some sites need
+ * a second pass to initialise their player). Resolves `null` when nothing is
+ * found before the deadline, or at once when `signal` aborts.
+ */
+function probePage(
   pageUrl: string,
-  preloadPath?: string,
-  isRetry = false,
-  wantedTranslation?: string,
-  signal?: AbortSignal,
+  wantedTranslation: string | undefined,
+  signal: AbortSignal | undefined,
 ): Promise<ManifestResult | null> {
+  const { win, session: probeSession, dispose } = openHiddenProbe();
+
   return new Promise<ManifestResult | null>((resolve) => {
     let settled = false;
-    let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+    let reloadTimer: ReturnType<typeof setTimeout> | undefined;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let languageBail: ReturnType<typeof setTimeout> | undefined;
+    // One extra load per probe, whether it is the settle-and-reload retry or a
+    // retry after a network failure.
+    let reloadsLeft = 1;
     let languageOutcome: ManifestResult['languageOutcome'];
+    // An .mp4 seen on the wire: used only if no real manifest ever shows up.
+    let mp4Fallback: ManifestResult | null = null;
+    const subtitles = new Map<string, CapturedSubtitle>();
 
     // When a language is requested, the manifest the page loads on its own is
     // the wrong one — anikoto opens on SUB. Manifests are ignored until the
@@ -830,14 +759,20 @@ async function probeOnce(
     // start and nothing changes.
     const wantsLanguage = Boolean(wantedTranslation) && wantedTranslation !== 'unknown';
     let languageReady = !wantsLanguage;
+    // Bumped by every main-frame document, so an answer from a page that has
+    // since been replaced cannot open the gate on its successor.
+    let documentGeneration = 0;
 
     const finish = (result: ManifestResult | null) => {
       if (settled) return;
       settled = true;
       signal?.removeEventListener('abort', onAbort);
-      if (reloadTimer) clearTimeout(reloadTimer);
-      try { if (preloadPath) rmSync(preloadPath, { force: true }); } catch { /* temp file cleanup is best-effort */ }
-      cleanup();
+      clearTimeout(deadline);
+      clearTimeout(reloadTimer);
+      clearTimeout(retryTimer);
+      clearTimeout(languageBail);
+      dispose();
+      if (result && subtitles.size > 0) result = { ...result, subtitles: [...subtitles.values()] };
       if (result && wantsLanguage) {
         const outcome = languageOutcome ?? 'unconfirmed';
         result = {
@@ -853,15 +788,38 @@ async function probeOnce(
     const onAbort = () => finish(null);
     signal?.addEventListener('abort', onAbort, { once: true });
 
-    const manifestFromStr = (urls: string[]): ManifestResult | null => {
-      for (const u of urls) {
-        const type = mediaTypeFromUrl(u);
-        if (type) return { originalUrl: pageUrl, manifestUrl: u, type, referer: pageUrl };
+    /** A manifest turned up. Streams win at once; an .mp4 waits in reserve. */
+    const accept = (found: ManifestResult, how: string): void => {
+      if (settled) return;
+      if (found.type === 'mp4') {
+        if (!mp4Fallback) {
+          mp4Fallback = found;
+          log.info(`[manifest-extractor] Holding ${found.manifestUrl} in reserve: an .mp4 may be an ad`);
+        }
+        return;
       }
-      return null;
+      log.info(`[manifest-extractor] Found ${found.type} manifest${how}: ${found.manifestUrl}`);
+      finish(found);
+    };
+    const giveUp = (why: string): void => {
+      if (settled) return;
+      if (mp4Fallback) log.info(`[manifest-extractor] No stream manifest (${why}); using the .mp4 seen on the page`);
+      else log.warn(`[manifest-extractor] ${why} for ${pageUrl}`);
+      finish(mp4Fallback);
     };
 
-    const timeout = setTimeout(() => {
+    /** Manifests the page's own JS context exposes. Gated like the network. */
+    const readPageContext = (how: string): Promise<void> =>
+      runInPage<string[]>(win, EXTRACT_JS).then((urls) => {
+        if (settled || !languageReady || !Array.isArray(urls)) return;
+        for (const u of urls) {
+          const type = mediaTypeFromUrl(u);
+          if (type) accept({ originalUrl: pageUrl, manifestUrl: u, type, referer: pageUrl }, how);
+          if (settled) return;
+        }
+      });
+
+    const deadline = setTimeout(() => {
       if (settled) return;
 
       // Before giving up, try JS context extraction as a last resort — but on a
@@ -871,158 +829,94 @@ async function probeOnce(
       // with no log line. The queue is serialised, so one such hang stalls
       // every remaining episode indefinitely — observed as a download stuck on
       // "starting" with nothing after `Probing …` in the log.
-      let answered = false;
-      const give = (found: ManifestResult | null, reason: string): void => {
-        if (answered) return;
-        answered = true;
-        if (found) {
-          log.info(`[manifest-extractor] Found manifest via JS context: ${found.manifestUrl}`);
-        } else {
-          log.warn(`[manifest-extractor] Timed out after ${EXTRACTION_TIMEOUT_MS}ms for ${pageUrl} (${reason})`);
-        }
-        finish(found);
-      };
-
-      const lastResort = setTimeout(() => give(null, 'JS context read never returned'), JS_LAST_RESORT_MS);
-      win.webContents.executeJavaScript(EXTRACT_JS)
-        .then((urls: string[]) => {
+      const why = `Timed out after ${EXTRACTION_TIMEOUT_MS}ms`;
+      const lastResort = setTimeout(() => giveUp(`${why} (JS context read never returned)`), JS_LAST_RESORT_MS);
+      readPageContext(' via JS context')
+        .catch(() => { /* reported below */ })
+        .finally(() => {
           clearTimeout(lastResort);
-          give(manifestFromStr(urls), 'no manifest in JS context');
-        })
-        .catch(() => {
-          clearTimeout(lastResort);
-          give(null, 'JS context read failed');
+          giveUp(`${why} (no manifest in JS context)`);
         });
     }, EXTRACTION_TIMEOUT_MS);
 
-    const cleanup = () => {
-      clearTimeout(timeout);
-      try { win.destroy(); } catch { /* already gone */ }
-      probeSession.clearStorageData().catch(() => { });
+    const startAutoClick = (): void => {
+      runInPage(win, autoClickScript(wantsLanguage)).catch(() => { });
     };
 
-    // Spoof user-agent
-    win.webContents.setUserAgent(SPOOF_UA);
+    /**
+     * Close the gate for a new document and select the language on it.
+     *
+     * This used to run once, on the first dom-ready, and the gate was never
+     * closed again. After any reload — the settle-and-retry below, a retry
+     * after a network failure — the page came back on its default SUB server
+     * with the gate still open and the earlier "selected" still recorded, so
+     * the Sub stream was returned as proven Dub. Isaac's log for ep 560 shows
+     * exactly that order: "server selected", then a reload, then a manifest.
+     */
+    const armLanguageGate = (): void => {
+      const generation = ++documentGeneration;
+      languageReady = false;
+      languageOutcome = undefined;
+      mp4Fallback = null;
+      subtitles.clear();
+      clearTimeout(languageBail);
 
-    if (wantsLanguage) {
-      win.webContents.once('dom-ready', () => {
-        // Bounded like every other await in this file: a hung renderer must not
-        // leave the gate closed forever, or no manifest is ever accepted.
-        let answered = false;
-        const open = (outcome: NonNullable<ManifestResult['languageOutcome']>, why: string): void => {
-          if (answered) return;
-          answered = true;
-          languageReady = true;
-          languageOutcome = outcome;
-          log.info(`[manifest-extractor] Language "${wantedTranslation}": ${why}`);
-        };
-        const bail = setTimeout(() => open('unconfirmed', 'selection timed out; the manifest captured next is unproven'), LANGUAGE_WAIT_MS + 4_000);
-        win.webContents
-          .executeJavaScript(languageClickScript(String(wantedTranslation)))
-          .then((outcome: string) => {
-            clearTimeout(bail);
-            if (outcome === 'clicked') open('selected', 'server selected');
-            else open('absent', 'not offered by this page');
-          })
-          .catch(() => {
-            clearTimeout(bail);
-            open('unconfirmed', 'selection failed; the manifest captured next is unproven');
-          });
-      });
-    }
+      // Bounded like every other await in this file: a hung renderer must not
+      // leave the gate closed forever, or no manifest is ever accepted.
+      let answered = false;
+      const open = (outcome: NonNullable<ManifestResult['languageOutcome']>, why: string): void => {
+        if (answered || settled || generation !== documentGeneration) return;
+        answered = true;
+        clearTimeout(languageBail);
+        languageReady = true;
+        languageOutcome = outcome;
+        log.info(`[manifest-extractor] Language "${wantedTranslation}": ${why}`);
+        // Only now start the player: clicking play first would start the
+        // default server's stream before the requested one was chosen.
+        startAutoClick();
+      };
+      languageBail = setTimeout(() => open('unconfirmed', 'selection timed out; the manifest captured next is unproven'), LANGUAGE_WAIT_MS + 4_000);
+      runInPage<string>(win, languageClickScript(String(wantedTranslation)))
+        .then((outcome) => {
+          if (outcome === 'clicked') open('selected', 'server selected');
+          else open('absent', 'not offered by this page');
+        })
+        .catch(() => open('unconfirmed', 'selection failed; the manifest captured next is unproven'));
+    };
 
-    // Aggressive auto-click: play buttons, player containers, and video elements
+    // dom-ready fires once per main-frame document, including after a reload.
     win.webContents.on('dom-ready', () => {
-      win.webContents.executeJavaScript(`
-        const tryClick = (sel) => {
-          document.querySelectorAll(sel).forEach(el => {
-            if (el && typeof el.click === 'function') {
-              try { el.click(); } catch {}
-            }
-          });
-        };
-
-        window.__sd_clicks = window.__sd_clicks || 0;
-        const clickInterval = setInterval(() => {
-          if (window.__sd_clicks++ > 40) {
-            clearInterval(clickInterval);
-            return;
-          }
-          // Generic play buttons
-          tryClick('button, .play, .vjs-big-play-button, .jw-video, .plyr__control--overlaid');
-          tryClick('[class*="play"], [class*="Play"], [id*="play"], [id*="Play"]');
-          tryClick('[class*="player"], [class*="Player"], [class*="video"], [class*="Video"]');
-
-          // Force-play any paused <video>
-          document.querySelectorAll('video').forEach(v => {
-            if (v.paused) v.play().catch(() => {});
-            // Set source again as a fallback
-            const src = v.getAttribute('data-src') || v.getAttribute('data-url');
-            if (src && !v.src.includes(src)) { v.src = src; v.play().catch(() => {}); }
-          });
-
-          // Look for iframes and click inside them
-          document.querySelectorAll('iframe').forEach(iframe => {
-            try {
-              const doc = iframe.contentDocument || iframe.contentWindow?.document;
-              if (doc) {
-                doc.querySelectorAll('button, video').forEach(el => {
-                  if (typeof el.click === 'function') el.click();
-                  if (el.tagName === 'VIDEO' && el.paused) el.play().catch(() => {});
-                });
-              }
-            } catch {}
-          });
-        }, 500);
-
-        // Scroll to trigger lazy-loaded content
-        window.scrollTo({ top: document.body.scrollHeight * 0.4, behavior: 'instant' });
-        setTimeout(() => window.scrollTo({ top: 0, behavior: 'instant' }), 1500);
-      `).catch(() => { });
+      if (settled) return;
+      if (wantsLanguage) armLanguageGate();
+      else startAutoClick();
     });
 
-    // Intercept requests and responses. Use separate handlers for:
-    //  - onBeforeRequest: fast-path manifest detection and optional cancel
-    //  - onBeforeSendHeaders: ensure UA/Accept-Language headers
-    //  - onHeadersReceived: inspect JSON API responses via filterResponseData
     let apiFetchAttempted = false;
 
-    // Fast-path: detect direct manifest requests and CDN-hosted manifests
     probeSession.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
+      if (settled) { callback({ cancel: true }); return; }
       try {
-        if (settled) { callback({ cancel: true }); return; }
-        const match = details.url.match(MANIFEST_PATTERN);
+        const match = streamTypeOf(details.url);
         if (match && !languageReady) {
           // The default-language stream, arriving before the switch. Let it
           // through so the player keeps working, but do not capture it.
           callback({});
           return;
         }
-        if (match) {
-          const type = match[1].toLowerCase() as ManifestResult['type'];
-          log.info(`[manifest-extractor] Found ${type} manifest: ${details.url}`);
+        if (languageReady && SUBTITLE_PATTERN.test(details.url)) {
+          // ponytail: only tracks requested before the manifest are caught
+          // (anikoto asks ~100ms earlier); a grace window after the manifest
+          // is the upgrade if a player orders them the other way.
+          subtitles.set(details.url, { url: details.url, referer: refererForRequest(details, pageUrl) });
+        }
+        if (match === 'm3u8' || match === 'mpd') {
           // Cancel the request to avoid letting the player consume it
           callback({ cancel: true });
-          finish({ originalUrl: pageUrl, manifestUrl: details.url, type, referer: refererForRequest(details, pageUrl) });
+          accept({ originalUrl: pageUrl, manifestUrl: details.url, type: match, referer: refererForRequest(details, pageUrl) }, '');
           return;
         }
-
-        if (!languageReady && KNOWN_CDNS.some((cdn) => details.url.includes(cdn))) {
-          callback({});
-          return;
-        }
-
-        if (KNOWN_CDNS.some((cdn) => details.url.includes(cdn)) && (MANIFEST_PATTERN.test(details.url) || details.url.includes('/hls/'))) {
-          log.info(`[manifest-extractor] Found CDN manifest: ${details.url}`);
-          callback({ cancel: true });
-          finish({ originalUrl: pageUrl, manifestUrl: details.url, type: 'm3u8', referer: refererForRequest(details, pageUrl) });
-          return;
-        }
-
-        // Heuristic: if this looks like a segment list or API that might contain
-        // manifest info, note it for potential background fetches.
-        if (!apiFetchAttempted && SEGMENT_PATTERN.test(details.url) && !details.url.includes('.ts') && !details.url.includes('.m4s')) {
-          log.info(`[manifest-extractor] Possible manifest via pattern: ${details.url}`);
+        if (match === 'mp4') {
+          accept({ originalUrl: pageUrl, manifestUrl: details.url, type: 'mp4', referer: refererForRequest(details, pageUrl) }, '');
         }
       } catch {
         // swallow: this handler must never throw and block navigation
@@ -1032,149 +926,74 @@ async function probeOnce(
 
     // Ensure outgoing headers include Accept-Language / User-Agent
     probeSession.webRequest.onBeforeSendHeaders({ urls: ['<all_urls>'] }, (details, callback) => {
-      try {
-        const headers = { ...details.requestHeaders } as Record<string, string>;
-        if (!headers['Accept-Language'] && !headers['accept-language']) headers['Accept-Language'] = 'en-US,en;q=0.9';
-        if (!headers['User-Agent'] && !headers['user-agent']) headers['User-Agent'] = SPOOF_UA;
-        callback({ requestHeaders: headers });
-        return;
-      } catch {
-        callback({});
-        return;
-      }
+      const headers = { ...details.requestHeaders } as Record<string, string>;
+      if (!headers['Accept-Language'] && !headers['accept-language']) headers['Accept-Language'] = 'en-US,en;q=0.9';
+      if (!headers['User-Agent'] && !headers['user-agent']) headers['User-Agent'] = SPOOF_UA;
+      callback({ requestHeaders: headers });
     });
 
-    // Inspect JSON responses for embedded manifest URLs using a response filter
+    // Some sites answer an API call with JSON that names the manifest. The
+    // response body cannot be read from here, so it is fetched again from the
+    // main process. (A `filterResponseData` branch used to sit in front of
+    // this; it is not an Electron API, so it threw every time and this
+    // fallback was the only path that ever ran.)
     probeSession.webRequest.onHeadersReceived({ urls: ['<all_urls>'] }, (details, callback) => {
-      try {
-        const rawCt = (details.responseHeaders && (details.responseHeaders['content-type'] || details.responseHeaders['Content-Type'])) || [];
-        const ct = Array.isArray(rawCt) ? rawCt[0] : (rawCt || '');
-        const isJson = /application\/(json|javascript)|text\/json|text\/plain/i.test(String(ct)) || API_DOMAINS.some(d => details.url.includes(d));
-
-        if (isJson) {
-          try {
-            // @ts-expect-error - filterResponseData is an Electron API that may not be fully typed
-            const filter = probeSession.webRequest.filterResponseData(details.requestId);
-            const chunks: Buffer[] = [];
-            filter.on('data', (chunk: Buffer) => {
-              chunks.push(Buffer.from(chunk));
-              filter.write(chunk);
-            });
-            filter.on('end', () => {
-              try {
-                const body = Buffer.concat(chunks).toString('utf8');
-                // quick regex search for manifest URLs
-                const m = body.match(/(https?:\/\/[^\s"'<>{},]+?\.(?:m3u8|mpd|mp4)[^\s"'<>}]*)/i);
-                if (m && !settled) {
-                  const manifestUrl = m[1];
-                  const type = mediaTypeFromUrl(manifestUrl) || 'm3u8';
-                  log.info(`[manifest-extractor] Found manifest in API response: ${manifestUrl}`);
-                  const embedOrigin = new URL(details.url).origin + '/';
-                  finish({ originalUrl: pageUrl, manifestUrl, type, referer: embedOrigin });
-                }
-              } catch {
-                // ignore parse errors
-              } finally {
-                filter.end();
-              }
-            });
-          } catch {
-            // filterResponseData not supported or failed — fall back to background fetch
-            if (!apiFetchAttempted && API_DOMAINS.some((d) => details.url.includes(d))) {
-              apiFetchAttempted = true;
-              fetchAndFindManifest(pageUrl, details.url).then((manifestUrl) => {
-                if (settled || !manifestUrl) return;
-                const type = mediaTypeFromUrl(manifestUrl) || 'm3u8';
-                log.info(`[manifest-extractor] Found manifest via API response fetch: ${manifestUrl}`);
-                const embedOrigin = new URL(details.url).origin + '/';
-                finish({ originalUrl: pageUrl, manifestUrl, type, referer: embedOrigin });
-              }).catch(() => { });
-            }
-          }
-        }
-      } catch {
-        // ignore
+      if (!settled && languageReady && !apiFetchAttempted && API_DOMAINS.some((d) => details.url.includes(d))) {
+        apiFetchAttempted = true;
+        const generation = documentGeneration;
+        fetchAndFindManifest(pageUrl, details.url, signal).then((scan) => {
+          if (settled || !scan.manifestUrl || generation !== documentGeneration) return;
+          let referer = pageUrl;
+          try { referer = new URL(details.url).origin + '/'; } catch { /* keep the page */ }
+          for (const url of scan.subtitles) subtitles.set(url, { url, referer });
+          const type = mediaTypeFromUrl(scan.manifestUrl) || 'm3u8';
+          accept({ originalUrl: pageUrl, manifestUrl: scan.manifestUrl, type, referer }, ' via API response fetch');
+        }).catch(() => { });
       }
       callback({});
     });
 
-    // Handle navigation / load failures gracefully.
-    win.webContents.on('did-fail-load', (_event, code, desc) => {
+    // A failed load ends or retries the probe only when it is the page itself.
+    // Every failure used to count: a broken ad iframe ended a healthy probe,
+    // and the retry called loadURL again, which aborted the pending loadURL
+    // whose catch then ended the probe — "Page load failed (-105)", "Retrying
+    // load…", "loadURL error: ERR_ABORTED (-3)" within 20ms, 47 times in one
+    // real session. The loadURL promises no longer decide anything; this does.
+    win.webContents.on('did-fail-load', (_event, code, desc, _url, isMainFrame) => {
+      if (settled || !isMainFrame || code === -3) return;
       log.warn(`[manifest-extractor] Page load failed (${code}): ${desc} for ${pageUrl}`);
-      if (!isRetry && (code === -2 || code === -3 || code === -105)) {
-        log.info('[manifest-extractor] Retrying load due to network failure...');
-        win.loadURL(pageUrl).catch(() => finish(null));
-      } else {
+      if (!RETRYABLE_LOAD_ERRORS.has(code) || reloadsLeft <= 0) {
         finish(null);
+        return;
       }
+      reloadsLeft--;
+      log.info('[manifest-extractor] Retrying load due to network failure...');
+      retryTimer = setTimeout(() => { if (!settled) win.loadURL(pageUrl).catch(() => { }); }, NETWORK_RETRY_DELAY_MS);
     });
 
     // After the page settles with no manifest found, reload once as a retry.
-    // Some sites need a second pass after all JS initialises.
-    if (!isRetry) {
-      win.webContents.on('did-finish-load', () => {
+    // Some sites need a second pass after all JS initialises. One timer, reset
+    // by each load: it used to be one listener per load, each arming its own.
+    win.webContents.on('did-finish-load', () => {
+      if (settled) return;
+      readPageContext(' via JS context after load').catch(() => { });
+      clearTimeout(reloadTimer);
+      reloadTimer = setTimeout(() => {
         if (settled) return;
-        // Try JS context extraction after page load
-        win.webContents.executeJavaScript(EXTRACT_JS).then((urls: string[]) => {
-          if (settled) return;
-          const found = manifestFromStr(urls);
-          if (found) {
-            log.info(`[manifest-extractor] Found manifest via JS context after load: ${found.manifestUrl}`);
-            finish(found);
-            return;
-          }
-        }).catch(() => { });
+        if (reloadsLeft <= 0) {
+          giveUp('Still no manifest after reload');
+          return;
+        }
+        reloadsLeft--;
+        log.info(`[manifest-extractor] No manifest yet after ${POST_LOAD_WAIT_MS}ms, reloading once…`);
+        win.loadURL(pageUrl).catch(() => { });
+      }, POST_LOAD_WAIT_MS);
+    });
 
-        reloadTimer = setTimeout(() => {
-          if (settled) return;
-          log.info(`[manifest-extractor] No manifest yet after ${POST_LOAD_WAIT_MS}ms, reloading once…`);
-          win.webContents.once('did-finish-load', () => {
-            if (settled) return;
-            // Try JS context again after reload
-            win.webContents.executeJavaScript(EXTRACT_JS).then((urls: string[]) => {
-              if (settled) return;
-              const found = manifestFromStr(urls);
-              if (found) {
-                log.info(`[manifest-extractor] Found manifest via JS context after reload: ${found.manifestUrl}`);
-                finish(found);
-                return;
-              }
-            }).catch(() => { });
-
-            reloadTimer = setTimeout(() => {
-              if (!settled) {
-                log.warn(`[manifest-extractor] Still no manifest after reload for ${pageUrl}`);
-                finish(null);
-              }
-            }, POST_LOAD_WAIT_MS);
-          });
-          win.loadURL(pageUrl).catch(() => { });
-        }, POST_LOAD_WAIT_MS);
-      });
-    } else {
-      win.webContents.on('did-finish-load', () => {
-        if (settled) return;
-
-        win.webContents.executeJavaScript(EXTRACT_JS).then((urls: string[]) => {
-          if (settled) return;
-          const found = manifestFromStr(urls);
-          if (found) {
-            log.info(`[manifest-extractor] Found manifest via JS context (retry): ${found.manifestUrl}`);
-            finish(found);
-            return;
-          }
-        }).catch(() => { });
-
-        reloadTimer = setTimeout(() => {
-          if (!settled) finish(null);
-        }, POST_LOAD_WAIT_MS);
-      });
-    }
-
-    log.info(`[manifest-extractor] Probing${isRetry ? ' (retry)' : ''} ${pageUrl}`);
+    log.info(`[manifest-extractor] Probing ${pageUrl}`);
     win.loadURL(pageUrl).catch((err) => {
-      log.warn(`[manifest-extractor] loadURL error: ${err}`);
-      finish(null);
+      // did-fail-load has already decided what this failure means.
+      log.debug(`[manifest-extractor] loadURL settled with: ${err}`);
     });
   });
 }
