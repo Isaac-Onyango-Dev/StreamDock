@@ -666,6 +666,71 @@ describe('events to the renderer', () => {
   });
 });
 
+describe('commands that do not apply', () => {
+  // Every control used to write status directly, so Resume on a queued job
+  // queued it twice and Cancel on a failed one rewrote history. Only
+  // transition() moves a download now; these must all be no-ops.
+  it('leave a download exactly where it is', async () => {
+    const engine = newEngine();
+    const done = startVideo(engine, YOUTUBE);
+    childFor(YOUTUBE).exit(0);
+    const broken = startVideo(engine, `${YOUTUBE}&b=1`);
+    await settle(); // starts on one host are spaced 3s apart
+    childFor(`${YOUTUBE}&b=1`).exit(1);
+    await settle(100);
+    const spawned = children.length;
+
+    for (const id of [done.id, broken.id]) {
+      engine.pause(id);
+      engine.resume(id);
+    }
+    engine.retry(done.id);
+    engine.cancel(done.id);
+    await settle();
+    expect(find(engine, done.id).status).toBe('completed');
+    expect(find(engine, broken.id).status).toBe('failed');
+    expect(children).toHaveLength(spawned);
+
+    // Resume or Retry on a job that is already waiting must not queue it twice.
+    startVideo(engine, `${YOUTUBE}&blocker=1`);
+    const waiting = startVideo(engine, `${YOUTUBE}&w=1`);
+    expect(find(engine, waiting.id).status).toBe('queued');
+    engine.resume(waiting.id);
+    engine.retry(waiting.id);
+    for (let i = 0; i < 4; i++) {
+      await settle();
+      for (const child of children) child.exit(0);
+    }
+    expect(children.filter((c) => c.args.includes(`${YOUTUBE}&w=1`))).toHaveLength(1);
+  });
+});
+
+describe('scale (Phase 0 baseline: 100 jobs = 103 state writes; one IPC event per progress line)', () => {
+  it('200 queued jobs cost one state write, and three busy downloads a few events a second', async () => {
+    const { StateStore } = await import('./state-store');
+    const save = vi.spyOn(StateStore.prototype, 'save');
+    const engine = newEngine();
+    for (let i = 0; i < 200; i++) startVideo(engine, `${YOUTUBE}&n=${i}`);
+    await settle(600);
+    expect(save.mock.calls.length).toBeLessThanOrEqual(2);
+    save.mockRestore();
+
+    // Three running downloads printing 20 progress lines each within a second.
+    await settle();
+    await settle(); // three starts, 3s apart on one host
+    sent = [];
+    const busy = running(engine).map((r) => childFor(r.url));
+    expect(busy).toHaveLength(3);
+    for (let tick = 1; tick <= 20; tick++) {
+      for (const child of busy) child.out(`[download]  ${tick}.0% of   300.00MiB at    1.00MiB/s ETA 05:00`);
+      await vi.advanceTimersByTimeAsync(50);
+    }
+    const events = sent.filter((e) => e.channel === 'event:download-progress').length;
+    // 60 lines; at most one event per download per 250ms (+1 trailing each).
+    expect(events).toBeLessThanOrEqual(3 * (1000 / 250 + 1));
+  });
+});
+
 describe('log volume', () => {
   it('keeps yt-dlp messages in the log but not its progress ticks', async () => {
     vi.mocked(log.debug).mockClear();
