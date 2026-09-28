@@ -11,12 +11,27 @@ fast without re-deriving it. Update it as work continues — don't let it go sta
 
 - `electron/main.ts` — main process entry point: window lifecycle, IPC wiring,
   tray, crash reporter, boot sequence.
-- `electron/download-engine.ts` (~50KB) — the core `DownloadEngine` class:
-  spawns yt-dlp, parses progress, manages the queue/state machine
-  (queued/running/paused/completed/failed/cancelled/retrying/scheduled).
+- `electron/download-engine.ts` — the `DownloadEngine`: one owner per decision
+  since session 22. `transition()` is the only place status changes (a `NEXT`
+  table of legal moves); `pump()` via `electron/scheduler.ts`'s pure
+  `planStarts()` is the only place a job starts (global limit, per-host limit
+  and start spacing from host-config, offline); `startRun()` is the only
+  pipeline (resolve a manifest on probe hosts, then spawn yt-dlp; abortable in
+  both phases); `close()` is the only reader of an exit. States:
+  scheduled/queued/resolving/running/paused/completed/failed/cancelled.
 - `electron/url-router.ts` — authoritative URL classification (video vs stream
-  mode, host routing). Reads `electron/host-config.json` at runtime with a
-  hardcoded fallback if that file is missing/corrupt.
+  mode, host routing). `electron/host-config.json` is `import`ed, so esbuild
+  bundles it; there is no runtime read and no fallback copy (installed builds
+  used to run on the fallback, because the JSON was never packaged).
+- `electron/probe-support.ts` — the plumbing every probe shares: a disposable
+  hidden window on its own session, `runInPage` (main-frame scripts that do not
+  wait for the page to stop loading), `fetchWithDeadline`, `runProbeChild`
+  (tree-kill on timeout or abort), and the startup sweep of probe temp files.
+- `electron/subtitle-attach.ts` — delivers subtitle files a web player loads
+  beside the stream (which yt-dlp never sees): muxed in with ffmpeg, beside the
+  video, or both, per the same decision `shared/subtitle-args.ts` makes.
+- `shared/` — types and rules both processes use: `downloads.ts` (request,
+  record, status), `settings.ts`, `subtitle-args.ts`, `language.ts`.
 - `electron/playlist-inspector.ts` — probes a URL to determine what kind of
   content it is (single video / playlist / episode-range / manifest-probe) and
   returns preview data for the UI.
@@ -55,7 +70,7 @@ actual runs — full yt-dlp spawn command lines, verbatim stderr, timestamps.
 
 ## Where things stand (as of this session)
 
-Twenty work sessions have happened against this repo so far.
+Twenty-two work sessions have happened against this repo so far.
 
 **Correcting a claim this file carried for three sessions:** sessions 5 and 6
 were *not* unpushed. Verified in session 9 — `HEAD == origin/main` and
@@ -1975,9 +1990,10 @@ when the bar's width is hardcoded so it stops tracking percent. Test-only, no
 version bump.
 
 
-### Session 22 - full architecture audit, then the job-engine refactor (in progress)
+### Session 22 - full architecture audit, then the job-engine refactor
 
-Branch `refactor/job-engine`, **nothing released**. Isaac reported eight symptoms
+Branch `refactor/job-engine`, **nothing pushed or released**; Phases 0-8 are all
+committed. Isaac reported eight symptoms
 (forced tray, Purge History resurrection, concurrency ignored, scrollbar, a 50+
 episode queue struggling, probe/download race, useless subtitle default, controls
 that only look like they work) and asked for an audit before any code. The full
@@ -2020,7 +2036,109 @@ IPC event per progress line. Pipeline: 242 tests, 292 engine checks, Playwright
 20/20. **Convention: a fix flips its `it.fails` to `it`; never delete one to get
 green.**
 
+**Phase 1 (`2d6c229`, `2ca1f24`) — stop the P0 damage.** Single-instance lock;
+the close handler honours `isQuitting` and `WINDOW_CLOSE` is one path; exit 0
+clears an error; yt-dlp's retried lines no longer set one;
+`--abort-on-unavailable-fragments` for VOD, and a failed run deletes what it had
+already moved into the folder; engine `remove()`, so Purge and Remove are real;
+probe results carry a plan token and a stale one is dropped.
+
+**Phase 2 (`8508ccb`) — the engine core.** The five structures and twelve status
+writers became `transition()` + `pump()`/`planStarts()` + one `startRun()`
+pipeline with an `AbortController` per attempt (pause or cancel while resolving
+no longer leaks a slot). `retryWithManifest`, a drifted copy of the whole spawn
+pipeline, is gone. Per-host limits are data in host-config and the queued row
+says why it waits. A network failure while the internet is unreachable puts the
+job back at the front and holds the queue (rechecked every 10s, 3 tries), where
+DNS dying used to fail ~45 episodes in ten minutes. The stall monitor reports
+and never pauses. Restart maps interrupted jobs to paused, re-arms scheduled
+ones and sweeps orphan staging. Saves are debounced (500ms) and atomic.
+
+**Phase 3 (`eb30aa2`) — the renderer is a projection.** Every record carries a
+`revision`; the store applies an event only if it is newer and never for an id
+the engine removed. Progress is coalesced to 250ms per job, status changes are
+never delayed, and main drives the tray count itself (the renderer used to send
+it back on every progress event).
+
+**Phase 4 (`b1dd7d6`, then the merged probe work `89965a6`) — probes and
+language fidelity.** Download while languages are still being checked waits and
+asks (Wait / site default) instead of racing. The engine records
+`resolvedTranslation`, and an episode whose language cannot be proven fails
+(Decision 2). **The 8-in-10 Dub timeouts had a concrete cause**, found by a
+subagent measuring the real page: `webContents.executeJavaScript` is suspended
+until the page stops loading, which a streaming page does at ~+21.7s, while the
+language gate bailed at 12s. `mainFrame.executeJavaScript` ran at +1.4s in the
+same measurement. The gate also re-arms on every main-frame load (a reload used
+to return the default Sub stream as proven Dub), only main-frame load failures
+count, and an `.mp4` is held in reserve because it is usually an ad.
+
+**Phase 5 (`4e8be55`) — settings that do what they say.** The cookies toggle is
+gone end to end; history is kept until cleared; Sub and Dub have separate
+subtitle rules (Dub defaults to none); `closeBehavior` (tray-when-active /
+quit / ask, with a remember-my-choice checkbox and a first-time tray notice);
+atomic settings writes; custom args saved on blur; the plugin list shows real
+plugin packages.
+
+**Phase 6 (`c260b8a`) — the Downloads list.** The hand-rolled virtualiser is
+gone: plain memoised rows (measured ~1ms per update and ~1s to mount 1000 rows
+in the production build), entrance animation only for new rows, one visible
+scrollbar definition with `scrollbar-gutter: stable`. `content-visibility` was
+tried and removed: it made the last row unreachable.
+
+**Phase 7 (`eb3a439`) — cleanup.** Dead IPC channels and their preload methods;
+progress ticks out of the log (~95% of it); the engines and plugins are no
+longer packaged twice (**331MB off the install**, verified with a `--dir`
+package: no `app.asar.unpacked`, `resources/` intact).
+
+**B7 subtitles (`7b4e6f6`).** Confirmed from disk that site A Sub episodes
+arrived with no subtitles: the player fetches an English `.vtt` beside the
+manifest and yt-dlp never sees it. The extractor now returns those files and
+`subtitle-attach.ts` muxes them in (mov_text, stream copy, temp file + rename)
+or saves them beside the video, per the Sub/Dub rule. Checked against the
+bundled ffmpeg. Probe hosts are now always resolved at start, because the
+picker's manifest token dies in ~90s and only the engine's resolve catches the
+subtitles; the picker's manifest is the fallback.
+
+**Phase 8 (`c76f131`).** Commands that do not apply are no-ops; 200 queued jobs
+cost at most two state writes (baseline: 103 for 100); three busy downloads send
+at most 15 events a second (baseline: one per line, 60). An e2e drives Clear
+history then Pause All and was run red against the original renderer.
+
+**Final pipeline:** typecheck, ESLint 0/0, **290 Vitest tests**, verify:engine
+**379 checks**, Playwright **29/29**, production build.
+
+**Still needs Isaac at the keyboard** (none of this can be driven from here):
+quit with downloads active under each close behaviour; relaunch while hidden
+(one process in Task Manager); the tray on Linux; a real Dub range with the
+language shown per row; a Sub episode arriving with subtitles (ffprobe it); and
+2 concurrent site A jobs or `-N 4`, which were never measured against the live
+CDN, so the host limit stays at 1. Delete the 59MB truncated episode 553 file before retrying that episode.
+
 ## Working agreements for future sessions on this repo
+
+- **Read the API's documented waiting behaviour before tuning its timeout.**
+  The Dub gate's 12s bail looked too short; the real cause was that
+  `webContents.executeJavaScript` does not *start* until the page stops loading
+  (~21.7s on a streaming page). `mainFrame.executeJavaScript` ran at +1.4s.
+  A longer timeout would have hidden the bug and made every episode slower.
+- **Write code containing regexes with the Edit/Write tools, not a heredoc or a
+  script.** A Node heredoc turned `\b` into a backspace and `\[` into `[`;
+  Python writes came out CRLF. Check new files for `\r` before committing.
+- **`stripComments` in verify-engine eats from a `/*` inside a string or a line
+  comment to the next `*/`.** A comment mentioning `<root>/*/yt_dlp_plugins`
+  silently removed code from a guard's view. Reword such comments.
+- **Measure UI performance in the production build.** Dev-mode React adds
+  checks and double renders that a user never runs; the decision to drop the
+  virtualiser rests on production numbers.
+- **Headless Chromium hides scrollbars.** A screenshot meant to show one needs
+  `launchOptions.ignoreDefaultArgs: ['--hide-scrollbars']`.
+- **To run a red check against an old commit, use a detached worktree under
+  `.claude/worktrees/`**, so node_modules resolves from the repo, copy the new
+  test in, and adapt only the scratch copy to old UI details (the original
+  Purge asked through an in-app modal). The committed test stays about outcomes.
+- **Pass commit messages to git with `-F <file>` from Windows PowerShell 5.1.**
+  It re-quotes arguments to native programs, so a here-string containing double
+  quotes became a string of pathspecs and nothing was committed.
 
 - **An expected-failure test proves nothing until it has failed for its own
   reason.** `it.fails`/`test.fail` pass on *any* throw. The probe-race spec first
