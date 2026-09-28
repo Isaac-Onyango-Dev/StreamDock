@@ -2094,8 +2094,14 @@ package: no `app.asar.unpacked`, `resources/` intact).
 arrived with no subtitles: the player fetches an English `.vtt` beside the
 manifest and yt-dlp never sees it. The extractor now returns those files and
 `subtitle-attach.ts` muxes them in (mov_text, stream copy, temp file + rename)
-or saves them beside the video, per the Sub/Dub rule. Checked against the
-bundled ffmpeg. Probe hosts are now always resolved at start, because the
+or saves them beside the video, per the Sub/Dub rule. **Verified live** with a
+harness in a real Electron session (scratch profile, `.claude/harness/`, which
+is gitignored): ep 562 requested as Sub resolved in 8-14s, language proven,
+one `.vtt` captured with the player's referer; fetched and muxed as `mov_text`,
+the expected first cue at 00:18. A generated clip
+stood in for the episode itself, which is yt-dlp's part and unchanged (a
+`--download-sections` cut fails in ffmpeg against this CDN; unrelated to the
+app, which downloads whole episodes). Probe hosts are now always resolved at start, because the
 picker's manifest token dies in ~90s and only the engine's resolve catches the
 subtitles; the picker's manifest is the fallback.
 
@@ -2110,7 +2116,8 @@ history then Pause All and was run red against the original renderer.
 **Still needs Isaac at the keyboard** (none of this can be driven from here):
 quit with downloads active under each close behaviour; relaunch while hidden
 (one process in Task Manager); the tray on Linux; a real Dub range with the
-language shown per row; a Sub episode arriving with subtitles (ffprobe it); and
+language shown per row; a whole Sub episode through the app's own UI (ffprobe
+it for the subtitle track); and
 2 concurrent site A jobs or `-N 4`, which were never measured against the live
 CDN, so the host limit stays at 1. Delete the 59MB truncated episode 553 file before retrying that episode.
 
