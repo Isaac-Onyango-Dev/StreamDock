@@ -11,6 +11,7 @@ import { analyzeUrl } from './url-router';
 import { inspectUrl } from './playlist-inspector';
 import { probeMediaTracks } from './media-track-probe';
 import { probeStreamOptions } from './stream-options-probe';
+import { sweepProbeTempFiles } from './probe-support';
 import { getBinaryStatus, resolveUpdatableYtDlpCommand, resolveYtDlpCommand, resolvePluginDirs } from './binary-resolver';
 import { toUserError } from './error-translator';
 import {
@@ -199,6 +200,20 @@ function createWindow(): void {
   }
 }
 
+/**
+ * One probe of each kind at a time. A new Analyze cancels the last one's hidden
+ * window or yt-dlp child: pasting three URLs in a row used to leave three
+ * Chromium renderers running to their timeouts for results nobody would read
+ * (the renderer already drops results for a URL that is no longer current).
+ */
+const probeAborts = new Map<string, AbortController>();
+function supersede(kind: 'inspect' | 'tracks' | 'streams'): AbortSignal {
+  probeAborts.get(kind)?.abort();
+  const controller = new AbortController();
+  probeAborts.set(kind, controller);
+  return controller.signal;
+}
+
 function setupIpc(): void {
   // ── App ────────────────────────────────────────────────────────────────────
 
@@ -288,21 +303,21 @@ function setupIpc(): void {
   });
   ipcMain.handle(IPC.URL_INSPECT, async (_event, url: string) => {
     try {
-      return { success: true, data: await inspectUrl(url) };
+      return { success: true, data: await inspectUrl(url, supersede('inspect')) };
     } catch (error) {
       return { success: false, error: toUserError(error) };
     }
   });
   ipcMain.handle(IPC.MEDIA_PROBE_TRACKS, async (_event, payload: { pageUrl: string; manifestUrl?: string; referer?: string }) => {
     try {
-      return { success: true, data: await probeMediaTracks(payload) };
+      return { success: true, data: await probeMediaTracks(payload, supersede('tracks')) };
     } catch (error) {
       return { success: false, error: toUserError(error) };
     }
   });
   ipcMain.handle(IPC.STREAM_OPTIONS_PROBE, async (_event, pageUrl: string) => {
     try {
-      return await probeStreamOptions(pageUrl);
+      return await probeStreamOptions(pageUrl, supersede('streams'));
     } catch (error) {
       return { success: false, url: pageUrl, options: [], error: toUserError(error) };
     }
@@ -759,6 +774,9 @@ app.whenReady().then(async () => {
   // Configure electron-log file path
   log.transports.file.resolvePathFn = () => join(app.getPath('userData'), 'streamdock.log');
 
+  // Cookie jars and preload files a crash or a cancelled probe left behind.
+  // Before anything probes: the sweep cannot tell a leftover from a file in use.
+  sweepProbeTempFiles();
   engine = new DownloadEngine(() => mainWindow);
   engine.onPendingChange = showPendingCount;
   engine.onFinished = notifyFinished;

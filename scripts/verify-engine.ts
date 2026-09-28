@@ -583,7 +583,7 @@ function verifySubtitleOwnership(): void {
 
   // Burned-in subtitles are destructive and deliberately unimplemented; they
   // must never appear as a side effect of an embed path.
-  for (const source of [engine, shared]) {
+  for (const source of [engine, shared, readProjectFile('electron/subtitle-attach.ts')]) {
     assert(!source.includes('-vf'), 'no filter-graph flag: subtitles are never burned into the picture');
   }
 }
@@ -946,10 +946,20 @@ function verifyExtractionCannotHang(): void {
     extractor.includes('FETCH_TIMEOUT_MS'),
     'a raw fetch cannot wait forever on a silent server',
   );
+  // Every probe fetches through one helper now; its deadline is the one to check.
+  const support = stripComments(readProjectFile('electron/probe-support.ts'));
+  const fetchBody = support.slice(support.indexOf('export function fetchWithDeadline'), support.indexOf('function toNetscapeCookies'));
   assert(
-    /clearTimeout\(deadline\)/.test(extractor),
-    'the fetch deadline is cleared once the request settles',
+    /const deadline = setTimeout\(/.test(fetchBody) && /clearTimeout\(deadline\)/.test(fetchBody),
+    'the shared fetch has a total deadline, cleared once the request settles',
   );
+  for (const file of ['manifest-extractor', 'stream-options-probe', 'media-track-probe', 'playlist-inspector']) {
+    const source = stripComments(readProjectFile(`electron/${file}.ts`));
+    assert(
+      !/net\.request\(|from 'https'|\bspawn\(/.test(source),
+      `${file}.ts fetches and spawns only through probe-support, whose helpers always come back`,
+    );
+  }
 
   const engine = stripComments(readProjectFile('electron/download-engine.ts'));
   assert(
@@ -1378,6 +1388,42 @@ function verifyNoDeadWeight(): void {
   assert(/if \(!PROGRESS_TICK\.test\(trimmed\)\) log\.debug/.test(engine), 'progress ticks are not written to the log file');
 }
 
+/**
+ * Subtitles the player loads beside the stream reach the file (B7).
+ *
+ * anikoto's Sub stream carries its English subtitles as a separate .vtt the
+ * player fetches next to the manifest. yt-dlp is handed only the manifest, so
+ * every Sub episode arrived with no subtitles and the subtitle rule had nothing
+ * to act on. And the language click could not start until the page stopped
+ * loading (~21s), so the gate's bail fired first on 8 of 10 real Dub episodes.
+ */
+function verifyPlayerSubtitlesDelivered(): void {
+  const extractor = stripComments(readProjectFile('electron/manifest-extractor.ts'));
+  assert(
+    /SUBTITLE_PATTERN\.test\(details\.url\)/.test(extractor) && /subtitles: \[\.\.\.subtitles\.values\(\)\]/.test(extractor),
+    'the extractor captures the subtitle files the player requests and returns them with the manifest',
+  );
+
+  const engine = stripComments(readProjectFile('electron/download-engine.ts'));
+  assert(/task\.subtitles = result\.subtitles/.test(engine), 'the engine keeps the captured subtitles for the attempt');
+  assert(
+    /const mode = resolveSubtitleMode\(task\.request\)/.test(engine) && /attachSubtitles\([^)]*task\.subtitles, mode,/.test(engine),
+    'they are delivered by the same subtitle decision yt-dlp gets (shared/subtitle-args.ts)',
+  );
+  assert(/\.then\(\(\) => this\.complete\(id, task\)\)/.test(engine), 'a download reads completed only after its subtitles are on disk');
+
+  const attach = stripComments(readProjectFile('electron/subtitle-attach.ts'));
+  assert(!/-vf|-filter|subtitles=/.test(attach), 'subtitles are muxed as a track, never burned into the picture');
+  assert(/renameSync\(tmp, videoPath\)/.test(attach), 'the video is replaced only by a finished mux, never written in place');
+
+  const support = stripComments(readProjectFile('electron/probe-support.ts'));
+  assert(/mainFrame\.executeJavaScript\(/.test(support), 'page scripts run in the main frame, which does not wait for the page to stop loading');
+  for (const file of ['manifest-extractor', 'stream-options-probe']) {
+    const source = stripComments(readProjectFile(`electron/${file}.ts`));
+    assert(!/webContents\.executeJavaScript\(/.test(source), `${file}.ts runs page scripts through runInPage only`);
+  }
+}
+
 verifySmartNaming();
 verifyEngineWiring();
 verifyRouteCoverage();
@@ -1406,5 +1452,6 @@ verifyProbeLifecycle();
 verifySettingsAreReal();
 verifyDownloadsList();
 verifyNoDeadWeight();
+verifyPlayerSubtitlesDelivered();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);

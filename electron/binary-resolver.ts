@@ -151,19 +151,15 @@ function findPythonYtDlp(): { command: string; args: string[] } | null {
 }
 
 /**
- * Resolve a yt-dlp command suitable for spawning.
+ * Resolve a yt-dlp command suitable for spawning: the bundled binary, or
+ * `python -m yt_dlp` when there is none.
  *
- * When `preferPython` is `true`, the Python-module variant
- * (e.g. `python -m yt_dlp`) is tried first — this is useful for
- * sites that are only supported by custom yt-dlp forks such as
- * yt-dlp-hianime.
+ * It could also be asked to try Python *first*, for yt-dlp forks; the engine
+ * was its last caller, and it stopped in session 22 — the bundled binary loads
+ * the bundled plugins itself, and the Python checks ran synchronously on the
+ * main process.
  */
-export function resolveYtDlpCommand(preferPython = false): YtDlpCommand {
-  if (preferPython) {
-    const pyCmd = findPythonYtDlp();
-    if (pyCmd) return { ...pyCmd, type: 'python' };
-  }
-
+export function resolveYtDlpCommand(): YtDlpCommand {
   try {
     const path = resolveBinary('yt-dlp');
     return { command: path, args: [], type: 'native' };
@@ -171,10 +167,8 @@ export function resolveYtDlpCommand(preferPython = false): YtDlpCommand {
     // Native binary not available; try Python fallback
   }
 
-  if (!preferPython) {
-    const pyCmd = findPythonYtDlp();
-    if (pyCmd) return { ...pyCmd, type: 'python' };
-  }
+  const pyCmd = findPythonYtDlp();
+  if (pyCmd) return { ...pyCmd, type: 'python' };
 
   throw new Error('yt-dlp not found');
 }

@@ -27,13 +27,15 @@ import log from 'electron-log';
 import { IPC } from './ipc-channels';
 import { buildPluginDirArgs, resolveBinary } from './binary-resolver';
 import { toErrorDetail, classifyEngineFailure, isNetworkFailure } from './error-translator';
-import { extractManifest, type ManifestResult } from './manifest-extractor';
+import { extractManifest, type CapturedSubtitle, type ManifestResult } from './manifest-extractor';
+import { attachSubtitles } from './subtitle-attach';
+import { mediaTypeFromUrl } from './probe-support';
 import { CONCURRENCY, MANIFEST_PROBE_HOSTS, REFERENCE_HOSTS } from './url-router';
 import { detectFormat, buildFormatArgs } from './format-detector';
 import { StallWatch, isInternetReachable } from './network-monitor';
 import { StateStore } from './state-store';
 import { buildOutputTemplate } from './smart-naming';
-import { buildSubtitleArgs } from '../shared/subtitle-args';
+import { buildSubtitleArgs, resolveSubtitleMode } from '../shared/subtitle-args';
 import type { DownloadRecord, DownloadRequest, DownloadStatus } from '../shared/downloads';
 
 export type { DownloadRecord, DownloadRequest, DownloadStatus } from '../shared/downloads';
@@ -74,6 +76,8 @@ interface ActiveTask {
   startedAt: number;
   /** Temp cookies.txt written by manifest-extractor; deleted when the attempt ends. */
   cookiesFile?: string;
+  /** Subtitle files the page's player loaded beside the stream; yt-dlp never sees them. */
+  subtitles?: CapturedSubtitle[];
   /**
    * Files this attempt moved out of staging into the download folder.
    *
@@ -633,7 +637,11 @@ export class DownloadEngine {
     const record = this.records.get(id)!;
     const request = this.requests.get(id)!;
     const host = extractHost(request.url);
-    const resolve = !request.manifestUrl && matchesProbeHost(host);
+    // A probe host is always resolved at start, even when the picker already
+    // found a manifest: that manifest's CDN token dies in ~90s, long before a
+    // queued job starts, and only the engine's own resolve catches the
+    // subtitle files the player loads beside it.
+    const resolve = matchesProbeHost(host);
 
     const task: ActiveTask = {
       process: null,
@@ -661,11 +669,15 @@ export class DownloadEngine {
     if (resolve) {
       const wanted = task.record.requestedTranslation;
       log.info(`[engine] Resolving manifest for ${task.request.url}${wanted ? ` (${wanted})` : ''}`);
-      const result = await this.resolveManifest(id, task);
+      const found = await this.resolveManifest(id, task);
       // Paused, cancelled or resumed into a new attempt while this was pending:
       // this attempt no longer owns the job and must not spawn anything.
       if (this.tasks.get(id) !== task) return;
 
+      // The picker's manifest, whose language its probe proved by clicking the
+      // server, is the fallback when the fresh resolve comes up short.
+      const usable = found && !this.languageFailure(wanted, found) ? found : null;
+      const result = usable ?? this.pickedManifest(task.request, wanted) ?? found;
       const language = this.languageFailure(wanted, result);
       if (language) {
         this.settle(task);
@@ -678,6 +690,7 @@ export class DownloadEngine {
         task.spawnUrl = result.manifestUrl;
         task.manifestAttempted = true;
         task.cookiesFile = result.cookiesFile;
+        task.subtitles = result.subtitles;
         referer = result.referer;
         task.record.resolvedTranslation = result.translation;
       } else {
@@ -734,6 +747,18 @@ export class DownloadEngine {
     if (result.languageOutcome === 'selected') return null;
     if (result.languageOutcome === 'absent') return `${label} is not available for this episode.`;
     return `Could not confirm the ${label} stream for this episode, so it was not downloaded. Retry it, or choose another language.`;
+  }
+
+  private pickedManifest(request: DownloadRequest, wanted: string | undefined): ManifestResult | null {
+    if (!request.manifestUrl) return null;
+    return {
+      originalUrl: request.url,
+      manifestUrl: request.manifestUrl,
+      type: mediaTypeFromUrl(request.manifestUrl) ?? 'm3u8',
+      referer: request.manifestReferer,
+      languageOutcome: wanted ? 'selected' : undefined,
+      translation: wanted,
+    };
   }
 
   private withCeiling<T>(work: Promise<T>, pageUrl: string): Promise<T | null> {
@@ -1031,20 +1056,36 @@ export class DownloadEngine {
 
     if (code === 0) {
       this.settle(task);
-      // yt-dlp has moved the finished file to the download folder; whatever is
-      // left in staging is scratch.
-      this.clearStaging(task.request, id);
       this.networkRetries.delete(id);
-      this.transition(record, 'completed', { progress: 100 });
-      this.getWindow()?.webContents.send(IPC.EVENT_DOWNLOAD_COMPLETE, { ...record });
-      this.onFinished?.(record);
-      log.info(`[engine] Download ${id} completed: ${record.title}`);
-      this.pump();
+      const mode = resolveSubtitleMode(task.request);
+      if (task.subtitles?.length && mode !== 'none' && !record.alreadyExisted && record.outputPath) {
+        // The row stays "running" while the tracks are fetched and muxed; the
+        // slot is already free, so the next download is not held up by it.
+        void attachSubtitles(record.outputPath, task.subtitles, mode, resolveBinary('ffmpeg'), this.stagingDir(task.request, id))
+          .catch((err) => log.warn(`[engine] Subtitles for ${id} were not delivered:`, err))
+          .then(() => this.complete(id, task));
+      } else {
+        this.complete(id, task);
+      }
       return;
     }
 
     this.retractMovedFiles(task);
     void this.settleFailure(id, task, new Error(task.stderr || `yt-dlp exited with code ${code ?? 'unknown'}`));
+  }
+
+  private complete(id: string, task: ActiveTask): void {
+    const { record } = task;
+    // Paused or cancelled while its subtitles were being attached.
+    if (record.status !== 'running') return;
+    // yt-dlp has moved the finished file to the download folder; whatever is
+    // left in staging is scratch.
+    this.clearStaging(task.request, id);
+    this.transition(record, 'completed', { progress: 100 });
+    this.getWindow()?.webContents.send(IPC.EVENT_DOWNLOAD_COMPLETE, { ...record });
+    this.onFinished?.(record);
+    log.info(`[engine] Download ${id} completed: ${record.title}`);
+    this.pump();
   }
 
   /**

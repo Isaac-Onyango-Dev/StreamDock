@@ -101,6 +101,7 @@ type ManifestResult = {
   referer?: string;
   languageOutcome?: 'selected' | 'absent' | 'unconfirmed';
   translation?: string;
+  subtitles?: Array<{ url: string; referer?: string }>;
 };
 const extractions: Array<{ url: string; translation?: string; resolve: (r: ManifestResult | null) => void }> = [];
 
@@ -112,6 +113,17 @@ vi.mock('./manifest-extractor', () => ({
         // Like the real extractor: an abort ends the extraction with nothing.
         signal?.addEventListener('abort', () => resolve(null));
       }),
+  ),
+}));
+
+// ── Fake subtitle delivery ───────────────────────────────────────────────────
+
+const attached: Array<{ video: string; tracks: unknown[]; mode: string; done: () => void }> = [];
+
+vi.mock('./subtitle-attach', () => ({
+  attachSubtitles: vi.fn(
+    (video: string, tracks: unknown[], mode: string) =>
+      new Promise<number>((resolve) => attached.push({ video, tracks, mode, done: () => resolve(tracks.length) })),
   ),
 }));
 
@@ -160,6 +172,7 @@ beforeEach(() => {
   mkdirSync(outputDir, { recursive: true });
   children.length = 0;
   extractions.length = 0;
+  attached.length = 0;
   sent = [];
   internetUp = true;
   vi.mocked(log.error).mockClear();
@@ -486,6 +499,63 @@ describe('language fidelity (Decision 2: an unproven Dub fails clearly)', () => 
     expect(extractions).toHaveLength(1);
     expect(find(engine, id).error).toMatch(/dub is not available/i);
     expect(children).toHaveLength(0);
+  });
+});
+
+describe('subtitles the player loaded beside the stream (B7)', () => {
+  const VTT = { url: 'https://cdn.example/subs/eng.vtt', referer: 'https://megaplay.buzz/' };
+
+  async function finishEpisode(engine: Engine, extra: Record<string, unknown>) {
+    const { id } = startVideo(engine, episode(1), extra);
+    extractions[0].resolve({ originalUrl: episode(1), manifestUrl: CDN(1), type: 'm3u8', subtitles: [VTT] });
+    await settle();
+    const final = join(outputDir, 'One Piece - Episode 1.mp4');
+    childFor(CDN(1)).out(`[MoveFiles] Moving file "${join(outputDir, '.streamdock-incomplete', id, 'x.mp4')}" to "${final}"`);
+    childFor(CDN(1)).exit(0);
+    await settle(10);
+    return { id, final };
+  }
+
+  it('attaches them to the finished file before the row reads completed', async () => {
+    const engine = newEngine();
+    const { id, final } = await finishEpisode(engine, { subtitleMode: 'embed' });
+    expect(attached).toHaveLength(1);
+    expect(attached[0]).toMatchObject({ video: final, tracks: [VTT], mode: 'embed' });
+    expect(find(engine, id).status).toBe('running');
+
+    attached[0].done();
+    await settle(10);
+    expect(find(engine, id).status).toBe('completed');
+  });
+
+  it('leaves them alone when this download\'s rule is "none"', async () => {
+    const engine = newEngine();
+    const { id } = await finishEpisode(engine, { subtitleMode: 'none' });
+    expect(attached).toHaveLength(0);
+    expect(find(engine, id).status).toBe('completed');
+  });
+});
+
+describe('a manifest the picker found', () => {
+  it('is resolved afresh on a probe host: its token dies in ~90s, and only the engine\'s own resolve catches subtitles', async () => {
+    const engine = newEngine();
+    startVideo(engine, episode(1), { manifestUrl: CDN(9), manifestReferer: 'https://megaplay.buzz/' });
+    expect(extractions).toHaveLength(1);
+    extractions[0].resolve({ originalUrl: episode(1), manifestUrl: CDN(1), type: 'm3u8' });
+    await settle();
+    expect(childFor(CDN(1))).toBeDefined();
+  });
+
+  it('is still used when the fresh resolve finds nothing', async () => {
+    const engine = newEngine();
+    const { id } = startVideo(engine, episode(1), { manifestUrl: CDN(9), translation: 'dub' });
+    extractions[0].resolve(null);
+    await settle(10);
+    extractions[1].resolve(null);
+    await settle();
+    expect(childFor(CDN(9))).toBeDefined();
+    expect(find(engine, id).status).toBe('running');
+    expect(find(engine, id).resolvedTranslation).toBe('dub');
   });
 });
 

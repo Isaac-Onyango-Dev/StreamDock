@@ -1,7 +1,7 @@
 // Role: safe metadata probe for single videos, playlists, and stream pages.
-import { buildPluginDirArgs, resolveBinary, resolveYtDlpCommand } from './binary-resolver';
+import { buildPluginDirArgs, resolveYtDlpCommand } from './binary-resolver';
 import { fetchWithDeadline, runProbeChild } from './probe-support';
-import { ANIME_HOSTS, EPISODE_PATTERNS, MANIFEST_PROBE_HOSTS, PLUGIN_EXTRACTOR_HOSTS, REFERENCE_HOSTS } from './url-router';
+import { EPISODE_PATTERNS, MANIFEST_PROBE_HOSTS, PLUGIN_EXTRACTOR_HOSTS, REFERENCE_HOSTS } from './url-router';
 
 export type ProbeSupport = 'direct' | 'playlist' | 'episode-range' | 'manifest-probe' | 'unknown';
 
@@ -481,13 +481,12 @@ async function spawnProbe(
   url: string,
   flat: boolean,
   timeoutMs: number,
-  ytDlpCmd: { command: string; args: string[] } | undefined,
   signal: AbortSignal | undefined,
 ): Promise<ProbeResult> {
-  const resolvedCmd = ytDlpCmd ?? (() => {
-    const path = resolveBinary('yt-dlp');
-    return { command: path, args: [] };
-  })();
+  // The bundled binary loads the bundled plugins through --plugin-dirs, anime
+  // hosts included; the "anime fork" branch that used to pick it resolved to
+  // this same binary.
+  const resolvedCmd = resolveYtDlpCommand();
   const args = [
     ...resolvedCmd.args,
     ...buildPluginDirArgs(),
@@ -515,14 +514,6 @@ function tryParse(url: string, stdout: string): PlaylistProbe | null {
   }
 }
 
-function isAnimeUrl(url: string): boolean {
-  try {
-    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
-    return ANIME_HOSTS().some((d) => host === d || host.endsWith(`.${d}`));
-  } catch {
-    return false;
-  }
-}
 
 function isPluginExtractorUrl(url: string): boolean {
   try {
@@ -562,21 +553,8 @@ export async function inspectUrl(url: string, signal?: AbortSignal): Promise<Pla
     return await fallbackProbe(url, 'This page will be probed in a hidden browser when the download starts.', signal);
   }
 
-  // Known anime sites rely on bundled/local yt-dlp plugins. Prefer the bundled
-  // binary so those plugins and bundled optional libraries are available.
-  const useAnimeFork = isAnimeUrl(url);
-  let ytDlpCmd: { command: string; args: string[] } | undefined;
-
-  if (useAnimeFork) {
-    try {
-      ytDlpCmd = resolveYtDlpCommand(false);
-    } catch {
-      // Fall through to standard binary below
-    }
-  }
-
   // Fast pass: try with --flat-playlist first
-  let result = await spawnProbe(url, true, PROBE_TIMEOUT_MS, ytDlpCmd, signal);
+  let result = await spawnProbe(url, true, PROBE_TIMEOUT_MS, signal);
   let probe = result.probe;
 
   // If the URL has a list= parameter but the probe returned only 1 entry
@@ -589,7 +567,7 @@ export async function inspectUrl(url: string, signal?: AbortSignal): Promise<Pla
       !probe.qualityOptions?.length
     )
   ) {
-    result = await spawnProbe(url, false, FULL_PROBE_TIMEOUT_MS, ytDlpCmd, signal);
+    result = await spawnProbe(url, false, FULL_PROBE_TIMEOUT_MS, signal);
     if (result.probe) probe = result.probe;
   }
 

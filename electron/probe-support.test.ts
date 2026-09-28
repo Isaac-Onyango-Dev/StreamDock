@@ -170,10 +170,10 @@ describe('openHiddenProbe', () => {
     // A session holds one listener per webRequest event, so a shared one lets
     // the second probe replace the first one's interception.
     vi.useFakeTimers();
-    openHiddenProbe();
-    openHiddenProbe();
+    const probes = [openHiddenProbe(), openHiddenProbe()];
 
     expect(partitions[0]).not.toBe(partitions[1]);
+    for (const probe of probes) probe.dispose();
   });
 
   it('leaves no listener, cache, storage, window or preload behind', async () => {
