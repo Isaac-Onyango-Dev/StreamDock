@@ -1,6 +1,6 @@
 {
   "name": "streamdock",
-  "version": "1.8.1",
+  "version": "1.9.0",
   "description": "Desktop video downloader and live stream capture app",
   "type": "module",
   "main": "dist-electron/main.cjs",

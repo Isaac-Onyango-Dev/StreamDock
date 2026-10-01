@@ -4,6 +4,73 @@ All notable changes to StreamDock are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.9.0] - 2026-10-01
+
+### Fixed
+- **Anime downloads from some sites are playable again.** On 1 October some sites moved their videos to new servers that hide every piece of an episode inside a
+  small PNG image. StreamDock saved what arrived, so each episode became a file
+  that played as a single picture for 12 seconds, and the row still said
+  Completed. StreamDock now strips the wrappers, rebuilds a normal MP4, and
+  checks that the file really contains video before calling it finished; a file
+  that doesn't is removed and the download fails with a clear message.
+- **Sub episodes now come with their subtitles.** The site's player loads the
+  English subtitles as a separate file beside the video, which the download
+  engine never saw, so every Sub episode arrived without them. They are now
+  fetched and embedded, saved beside the video, or both, as your subtitle
+  setting says.
+- **Dub downloads no longer quietly arrive as Sub.** The step that picks the Dub
+  server could not start until the page had finished loading (over 20 seconds on
+  a streaming site) and gave up after 12, so most Dub episodes fell back to the
+  default Sub stream without saying so. It now runs as soon as the page opens,
+  each row shows which language it actually got, and an episode whose Dub
+  cannot be confirmed fails clearly instead of downloading the wrong language.
+- **A dropped connection no longer leaves a broken episode behind.** When the
+  internet cut out mid-episode, the missing pieces were skipped and a truncated
+  file was saved as if complete, and a retry then called it "Already saved".
+  Missing pieces now fail the download and anything it had saved is removed.
+  While the internet is down, the queue waits for it to come back instead of
+  failing every remaining episode in turn.
+- **Quit always quits.** "Pause & Exit" in the quit dialog hid the app in the
+  tray instead, and a download paused while it was still finding its stream
+  could stop the app from quitting at all. Opening StreamDock while it is
+  already running now brings back the existing window instead of starting a
+  second copy.
+- **Cleared downloads stay cleared.** Clearing history and then pausing
+  everything brought the cleared rows back, and removing a finished download
+  only hid it until the next launch.
+- **Finished downloads no longer show a stale error.** A connection hiccup that
+  yt-dlp recovered from by itself stayed on the row as an error after the
+  download completed.
+- **Download now waits for the language check instead of racing it.** Pressing
+  Download while StreamDock was still checking for Dub used the site default,
+  and a check still finishing for a previous link could decide which episode a
+  new download fetched.
+- **"Run StreamDock" at the end of the installer starts the app.** On recent
+  Windows 11 builds it failed with "Windows cannot find ...StreamDock.lnk".
+- The Downloads list no longer jumps or resizes its scrollbar while you scroll a
+  long queue.
+
+### Changed
+- **Up to 5 downloads at once, 3 recommended.** Anime sites were silently held
+  to one at a time whatever the setting said. Measured on the live site, five at
+  once is about three times faster with no blocking; beyond five, new episodes
+  start failing while the connection is full. The setting now runs from 1 to 5
+  and defaults to 3, and a waiting download says why it is waiting.
+- **Closing the window is now a choice**: keep downloading in the tray (the
+  default), quit, or ask. StreamDock tells you the first time it keeps running
+  in the tray, and notifies you when downloads finish.
+- **Separate subtitle settings for Sub and Dub**, with Dub defaulting to none.
+- **Finished downloads stay in the list until you clear them**, instead of
+  disappearing after 24 hours.
+- **The installer and uninstaller look like StreamDock**: the app's dark design
+  instead of the stock blue panel, and sharp text on high-DPI screens.
+- The installed app is about 330 MB smaller; the download engines were being
+  installed twice.
+
+### Removed
+- **The "Use Chrome cookies" setting.** It was saved with every download and
+  read by nothing, because browser cookies had long been disabled.
+
 ## [1.8.1] - 2026-09-20
 
 ### Fixed
