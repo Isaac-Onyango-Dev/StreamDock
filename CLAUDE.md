@@ -2140,6 +2140,30 @@ Verified by driving the real installer page by page: Finish starts the app with
 no dialog, and the uninstaller shows the same art. Installed on Isaac's machine
 (per-user; settings and log kept). Installer 190 MB, install 671 MB.
 
+**Anime hosts: five at once, measured (`22f9b1f`).** The per-host cap had been
+1 since session 15's 429 (five yt-dlp processes in 59 ms); start spacing has
+since removed that burst, but nobody had measured parallel episodes. A harness
+(`.claude/harness/concurrency-sweep.ts`, gitignored) drove the real
+`DownloadEngine` in Electron with a scratch profile, raising the cap at runtime
+through `CONCURRENCY()` (it returns the imported config object), over Series X
+562-571, five minutes per level on Isaac's ~1.2 MB/s line:
+
+  at once  total      failures
+  1        0.36 MB/s  none
+  2        0.80 MB/s  none
+  3        0.96 MB/s  none
+  5        1.18 MB/s  none       <- shipped (3.2x)
+  8        0.99 MB/s  4 of 8
+  10       stopped    9 of 10 within 2 min
+
+**No 403/429 at any level.** The failures were the hidden-window extraction
+timing out (45 s, "no manifest in JS context", 22 times): with the line full of
+running downloads, new episode pages could not load in time. So the ceiling is
+the user's bandwidth starving extraction, not the site — on a faster line a
+higher cap would likely work, but 5 is what was measured. `verify:engine` keeps
+the cap within 1-5 and requires start spacing whenever it is above 1. The
+engine tests pin the cap to 1 for the rule tests and restore it.
+
 **Still needs Isaac at the keyboard** (none of this can be driven from here):
 quit with downloads active under each close behaviour; relaunch while hidden
 (one process in Task Manager); the tray on Linux; a real Dub range with the
@@ -2149,6 +2173,13 @@ it for the subtitle track); and
 CDN, so the host limit stays at 1. Delete the 59MB truncated episode 553 file before retrying that episode.
 
 ## Working agreements for future sessions on this repo
+
+- **Measure a limit before choosing it, and find out what actually binds.** The
+  anime cap sat at 1 for weeks on the memory of one 429. A 35-minute sweep
+  showed the site never objected; what failed at 8+ was extraction starved by
+  the user's own saturated line. Sample a fixed window per level, count bytes
+  on disk rather than trusting progress estimates, and stop escalating at the
+  first sign of blocking.
 
 - **When an error names a file that exists, reproduce the exact call outside
   the app.** "Windows cannot find StreamDock.lnk" with the shortcut on disk was
