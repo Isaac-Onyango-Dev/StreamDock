@@ -221,10 +221,10 @@ code — flagged honestly rather than faked a fix:**
 
 First session to actually push to the real repo (both prior sessions left their
 work uncommitted locally — see the git log dates vs. the session narrative
-above). Two commits landed the backlog: `228aed9` (sessions 1+2's fix pass,
+above). Two commits landed the backlog: `e1f441a` (sessions 1+2's fix pass,
 committed as-is after fixing one regression it introduced — an unused
-`onNotice` prop on `CaptureView` that broke typecheck) and `97429a9` (this
-session's site work), followed by `148ee8f` fixing a reliability bug found
+`onNotice` prop on `CaptureView` that broke typecheck) and `3590292` (this
+session's site work), followed by `a26c37d` fixing a reliability bug found
 during live verification.
 
 **Version bumped 1.0.2 → 1.1.0** (minor: dub/sub language labeling and the
@@ -302,9 +302,9 @@ finds it already there.
 
 ### Session 4 — brand match, download counter, and a critical binary-bundling bug
 
-Landed as 5 separate commits (`a0d2f96` brand tokens, `ca633fd` download
-counter, `1b5a965` engine-binaries fix, `c71928b` wallpaper button fix,
-`9135513` version bump), pushed and released as **v1.2.0**.
+Landed as 5 separate commits (`04c1797` brand tokens, `c7bf0a9` download
+counter, `7c11163` engine-binaries fix, `c46b475` wallpaper button fix,
+`6082cb9` version bump), pushed and released as **v1.2.0**.
 
 **The most important finding this session**: v1.1.0 — the release from
 session 3, live for a few hours — was **actually broken for every user**.
@@ -352,7 +352,7 @@ unrelated to anything above.
 
 ### Session 5 — the "Rate limited" download regression, menu, README sync
 
-Landed as one commit (`1668e86`), version bumped 1.2.0 -> 1.3.0. **Not pushed
+Landed as one commit (`2eadc9f`), version bumped 1.2.0 -> 1.3.0. **Not pushed
 or released** — left for Isaac to review first.
 
 **P0 — downloads completely broken. Root cause found by reproduction, not
@@ -498,7 +498,7 @@ setting -> computed CSS chain for gradient, theme and solid modes.
 ### Session 7 — CI actually made green (and a misdiagnosis corrected)
 
 Isaac supplied the real Actions logs (`D:\logs_92478332964`) for run
-`d8931ba`. **The two long-standing CI failures had nothing to do with missing
+`6ee7817`. **The two long-standing CI failures had nothing to do with missing
 binaries or a missing display** — the explanation this file had carried since
 session 3, repeated without anyone testing it. Both were ordinary bugs.
 
@@ -682,7 +682,7 @@ and the engine seeds `record.title` from it instead of the generic label.
 
 **P5 — the duplicate wordmark was already fixed; the report predates the fix.**
 Isaac's log line `[menu] Top-level menus: File, Edit, View, Help` at 18:10:59
-shows no app-name entry, and commit `d8931ba` (session 6's fix) was authored at
+shows no app-name entry, and commit `6ee7817` (session 6's fix) was authored at
 18:14:48 — i.e. the fix was already in his working tree, uncommitted, when that
 run started. The screenshot is from the 17:00:33 run, before it. Rendered the
 current title bar to confirm: **exactly one "StreamDock"** on the whole page,
@@ -1372,13 +1372,13 @@ Playwright 12/12, ESLint 0/0, typecheck, production build.
   ignored. Flagged twice in HANDOVER and deferred twice.
 - `info.json` — a UTF-16LE `yt-dlp --dump-json` dump of an site A episode. The
   UTF-16 encoding is a PowerShell redirect signature; it was swept into the
-  wallpaper commit `9b47c04`.
+  wallpaper commit `ae87798`.
 - `icons-cards.png`, `icons-pills.png`, `icons-reqs.png` — 106KB of screenshots
-  from `4a37b64`'s visual verification of the site, committed at the repo root.
+  from `7ca6d85`'s visual verification of the site, committed at the repo root.
 - `plan.md` — the pre-implementation plan, which **contradicted shipped
   behaviour**: it specified the `Season N/Episode NN` naming session 8 abolished,
   and named `reference-index.example` as a site to research when `verify:engine` now
-  guards against its reintroduction. Recoverable from git (`git show 73c7129:plan.md`).
+  guards against its reintroduction. Recoverable from git (`git show 523299f:plan.md`).
 - `.vscode/settings.json` — tracked and empty (`{}`).
 - `assets/logo.svg` — referenced by nothing but `plan.md`.
 - Six unused dependencies: `class-variance-authority`, `clsx`, `tailwind-merge`
@@ -1995,7 +1995,7 @@ version bump.
 ### Session 22 - full architecture audit, then the job-engine refactor
 
 **Released as v1.9.0** (2026-10-01): `refactor/job-engine` fast-forwarded into
-`main` with the release commit `ede38ae`, after Isaac tested the installed build.
+`main` with the release commit `a1806cf`, after Isaac tested the installed build.
 See "Release v1.9.0" at the end of this section. Isaac reported eight symptoms
 (forced tray, Purge History resurrection, concurrency ignored, scrollbar, a 50+
 episode queue struggling, probe/download race, useless subtitle default, controls
@@ -2030,7 +2030,7 @@ configurable; a Dub episode that can't be proven Dub fails clearly; remove the
 cookies toggle (no login failure in the log; revisit as cookies.txt import);
 history is kept until cleared (no 24 h prune).
 
-**Phase 0 (done, `b365efd`):** the first `DownloadEngine` test harness — fake
+**Phase 0 (done, `e982e83`):** the first `DownloadEngine` test harness — fake
 yt-dlp child + deferred fake extractor, real state-store/url-router/classifier,
 fake timers. 5 characterization tests + 12 `it.fails` defects; a store test for
 Purge resurrection; a Playwright `test.fail` for the stale-probe race. Baseline:
@@ -2039,14 +2039,14 @@ IPC event per progress line. Pipeline: 242 tests, 292 engine checks, Playwright
 20/20. **Convention: a fix flips its `it.fails` to `it`; never delete one to get
 green.**
 
-**Phase 1 (`2d6c229`, `2ca1f24`) — stop the P0 damage.** Single-instance lock;
+**Phase 1 (`2993158`, `cd7950e`) — stop the P0 damage.** Single-instance lock;
 the close handler honours `isQuitting` and `WINDOW_CLOSE` is one path; exit 0
 clears an error; yt-dlp's retried lines no longer set one;
 `--abort-on-unavailable-fragments` for VOD, and a failed run deletes what it had
 already moved into the folder; engine `remove()`, so Purge and Remove are real;
 probe results carry a plan token and a stale one is dropped.
 
-**Phase 2 (`8508ccb`) — the engine core.** The five structures and twelve status
+**Phase 2 (`27dc7e2`) — the engine core.** The five structures and twelve status
 writers became `transition()` + `pump()`/`planStarts()` + one `startRun()`
 pipeline with an `AbortController` per attempt (pause or cancel while resolving
 no longer leaks a slot). `retryWithManifest`, a drifted copy of the whole spawn
@@ -2057,13 +2057,13 @@ DNS dying used to fail ~45 episodes in ten minutes. The stall monitor reports
 and never pauses. Restart maps interrupted jobs to paused, re-arms scheduled
 ones and sweeps orphan staging. Saves are debounced (500ms) and atomic.
 
-**Phase 3 (`eb30aa2`) — the renderer is a projection.** Every record carries a
+**Phase 3 (`ae89ef8`) — the renderer is a projection.** Every record carries a
 `revision`; the store applies an event only if it is newer and never for an id
 the engine removed. Progress is coalesced to 250ms per job, status changes are
 never delayed, and main drives the tray count itself (the renderer used to send
 it back on every progress event).
 
-**Phase 4 (`b1dd7d6`, then the merged probe work `89965a6`) — probes and
+**Phase 4 (`90cb267`, then the merged probe work `ba50fd1`) — probes and
 language fidelity.** Download while languages are still being checked waits and
 asks (Wait / site default) instead of racing. The engine records
 `resolvedTranslation`, and an episode whose language cannot be proven fails
@@ -2075,25 +2075,25 @@ same measurement. The gate also re-arms on every main-frame load (a reload used
 to return the default Sub stream as proven Dub), only main-frame load failures
 count, and an `.mp4` is held in reserve because it is usually an ad.
 
-**Phase 5 (`4e8be55`) — settings that do what they say.** The cookies toggle is
+**Phase 5 (`b8505c9`) — settings that do what they say.** The cookies toggle is
 gone end to end; history is kept until cleared; Sub and Dub have separate
 subtitle rules (Dub defaults to none); `closeBehavior` (tray-when-active /
 quit / ask, with a remember-my-choice checkbox and a first-time tray notice);
 atomic settings writes; custom args saved on blur; the plugin list shows real
 plugin packages.
 
-**Phase 6 (`c260b8a`) — the Downloads list.** The hand-rolled virtualiser is
+**Phase 6 (`8aa2e15`) — the Downloads list.** The hand-rolled virtualiser is
 gone: plain memoised rows (measured ~1ms per update and ~1s to mount 1000 rows
 in the production build), entrance animation only for new rows, one visible
 scrollbar definition with `scrollbar-gutter: stable`. `content-visibility` was
 tried and removed: it made the last row unreachable.
 
-**Phase 7 (`eb3a439`) — cleanup.** Dead IPC channels and their preload methods;
+**Phase 7 (`432a0b5`) — cleanup.** Dead IPC channels and their preload methods;
 progress ticks out of the log (~95% of it); the engines and plugins are no
 longer packaged twice (**331MB off the install**, verified with a `--dir`
 package: no `app.asar.unpacked`, `resources/` intact).
 
-**B7 subtitles (`7b4e6f6`).** Confirmed from disk that site A Sub episodes
+**B7 subtitles (`59cc9f3`).** Confirmed from disk that site A Sub episodes
 arrived with no subtitles: the player fetches an English `.vtt` beside the
 manifest and yt-dlp never sees it. The extractor now returns those files and
 `subtitle-attach.ts` muxes them in (mov_text, stream copy, temp file + rename)
@@ -2108,7 +2108,7 @@ app, which downloads whole episodes). Probe hosts are now always resolved at sta
 picker's manifest token dies in ~90s and only the engine's resolve catches the
 subtitles; the picker's manifest is the fallback.
 
-**Phase 8 (`c76f131`).** Commands that do not apply are no-ops; 200 queued jobs
+**Phase 8 (`3e14d70`).** Commands that do not apply are no-ops; 200 queued jobs
 cost at most two state writes (baseline: 103 for 100); three busy downloads send
 at most 15 events a second (baseline: one per line, 60). An e2e drives Clear
 history then Pause All and was run red against the original renderer.
@@ -2116,7 +2116,7 @@ history then Pause All and was run red against the original renderer.
 **Final pipeline:** typecheck, ESLint 0/0, **290 Vitest tests**, verify:engine
 **390 checks**, Playwright **29/29**, production build.
 
-**Installer (`b8fc497`) — branded, and "Run StreamDock" that runs.** Isaac
+**Installer (`e57a7dd`) — branded, and "Run StreamDock" that runs.** Isaac
 called the installer's blue panel unprofessional: it was NSIS's stock
 `nsis3-metro.bmp`, because the assisted installer had no art of its own, and the
 window was bitmap-stretched (blurry) at his 125% scaling because it was not
@@ -2143,7 +2143,7 @@ Verified by driving the real installer page by page: Finish starts the app with
 no dialog, and the uninstaller shows the same art. Installed on Isaac's machine
 (per-user; settings and log kept). Installer 190 MB, install 671 MB.
 
-**Anime hosts: five at once, measured (`22f9b1f`).** The per-host cap had been
+**Anime hosts: five at once, measured (`557ac45`).** The per-host cap had been
 1 since session 15's 429 (five yt-dlp processes in 59 ms); start spacing has
 since removed that burst, but nobody had measured parallel episodes. A harness
 (`.claude/harness/concurrency-sweep.ts`, gitignored) drove the real
@@ -2167,7 +2167,7 @@ higher cap would likely work, but 5 is what was measured. `verify:engine` keeps
 the cap within 1-5 and requires start spacing whenever it is above 1. The
 engine tests pin the cap to 1 for the rule tests and restore it.
 
-**The confirmation run found site A broken by a CDN change (`39f3fa3`).** Ten
+**The confirmation run found site A broken by a CDN change (`5566c4a`).** Ten
 whole episodes at cap 5 "completed" 9 of 10 — and every file was a 1x1 PNG
 "video" of 12 s. On 1 Oct 2026 site A moved from `old-cdn.example` to new
 `new-cdn-*.example` servers whose playlists point at "images" on a third-party ad CDN
@@ -2193,7 +2193,7 @@ reads as 5. Untested follow-up if the burst failure shows up in real use: wider
 `startSpacingMs` for probe hosts, so fewer episode pages load at once.
 
 **Release v1.9.0 — the first run failed on Linux, the second published.** The
-release commit `ede38ae` (CHANGELOG entry, `npm version 1.9.0`, `sync:docs`)
+release commit `a1806cf` (CHANGELOG entry, `npm version 1.9.0`, `sync:docs`)
 went straight to `main`. Build & Release #14's quality gate failed on one unit
 test, "removes an active download once its process has exited": it waited
 100 ms, and off Windows the engine signals the children and kills the parent
@@ -2201,7 +2201,7 @@ test, "removes an active download once its process has exited": it waited
 Linux, because CI runs on `main` and pull requests only. Reproduced locally by
 running the suite with `process.platform` forced to `'linux'` (scratch config
 in `.claude/harness/`): exactly that test, CI's assertion, the other 300 green.
-Fixed in `6620197`; CI's unit tests then passed on ubuntu, and Build & Release
+Fixed in `3879ad8`; CI's unit tests then passed on ubuntu, and Build & Release
 was re-run by `workflow_dispatch` (a test-only commit does not touch
 `package.json`, so the push alone cannot release). Run #15 published
 v1.9.0 with the Windows installer (202.5 MB), the AppImage (289.8 MB),
