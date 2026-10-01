@@ -7,15 +7,16 @@ All notable changes to StreamDock are documented here. Format loosely follows
 ## [1.9.0] - 2026-10-01
 
 ### Fixed
-- **Anime downloads from some sites are playable again.** On 1 October some sites moved their videos to new servers that hide every piece of an episode inside a
-  small PNG image. StreamDock saved what arrived, so each episode became a file
+- **Anime downloads from some sites are playable again.** On 1 October some
+  sites moved their videos to new servers that hide every piece of an episode
+  inside a small PNG image. StreamDock saved what arrived, so each episode became a file
   that played as a single picture for 12 seconds, and the row still said
   Completed. StreamDock now strips the wrappers, rebuilds a normal MP4, and
   checks that the file really contains video before calling it finished; a file
   that doesn't is removed and the download fails with a clear message.
-- **Sub episodes now come with their subtitles.** The site's player loads the
-  English subtitles as a separate file beside the video, which the download
-  engine never saw, so every Sub episode arrived without them. They are now
+- **Sub episodes now come with their subtitles.** Some sites' players load the
+  subtitles as a separate file beside the video, which the download engine
+  never saw, so Sub episodes from those sites arrived without them. They are now
   fetched and embedded, saved beside the video, or both, as your subtitle
   setting says.
 - **Dub downloads no longer quietly arrive as Sub.** The step that picks the Dub
@@ -52,7 +53,7 @@ All notable changes to StreamDock are documented here. Format loosely follows
 
 ### Changed
 - **Up to 5 downloads at once, 3 recommended.** Anime sites were silently held
-  to one at a time whatever the setting said. Measured on the live site, five at
+  to one at a time whatever the setting said. Measured live, five at
   once is about three times faster with no blocking; beyond five, new episodes
   start failing while the connection is full. The setting now runs from 1 to 5
   and defaults to 3, and a waiting download says why it is waiting.
@@ -134,10 +135,12 @@ All notable changes to StreamDock are documented here. Format loosely follows
 - Sub and dub are offered as a **Language** control beside Quality, populated
   from what the source declares rather than guessed from a link.
 - **Real episode counts.** A series page that states no total is now read from
-  the site's own listing instead, so a long-running series reports its real count rather than 1.
-- Episode ranges work on a site where they silently did not. The host was configured everywhere else
-  in the app but was missing from the one place that recognises episode URLs, so
-  pasting an episode there silently offered only that single episode.
+  the site's own listing instead, so a long-running series reports its real
+  count rather than 1.
+- Episode ranges work on a site where they silently did not. The host was
+  configured everywhere else in the app but was missing from the one place that
+  recognises episode URLs, so pasting an episode there offered only that single
+  episode.
 - StreamDock now carries its MIT licence text. The project has always described
   itself as MIT without actually including the licence.
 
@@ -182,7 +185,8 @@ All notable changes to StreamDock are documented here. Format loosely follows
 ## [1.6.1] - 2026-09-08
 
 ### Fixed
-- **Bundled plugins now actually load.** StreamDock ships yt-dlp extractors for several anime sites, plus a PO-token provider — and none of
+- **Bundled plugins now actually load.** StreamDock ships yt-dlp extractors for
+  several anime sites, plus a PO-token provider — and none of
   them had ever been reachable in a shipped build. The plugin path resolver
   handed yt-dlp each individual package folder, when yt-dlp expects the folder
   that *holds* the packages and finds them itself. Given the wrong level it
@@ -455,8 +459,7 @@ All notable changes to StreamDock are documented here. Format loosely follows
   with a clear "Unknown" fallback instead of generic "Stream 2"/"Stream 3"
   labels.
 - Advisory source-status check: a dismissible, non-blocking toast flags
-  reference-only sites before you try to download
-  from them, instead of letting the attempt silently fail.
+  reference-only sites before you try to download from them, instead of letting the attempt silently fail.
 
 ### Fixed
 - The full test suite was silently collecting **zero tests** — a Vitest setup

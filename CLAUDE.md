@@ -1186,7 +1186,8 @@ either.** Neither `ani-cli` nor `anipy-cli` supports a single host StreamDock
 targets, nor any of Isaac's four failing samples — grepping both codebases for
 every host StreamDock targets returns nothing. Measured live rather than read off their
 READMEs: `ani-cli`'s *only* backend serves an **"Under Maintenance" page** — the 13.7k-star tool is non-functional today.
-Another of their backends is unreachable and its decoder feed is 404. Only one backend is healthy; its search API was confirmed returning
+Another of their backends is unreachable and its decoder feed is 404. Only
+one backend is healthy; its search API was confirmed returning
 real JSON.
 
 Two things from them were worth taking, as designs rather than code (both are
@@ -1420,7 +1421,8 @@ rewrites vendored code by design.
    Windows and a `.tar.xz` on Linux — though its comment claiming one invocation
    covers both formats is optimistic.
 2. *One bundled plugin's upstream repo is gone* — 404 on the repo page, the API and
-   both branch archives. **our vendored copy is now the only surviving copy** of three of the bundled extractors. Its entry carries
+   both branch archives. **our vendored copy is now the only surviving
+   copy** of three of the bundled extractors. Its entry carries
    `repo: null` and is skipped with an explanation, so the vendored copy is never
    deleted and the skip is not mistaken for a bug.
 
@@ -2218,6 +2220,12 @@ it for the subtitle track); and
 CDN, so the host limit stays at 1. Delete the 59MB truncated episode 553 file before retrying that episode.
 
 ## Working agreements for future sessions on this repo
+
+- **Never name a streaming site in public text.** The changelog (and so the
+  README, the site and the release notes), commit messages, PRs and these notes
+  say "some sites" or use placeholders (site A, `site-a.example`, Series X).
+  Isaac wants users to try sites themselves and report which ones break. Only
+  functional code (`host-config.json`, extractors, tests) names real hosts.
 
 - **Let CI run on Linux before a release commit reaches `main`.** CI runs on
   `main` and on pull requests, so a branch merged straight into a release never

@@ -141,7 +141,9 @@ Full write-up:
 https://claude.ai/code/artifact/1e3136ea-3954-4808-8498-584f840951af
 
 **Neither is worth adopting.** Zero host overlap with StreamDock, and none of
-Isaac's failing samples. Measured live: `ani-cli`'s *only* backend serves an "Under Maintenance" page, and another backend is unreachable with a 404 decoder feed. Their designs were taken (tri-state
+Isaac's failing samples. Measured live: `ani-cli`'s *only* backend serves an "Under
+Maintenance" page, and another backend is
+unreachable with a 404 decoder feed. Their designs were taken (tri-state
 language, headless HTTP); their code and backends were not, and should not be —
 all three are GPL-3.0 against StreamDock's MIT.
 
