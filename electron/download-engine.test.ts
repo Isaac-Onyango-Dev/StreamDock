@@ -134,6 +134,13 @@ vi.mock('./binary-resolver', () => ({
 }));
 
 const { DownloadEngine } = await import('./download-engine');
+const { CONCURRENCY } = await import('./url-router');
+/**
+ * The per-host cap as shipped in host-config.json. Tests below run the rule at
+ * a cap of 1, where a second episode must wait, and put this back afterwards;
+ * scheduler.test.ts covers other caps and verify-engine checks the shipped value.
+ */
+const SHIPPED_HOST_CAP = CONCURRENCY().probeHostMaxConcurrent;
 type Engine = InstanceType<typeof DownloadEngine>;
 type DlRecord = ReturnType<Engine['list']>[number];
 
@@ -174,6 +181,7 @@ beforeEach(() => {
   extractions.length = 0;
   attached.length = 0;
   sent = [];
+  CONCURRENCY().probeHostMaxConcurrent = 1;
   internetUp = true;
   vi.mocked(log.error).mockClear();
 });
@@ -183,6 +191,7 @@ afterEach(() => {
   // scenario here may attempt one.
   const illegal = vi.mocked(log.error).mock.calls.filter(([m]) => String(m).includes('illegal transition'));
   expect(illegal).toEqual([]);
+  CONCURRENCY().probeHostMaxConcurrent = SHIPPED_HOST_CAP;
   vi.useRealTimers();
   rmSync(userDataDir, { recursive: true, force: true });
 });
@@ -255,6 +264,17 @@ describe('lifecycle that works today', () => {
     await settle();
     expect(find(engine, second.id).status).toBe('queued');
     expect(extractions).toHaveLength(1);
+  });
+
+  it('runs as many episodes at once as the host allows, spaced, and says why the next waits', async () => {
+    CONCURRENCY().probeHostMaxConcurrent = 3;
+    const engine = newEngine();
+    engine.setMaxConcurrent(10); // so the host's limit, not the global one, is what binds
+    const jobs = [1, 2, 3, 4].map((n) => startVideo(engine, episode(n)));
+    for (let i = 0; i < 3; i++) await settle(); // one start per 3s on a host
+    expect(extractions).toHaveLength(3);
+    expect(active(engine)).toHaveLength(3);
+    expect(find(engine, jobs[3].id).waitReason).toMatch(/anikoto\.cz allows 3 downloads at a time/);
   });
 });
 

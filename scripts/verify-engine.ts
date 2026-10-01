@@ -1389,6 +1389,25 @@ function verifyNoDeadWeight(): void {
 }
 
 /**
+ * The anime-host limit stays where it was measured, and never without spacing.
+ *
+ * Measured live in session 22 (One Piece 562-571, 5 min per level, on Isaac's
+ * ~1.2 MB/s line): 1 → 0.36 MB/s, 2 → 0.80, 3 → 0.96, 5 → 1.18 with no
+ * failures; at 8, 4 of 8 episodes failed because the hidden-window extraction
+ * timed out while the line was full, and at 10, 9 of 10. No 403/429 at any
+ * level. Five parallel starts within 59 ms is what drew the 429 in session 15,
+ * so a cap above 1 needs the start spacing that prevents that burst.
+ */
+function verifyAnimeHostConcurrency(): void {
+  const config = JSON.parse(readProjectFile('electron/host-config.json')) as {
+    concurrency: { probeHostMaxConcurrent: number; startSpacingMs: number };
+  };
+  const { probeHostMaxConcurrent: cap, startSpacingMs } = config.concurrency;
+  assert(Number.isInteger(cap) && cap >= 1 && cap <= 5, 'the anime-host limit is within what was measured to work (1-5)');
+  assert(cap === 1 || startSpacingMs >= 1000, 'parallel anime downloads start spaced, never as one burst');
+}
+
+/**
  * Subtitles the player loads beside the stream reach the file (B7).
  *
  * anikoto's Sub stream carries its English subtitles as a separate .vtt the
@@ -1499,6 +1518,7 @@ verifySettingsAreReal();
 verifyDownloadsList();
 verifyNoDeadWeight();
 verifyPlayerSubtitlesDelivered();
+verifyAnimeHostConcurrency();
 await verifyInstallerLooksLikeTheApp();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);

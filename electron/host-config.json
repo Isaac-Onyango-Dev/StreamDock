@@ -88,7 +88,7 @@
     }
   ],
   "concurrency": {
-    "probeHostMaxConcurrent": 1,
+    "probeHostMaxConcurrent": 5,
     "startSpacingMs": 3000
   }
 }
