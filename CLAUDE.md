@@ -1992,8 +1992,9 @@ version bump.
 
 ### Session 22 - full architecture audit, then the job-engine refactor
 
-Branch `refactor/job-engine`, **nothing pushed or released**; Phases 0-8 are all
-committed. Isaac reported eight symptoms
+**Released as v1.9.0** (2026-10-01): `refactor/job-engine` fast-forwarded into
+`main` with the release commit `ede38ae`, after Isaac tested the installed build.
+See "Release v1.9.0" at the end of this section. Isaac reported eight symptoms
 (forced tray, Purge History resurrection, concurrency ignored, scrollbar, a 50+
 episode queue struggling, probe/download race, useless subtitle default, controls
 that only look like they work) and asked for an audit before any code. The full
@@ -2189,6 +2190,25 @@ At Isaac's request the **slider now tops out at 5 and defaults to 3, marked
 reads as 5. Untested follow-up if the burst failure shows up in real use: wider
 `startSpacingMs` for probe hosts, so fewer episode pages load at once.
 
+**Release v1.9.0 — the first run failed on Linux, the second published.** The
+release commit `ede38ae` (CHANGELOG entry, `npm version 1.9.0`, `sync:docs`)
+went straight to `main`. Build & Release #14's quality gate failed on one unit
+test, "removes an active download once its process has exited": it waited
+100 ms, and off Windows the engine signals the children and kills the parent
+500 ms later (`taskkill` in the fake is instant). The branch had never run on
+Linux, because CI runs on `main` and pull requests only. Reproduced locally by
+running the suite with `process.platform` forced to `'linux'` (scratch config
+in `.claude/harness/`): exactly that test, CI's assertion, the other 300 green.
+Fixed in `6620197`; CI's unit tests then passed on ubuntu, and Build & Release
+was re-run by `workflow_dispatch` (a test-only commit does not touch
+`package.json`, so the push alone cannot release). Run #15 published
+v1.9.0 with the Windows installer (202.5 MB), the AppImage (289.8 MB),
+`latest.yml` and `latest-linux.yml`; `releases/latest` serves both v1.9.0
+assets, `latest.yml` says 1.9.0, and Deploy Site ran clean. For the ~15 minutes
+between the failed run and the published one, GitHub Pages already showed
+v1.9.0 (the release commit changes `docs/`) while the download button served
+1.8.1 — the window session 12 recorded, seen for real.
+
 **Still needs Isaac at the keyboard** (none of this can be driven from here):
 quit with downloads active under each close behaviour; relaunch while hidden
 (one process in Task Manager); the tray on Linux; a real Dub range with the
@@ -2198,6 +2218,13 @@ it for the subtitle track); and
 CDN, so the host limit stays at 1. Delete the 59MB truncated episode 553 file before retrying that episode.
 
 ## Working agreements for future sessions on this repo
+
+- **Let CI run on Linux before a release commit reaches `main`.** CI runs on
+  `main` and on pull requests, so a branch merged straight into a release never
+  ran its tests on ubuntu, and v1.9.0's first release run died on a test that
+  only passed on Windows. Open a pull request (or push and wait for CI) first.
+  Locally, forcing `process.platform` to `'linux'` in a Vitest setup file
+  catches tests that assume Windows behaviour.
 
 - **A "completed" download is not a playable file — probe it.** Ten episodes
   finished with correct sizes and the right titles, and every one was a 1x1 PNG.
