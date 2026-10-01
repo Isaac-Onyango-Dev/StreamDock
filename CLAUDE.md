@@ -2164,6 +2164,31 @@ higher cap would likely work, but 5 is what was measured. `verify:engine` keeps
 the cap within 1-5 and requires start spacing whenever it is above 1. The
 engine tests pin the cap to 1 for the rule tests and restore it.
 
+**The confirmation run found site A broken by a CDN change (`39f3fa3`).** Ten
+whole episodes at cap 5 "completed" 9 of 10 — and every file was a 1x1 PNG
+"video" of 12 s. On 1 Oct 2026 site A moved from `old-cdn.example` to new
+`new-cdn-*.example` servers whose playlists point at "images" on a third-party ad CDN
+(`…<ad-cdn>/…~tplv-…-origin.image`, `image/png`). Each segment is a real
+70-byte PNG, then a 182-byte short TS packet, then 188-byte TS packets to the
+last byte. yt-dlp glued them together and its `--embed-metadata` ffmpeg step
+read the result as a picture. **Every version of the app was affected**, not
+just this branch. `electron/stream-repair.ts` streams the file through a packet
+parser (drop wrappers, keep 188-byte packets), remuxes to MP4 and refuses a file
+with no real video/audio stream; the engine passes `--fixup never
+--no-embed-metadata` for player streams and runs repair → subtitles → complete,
+failing (and removing) anything unplayable. Verified through the real engine:
+ep 562 as 1080p H.264 + AAC, 24:00, subtitles embedded, real frame at 10:00.
+That same metadata step had been writing the CDN's tokened manifest URL into
+every file's comment field.
+
+The confirmation run's other result: at 5 at once, 1 of 10 episodes failed in
+the opening burst (five pages resolving together, two 45 s extraction timeouts).
+At Isaac's request the **slider now tops out at 5 and defaults to 3, marked
+"recommended"** (`shared/settings.ts`: `MAX_CONCURRENT`, `DEFAULT_CONCURRENT`,
+`clampConcurrent`, used by persistence, the engine and the slider); a saved 8
+reads as 5. Untested follow-up if the burst failure shows up in real use: wider
+`startSpacingMs` for probe hosts, so fewer episode pages load at once.
+
 **Still needs Isaac at the keyboard** (none of this can be driven from here):
 quit with downloads active under each close behaviour; relaunch while hidden
 (one process in Task Manager); the tray on Linux; a real Dub range with the
@@ -2173,6 +2198,15 @@ it for the subtitle track); and
 CDN, so the host limit stays at 1. Delete the 59MB truncated episode 553 file before retrying that episode.
 
 ## Working agreements for future sessions on this repo
+
+- **A "completed" download is not a playable file — probe it.** Ten episodes
+  finished with correct sizes and the right titles, and every one was a 1x1 PNG.
+  Only `ffprobe` on the result showed it. The app now checks for a real stream
+  before completing; a verification run should do the same.
+- **When a site starts failing, diff what it served then against now.** The log
+  named the CDN host for each run: `old-cdn.example` on 27 Sep, five new
+  `new-cdn-*.example` hosts on 1 Oct. That one comparison pointed at the site, not the
+  code, before any byte was inspected.
 
 - **Measure a limit before choosing it, and find out what actually binds.** The
   anime cap sat at 1 for weeks on the memory of one 429. A 35-minute sweep
