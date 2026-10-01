@@ -2111,7 +2111,34 @@ at most 15 events a second (baseline: one per line, 60). An e2e drives Clear
 history then Pause All and was run red against the original renderer.
 
 **Final pipeline:** typecheck, ESLint 0/0, **290 Vitest tests**, verify:engine
-**379 checks**, Playwright **29/29**, production build.
+**390 checks**, Playwright **29/29**, production build.
+
+**Installer (`b8fc497`) — branded, and "Run StreamDock" that runs.** Isaac
+called the installer's blue panel unprofessional: it was NSIS's stock
+`nsis3-metro.bmp`, because the assisted installer had no art of its own, and the
+window was bitmap-stretched (blurry) at his 125% scaling because it was not
+DPI-aware. `build/installerSidebar.bmp` and `build/installerHeader.bmp` are now
+rendered by `npm run installer:art` (`scripts/generate-installer-art.ts`) from
+`design/tokens.json` and `assets/icon.svg` — Playwright to RGBA, written as
+24-bit BMP. `build/installer.nsh` sets the pages to the brand ink, draws the art
+1:1 (`NoStretchNoCrop`: NSIS stretches nearest-neighbour; the art's edges fade
+into the page colour instead), forces classic controls on the Finish page (a
+themed checkbox ignores the text colour — Modern UI bug #443 — so "Run
+StreamDock" would be black on dark) and sets `ManifestDPIAware`.
+
+Isaac then hit **"Windows cannot find '...\StreamDock.lnk'. Make sure you typed
+the name correctly"** on Finish, and the app never started. Not the art: the
+Finish page launches through StdUtils `ExecShellAsUser`, which hands the path to
+Explorer, and on Windows 11 build 26200 Explorer refuses the Start Menu shortcut
+although it exists. Reproduced outside the installer with a ten-line NSIS
+program: `timeout` + the dialog for the `.lnk`, `ok` + a running app for
+`StreamDock.exe`. `customInstall` now points `$launchLink` at the exe (still
+through ExecShellAsUser, so an elevated all-users install starts the app as the
+user), and `main.ts` sets `app.setAppUserModelId('com.streamdock.app')` — the ID
+the shortcut carries — so a launch from the exe groups and notifies the same.
+Verified by driving the real installer page by page: Finish starts the app with
+no dialog, and the uninstaller shows the same art. Installed on Isaac's machine
+(per-user; settings and log kept). Installer 190 MB, install 671 MB.
 
 **Still needs Isaac at the keyboard** (none of this can be driven from here):
 quit with downloads active under each close behaviour; relaunch while hidden
@@ -2122,6 +2149,20 @@ it for the subtitle track); and
 CDN, so the host limit stays at 1. Delete the 59MB truncated episode 553 file before retrying that episode.
 
 ## Working agreements for future sessions on this repo
+
+- **When an error names a file that exists, reproduce the exact call outside
+  the app.** "Windows cannot find StreamDock.lnk" with the shortcut on disk was
+  settled by a ten-line NSIS program calling the same `ExecShellAsUser` on the
+  shortcut and on the exe — one failed, one worked. Reading the templates
+  would not have shown it.
+- **Drive an NSIS installer with Win32, not the desktop-control tool.** That
+  tool only addresses Start Menu apps, and NSIS buttons expose no UI
+  Automation invoke. `PrintWindow` captures the window and `BM_CLICK` on the
+  child found by its text presses a button. Run the process DPI-aware, or the
+  capture comes out at the virtualised size.
+- **Close only the window you identified, by its exact title.** A cleanup that
+  closed every dialog containing "StreamDock" also closed the uninstaller Isaac
+  had opened himself. Match the full title of the one window you mean.
 
 - **Read the API's documented waiting behaviour before tuning its timeout.**
   The Dub gate's 12s bail looked too short; the real cause was that
