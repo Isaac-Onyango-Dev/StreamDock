@@ -719,7 +719,10 @@ describe('remove', () => {
     const engine = newEngine();
     const { id } = startVideo(engine, YOUTUBE);
     expect(engine.remove(id)).toBe(true);
-    await settle(100);
+    // Long enough for either kill path: taskkill ends the tree at once, while
+    // off Windows the engine signals the children and the parent 500ms later.
+    // 100ms passed on Windows and failed v1.9.0's first release run on Linux.
+    await settle();
     expect(engine.list().map((r) => r.id)).not.toContain(id);
     expect(sent.filter((e) => e.channel === 'event:download-removed')).toHaveLength(1);
   });
