@@ -1389,6 +1389,31 @@ function verifyNoDeadWeight(): void {
 }
 
 /**
+ * A player's stream becomes a playable file, or the download fails.
+ *
+ * On 1 Oct 2026 anikoto's new CDN wrapped every HLS segment in a 70-byte PNG.
+ * yt-dlp glued the segments together and its metadata step (ffmpeg) read the
+ * result as a picture, rewriting each episode as a 1x1 PNG "video" — and every
+ * row said Completed. The engine now keeps yt-dlp's ffmpeg steps off these
+ * files, repairs them itself, and refuses to complete one with no playable
+ * stream.
+ */
+function verifyPlayerStreamsArePlayable(): void {
+  const engine = stripComments(readProjectFile('electron/download-engine.ts'));
+  assert(
+    /task\.manifestAttempted && request\.mode === 'video'\)[\s\S]{0,200}'--fixup', 'never', '--no-embed-metadata'/.test(engine),
+    'yt-dlp\'s own ffmpeg steps never run on a player stream before it is repaired',
+  );
+  assert(
+    /await repairStreamDownload\([\s\S]*?if \(!playable\) \{[\s\S]*?this\.retractMovedFiles\(task\);[\s\S]*?this\.fail\(/.test(engine),
+    'a player stream that cannot be made playable fails and is removed, never completed',
+  );
+  const repair = stripComments(readProjectFile('electron/stream-repair.ts'));
+  assert(/return hasPlayableStream\(file, ffmpeg\);/.test(repair), 'every repaired file is checked for a playable stream');
+  assert(/IMAGE_CODECS = new Set\(\[[^\]]*'png'/.test(repair), 'a picture is never mistaken for a video stream');
+}
+
+/**
  * The anime-host limit stays where it was measured, and never without spacing.
  *
  * Measured live in session 22 (One Piece 562-571, 5 min per level, on Isaac's
@@ -1426,10 +1451,13 @@ function verifyPlayerSubtitlesDelivered(): void {
   const engine = stripComments(readProjectFile('electron/download-engine.ts'));
   assert(/task\.subtitles = result\.subtitles/.test(engine), 'the engine keeps the captured subtitles for the attempt');
   assert(
-    /const mode = resolveSubtitleMode\(task\.request\)/.test(engine) && /attachSubtitles\([^)]*task\.subtitles, mode,/.test(engine),
+    /attachSubtitles\([^;]*task\.subtitles!?, resolveSubtitleMode\(request\)/.test(engine),
     'they are delivered by the same subtitle decision yt-dlp gets (shared/subtitle-args.ts)',
   );
-  assert(/\.then\(\(\) => this\.complete\(id, task\)\)/.test(engine), 'a download reads completed only after its subtitles are on disk');
+  assert(
+    /await attachSubtitles\([\s\S]*?\);\s*\}\s*this\.complete\(id, task\);/.test(engine),
+    'a download reads completed only after its subtitles are on disk',
+  );
 
   const attach = stripComments(readProjectFile('electron/subtitle-attach.ts'));
   assert(!/-vf|-filter|subtitles=/.test(attach), 'subtitles are muxed as a track, never burned into the picture');
@@ -1519,6 +1547,7 @@ verifyDownloadsList();
 verifyNoDeadWeight();
 verifyPlayerSubtitlesDelivered();
 verifyAnimeHostConcurrency();
+verifyPlayerStreamsArePlayable();
 await verifyInstallerLooksLikeTheApp();
 
 console.log(`StreamDock engine verification passed (${assertions} checks).`);

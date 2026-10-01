@@ -29,6 +29,7 @@ import { buildPluginDirArgs, resolveBinary } from './binary-resolver';
 import { toErrorDetail, classifyEngineFailure, isNetworkFailure } from './error-translator';
 import { extractManifest, type CapturedSubtitle, type ManifestResult } from './manifest-extractor';
 import { attachSubtitles } from './subtitle-attach';
+import { repairStreamDownload } from './stream-repair';
 import { mediaTypeFromUrl } from './probe-support';
 import { CONCURRENCY, MANIFEST_PROBE_HOSTS, REFERENCE_HOSTS } from './url-router';
 import { detectFormat, buildFormatArgs } from './format-detector';
@@ -37,6 +38,7 @@ import { StateStore } from './state-store';
 import { buildOutputTemplate } from './smart-naming';
 import { buildSubtitleArgs, resolveSubtitleMode } from '../shared/subtitle-args';
 import type { DownloadRecord, DownloadRequest, DownloadStatus } from '../shared/downloads';
+import { clampConcurrent, DEFAULT_CONCURRENT } from '../shared/settings';
 
 export type { DownloadRecord, DownloadRequest, DownloadStatus } from '../shared/downloads';
 import { persistence } from './persistence';
@@ -121,6 +123,9 @@ const PROGRESS_INTERVAL_MS = 250;
 
 const STALL_MESSAGE = 'No data for 30 seconds — the connection may have dropped. yt-dlp is retrying.';
 
+const UNPLAYABLE_MESSAGE =
+  'The site sent this episode in a form StreamDock could not turn into a playable video, so nothing was saved. Retry it; if it keeps happening, the site has changed how it serves video.';
+
 function extractHost(url: string): string {
   try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ''); }
   catch { return ''; }
@@ -176,7 +181,7 @@ export class DownloadEngine {
   /** Removed while their process was still exiting; deleted in close(). */
   private pendingRemoval = new Set<string>();
 
-  private maxConcurrent = 3;
+  private maxConcurrent = DEFAULT_CONCURRENT;
   private lastStartAt = new Map<string, number>();
   private pumpTimer: ReturnType<typeof setTimeout> | undefined;
   private pumping = false;
@@ -209,7 +214,7 @@ export class DownloadEngine {
   // ───────────────────────────────────────────────────────────────── Lifecycle
 
   setMaxConcurrent(n: number): void {
-    this.maxConcurrent = Math.max(1, n);
+    this.maxConcurrent = clampConcurrent(n);
     log.info(`[engine] maxConcurrent set to ${this.maxConcurrent}`);
     this.pump();
   }
@@ -798,6 +803,16 @@ export class DownloadEngine {
       this.stagingDir(request, id),
     );
 
+    // A player's stream is finished by the engine (finishFile), not by
+    // yt-dlp's own ffmpeg steps: its metadata step read a PNG-wrapped stream as
+    // a picture and rewrote a whole episode as one, before anything could
+    // repair it. The metadata it wrote was the CDN's: title "master" and the
+    // tokened manifest URL as the comment.
+    if (task.manifestAttempted && request.mode === 'video') {
+      const sepIdx = args.indexOf('--');
+      args.splice(sepIdx === -1 ? args.length : sepIdx, 0, '--fixup', 'never', '--no-embed-metadata');
+    }
+
     // Inject --cookies before the -- URL separator if the manifest extractor
     // captured session cookies from the embed CDN response.
     if (task.cookiesFile && existsSync(task.cookiesFile)) {
@@ -1057,13 +1072,13 @@ export class DownloadEngine {
     if (code === 0) {
       this.settle(task);
       this.networkRetries.delete(id);
-      const mode = resolveSubtitleMode(task.request);
-      if (task.subtitles?.length && mode !== 'none' && !record.alreadyExisted && record.outputPath) {
-        // The row stays "running" while the tracks are fetched and muxed; the
-        // slot is already free, so the next download is not held up by it.
-        void attachSubtitles(record.outputPath, task.subtitles, mode, resolveBinary('ffmpeg'), this.stagingDir(task.request, id))
-          .catch((err) => log.warn(`[engine] Subtitles for ${id} were not delivered:`, err))
-          .then(() => this.complete(id, task));
+      const fresh = !record.alreadyExisted && Boolean(record.outputPath);
+      const repair = fresh && task.manifestAttempted && task.request.mode === 'video';
+      const subtitles = fresh && Boolean(task.subtitles?.length) && resolveSubtitleMode(task.request) !== 'none';
+      if (repair || subtitles) {
+        // The row stays "running" while the file is finished off; the slot is
+        // already free, so the next download is not held up by it.
+        void this.finishFile(id, task, repair, subtitles);
       } else {
         this.complete(id, task);
       }
@@ -1072,6 +1087,36 @@ export class DownloadEngine {
 
     this.retractMovedFiles(task);
     void this.settleFailure(id, task, new Error(task.stderr || `yt-dlp exited with code ${code ?? 'unknown'}`));
+  }
+
+  /**
+   * Finish what yt-dlp saved from a player's stream: repair it into a playable
+   * MP4 (stream-repair.ts), then deliver its subtitles. A file that still has
+   * no playable stream fails the download and is removed — on 1 Oct 2026 a
+   * CDN change made every anikoto episode a 230 MB "PNG", and each row said
+   * Completed.
+   */
+  private async finishFile(id: string, task: ActiveTask, repair: boolean, subtitles: boolean): Promise<void> {
+    const { record, request } = task;
+    const ffmpeg = resolveBinary('ffmpeg');
+    const workDir = this.stagingDir(request, id);
+    if (repair) {
+      const playable = await repairStreamDownload(record.outputPath!, ffmpeg, workDir).catch((err) => {
+        log.warn(`[engine] Could not repair ${id}:`, err);
+        return false;
+      });
+      if (record.status !== 'running') return;
+      if (!playable) {
+        this.retractMovedFiles(task);
+        this.fail(id, record, UNPLAYABLE_MESSAGE);
+        return;
+      }
+    }
+    if (subtitles) {
+      await attachSubtitles(record.outputPath!, task.subtitles!, resolveSubtitleMode(request), ffmpeg, workDir)
+        .catch((err) => log.warn(`[engine] Subtitles for ${id} were not delivered:`, err));
+    }
+    this.complete(id, task);
   }
 
   private complete(id: string, task: ActiveTask): void {

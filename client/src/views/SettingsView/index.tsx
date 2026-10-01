@@ -4,6 +4,7 @@ import type { CloseBehavior, EngineStatus, Settings } from '../../lib/types';
 import { BackgroundSettings } from './BackgroundSettings';
 import { YtDlpSettings } from './YtDlpSettings';
 import { Toggle } from '../../components/Toggle';
+import { clampConcurrent, DEFAULT_CONCURRENT, MAX_CONCURRENT } from '../../../../shared/settings';
 
 interface SettingsPanelProps {
   settings: Settings;
@@ -22,6 +23,7 @@ export function SettingsView({
 }: SettingsPanelProps) {
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
+  const concurrent = clampConcurrent(settings.maxConcurrent);
 
   const handleUpdateEngine = async () => {
     if (!window.streamDock?.updateEngine) return;
@@ -102,15 +104,17 @@ export function SettingsView({
               <div className="mb-2 flex items-center justify-between">
                 <p className="text-sm text-text-primary">Concurrent downloads</p>
                 <span className="text-xs font-medium tabular-nums text-text-secondary">
-                  {settings.maxConcurrent || 3}
+                  {concurrent}
+                  {concurrent === DEFAULT_CONCURRENT && ' (recommended)'}
                 </span>
               </div>
               <input
                 type="range"
+                aria-label="Concurrent downloads"
                 min={1}
-                max={10}
+                max={MAX_CONCURRENT}
                 step={1}
-                value={settings.maxConcurrent || 3}
+                value={concurrent}
                 onChange={(e) => {
                   const val = parseInt(e.target.value, 10);
                   void window.streamDock?.updateSettings({ maxConcurrent: val }).then((next) => {
@@ -119,6 +123,10 @@ export function SettingsView({
                 }}
                 className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-surface-4 accent-accent"
               />
+              <p className="mt-1.5 text-xs text-text-secondary">
+                {DEFAULT_CONCURRENT} is recommended. Up to {MAX_CONCURRENT}: more at once only splits the same connection,
+                and new downloads start failing while it is full.
+              </p>
             </div>
 
             <div className="flex items-center justify-between gap-3">

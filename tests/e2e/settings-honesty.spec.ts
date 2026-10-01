@@ -52,6 +52,18 @@ test('saves what closing the window should do', async ({ page }) => {
     .toContainEqual({ closeBehavior: 'quit' });
 });
 
+test('limits downloads at once to 5 and marks 3 as recommended', async ({ page }) => {
+  const slider = page.getByRole('slider', { name: 'Concurrent downloads' });
+  await expect(slider).toHaveAttribute('max', '5');
+  await expect(slider).toHaveValue('3');
+  await expect(page.getByText('3 (recommended)')).toBeVisible();
+  await slider.fill('5');
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __saved: Array<Record<string, unknown>> }).__saved))
+    .toContainEqual({ maxConcurrent: 5 });
+  await expect(page.getByText('3 (recommended)')).toHaveCount(0);
+});
+
 test('keeps separate subtitle rules for Sub and Dub', async ({ page }) => {
   await expect(page.getByLabel('Subtitles for Sub (original audio)')).toBeVisible();
   await expect(page.getByLabel('Subtitles for Dub')).toBeVisible();

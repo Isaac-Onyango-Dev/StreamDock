@@ -1,5 +1,5 @@
 import { DEFAULT_SUBTITLE_MODE } from '../shared/subtitle-args';
-import type { AppSettings } from '../shared/settings';
+import { clampConcurrent, DEFAULT_CONCURRENT, type AppSettings } from '../shared/settings';
 
 export type { AppSettings, BackgroundMode, CloseBehavior } from '../shared/settings';
 import { app } from 'electron';
@@ -23,7 +23,7 @@ export class PersistenceGateway {
     this.path = join(app.getPath('userData'), 'settings.json');
     this.fallback = {
       downloadDir: app.getPath('downloads'),
-      maxConcurrent: 3,
+      maxConcurrent: DEFAULT_CONCURRENT,
       closeBehavior: 'tray-when-active',
       densityMode: 'comfortable',
       // The site's gradient is the product's default look; a fresh install
@@ -47,7 +47,8 @@ export class PersistenceGateway {
       if (!existsSync(this.path)) return this.fallback;
       const stored = JSON.parse(readFileSync(this.path, 'utf-8')) as Partial<AppSettings>;
       const merged = this.applyBackgroundDefault({ ...this.fallback, ...stored }, stored);
-      return this.applySubtitleModeDefault(merged, stored);
+      // The slider used to go to 10; a limit saved above today's maximum reads as it.
+      return { ...this.applySubtitleModeDefault(merged, stored), maxConcurrent: clampConcurrent(merged.maxConcurrent) };
     } catch {
       return this.fallback;
     }

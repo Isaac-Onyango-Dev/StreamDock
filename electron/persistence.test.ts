@@ -25,6 +25,23 @@ afterEach(() => {
   rmSync(userDataDir, { recursive: true, force: true });
 });
 
+describe('downloads at once', () => {
+  it('defaults to 3 on a fresh install', () => {
+    expect(new PersistenceGateway().getSettings().maxConcurrent).toBe(3);
+  });
+
+  it('reads a limit saved above the new maximum of 5 as 5', () => {
+    // The slider went to 10 until session 22; Isaac's own install was saved at 8.
+    writeStoredSettings({ downloadDir: 'D:/Videos', maxConcurrent: 8 });
+    expect(new PersistenceGateway().getSettings().maxConcurrent).toBe(5);
+  });
+
+  it('keeps a limit within range as saved', () => {
+    writeStoredSettings({ downloadDir: 'D:/Videos', maxConcurrent: 2 });
+    expect(new PersistenceGateway().getSettings().maxConcurrent).toBe(2);
+  });
+});
+
 describe('background default on upgrade', () => {
   it('uses the site gradient for a fresh install with no settings file', () => {
     expect(new PersistenceGateway().getSettings().backgroundMode).toBe('gradient');

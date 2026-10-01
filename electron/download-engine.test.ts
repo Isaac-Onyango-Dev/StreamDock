@@ -127,6 +127,16 @@ vi.mock('./subtitle-attach', () => ({
   ),
 }));
 
+// ── Fake stream repair ───────────────────────────────────────────────────────
+
+const repairs: Array<{ file: string; done: (playable: boolean) => void }> = [];
+
+vi.mock('./stream-repair', () => ({
+  repairStreamDownload: vi.fn(
+    (file: string) => new Promise<boolean>((resolve) => repairs.push({ file, done: resolve })),
+  ),
+}));
+
 vi.mock('./binary-resolver', () => ({
   resolveBinary: () => 'ffmpeg',
   resolveYtDlpCommand: () => ({ command: 'yt-dlp', args: [], type: 'native' }),
@@ -180,6 +190,7 @@ beforeEach(() => {
   children.length = 0;
   extractions.length = 0;
   attached.length = 0;
+  repairs.length = 0;
   sent = [];
   CONCURRENCY().probeHostMaxConcurrent = 1;
   internetUp = true;
@@ -533,6 +544,8 @@ describe('subtitles the player loaded beside the stream (B7)', () => {
     childFor(CDN(1)).out(`[MoveFiles] Moving file "${join(outputDir, '.streamdock-incomplete', id, 'x.mp4')}" to "${final}"`);
     childFor(CDN(1)).exit(0);
     await settle(10);
+    repairs[0].done(true); // a player stream is repaired before anything else touches it
+    await settle(10);
     return { id, final };
   }
 
@@ -553,6 +566,52 @@ describe('subtitles the player loaded beside the stream (B7)', () => {
     const { id } = await finishEpisode(engine, { subtitleMode: 'none' });
     expect(attached).toHaveLength(0);
     expect(find(engine, id).status).toBe('completed');
+  });
+});
+
+describe('player streams (anikoto CDN, 1 Oct 2026: every segment wrapped in a PNG)', () => {
+  async function download(engine: Engine) {
+    const { id } = startVideo(engine, episode(1));
+    extractions[0].resolve({ originalUrl: episode(1), manifestUrl: CDN(1), type: 'm3u8' });
+    await settle();
+    const final = join(outputDir, 'One Piece - Episode 1.mp4');
+    writeFileSync(final, 'png-wrapped stream');
+    childFor(CDN(1)).out(`[MoveFiles] Moving file "${join(outputDir, '.streamdock-incomplete', id, 'x.mp4')}" to "${final}"`);
+    childFor(CDN(1)).exit(0);
+    await settle(10);
+    return { id, final };
+  }
+
+  it('are repaired before the row reads completed, and yt-dlp\'s own ffmpeg steps leave them alone', async () => {
+    const engine = newEngine();
+    const { id, final } = await download(engine);
+    expect(childFor(CDN(1)).args).toEqual(expect.arrayContaining(['--fixup', 'never', '--no-embed-metadata']));
+    expect(repairs).toHaveLength(1);
+    expect(repairs[0].file).toBe(final);
+    expect(find(engine, id).status).toBe('running');
+
+    repairs[0].done(true);
+    await settle(10);
+    expect(find(engine, id).status).toBe('completed');
+  });
+
+  it('fail, and leave nothing in the folder, when they cannot be made playable', async () => {
+    const engine = newEngine();
+    const { id, final } = await download(engine);
+    repairs[0].done(false);
+    await settle(10);
+    expect(find(engine, id).status).toBe('failed');
+    expect(find(engine, id).error).toMatch(/could not turn into a playable video/);
+    expect(existsSync(final)).toBe(false);
+  });
+
+  it('do not change how an ordinary site is downloaded', async () => {
+    const engine = newEngine();
+    startVideo(engine, YOUTUBE);
+    expect(childFor(YOUTUBE).args).not.toContain('--fixup');
+    childFor(YOUTUBE).exit(0);
+    await settle(10);
+    expect(repairs).toHaveLength(0);
   });
 });
 

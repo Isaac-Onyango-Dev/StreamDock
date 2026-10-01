@@ -21,6 +21,21 @@ export type BackgroundMode = 'solid' | 'bing' | 'picsum' | 'gradient' | 'theme';
  */
 export type CloseBehavior = 'tray-when-active' | 'quit' | 'ask';
 
+/**
+ * Most downloads at once. Measured live (session 22) on a ~1.2 MB/s line:
+ * total speed peaked at 5 (3.2x one at a time); at 8, half the anime episodes
+ * failed because their pages could not load while the line was full.
+ */
+export const MAX_CONCURRENT = 5;
+/** A fresh install's setting, and what the Settings slider marks as recommended. */
+export const DEFAULT_CONCURRENT = 3;
+
+/** A stored or requested limit, within 1..MAX_CONCURRENT. An install saved at 8 becomes 5. */
+export function clampConcurrent(value: number | undefined): number {
+  if (!Number.isFinite(value)) return DEFAULT_CONCURRENT;
+  return Math.min(MAX_CONCURRENT, Math.max(1, Math.round(value as number)));
+}
+
 export interface AppSettings {
   downloadDir: string;
   maxConcurrent?: number;
