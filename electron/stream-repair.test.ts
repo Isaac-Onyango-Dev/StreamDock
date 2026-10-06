@@ -39,25 +39,33 @@ function unwrapAll(data: Buffer, chunkSize: number): Buffer {
   return Buffer.concat(out);
 }
 
+/**
+ * Byte-for-byte equality, compared as hex. `toEqual` on a Buffer walks it one
+ * element at a time through generic deep equality: ~60ms per 15KB comparison,
+ * which made these the slowest tests in the suite while the parsing they check
+ * took ~2ms. A failure still diffs, at the first differing byte.
+ */
+const hex = (bytes: Buffer) => bytes.toString('hex');
+
 describe('extractPackets', () => {
   it('keeps every video packet and drops the PNG wrappers and short packets', () => {
     expect(PNG.length).toBe(70);
     const data = Buffer.concat([segment(0, 50), segment(50, 30), segment(80, 7)]);
     const clean = unwrapAll(data, data.length);
-    expect(clean).toEqual(Buffer.concat(Array.from({ length: 87 }, (_, i) => packet(i))));
+    expect(hex(clean)).toBe(hex(Buffer.concat(Array.from({ length: 87 }, (_, i) => packet(i)))));
   });
 
   it('gives the same result however the file is chunked, including mid-wrapper and mid-signature', () => {
     const data = Buffer.concat([segment(0, 40), segment(40, 40)]);
-    const expected = unwrapAll(data, data.length);
+    const expected = hex(unwrapAll(data, data.length));
     for (const size of [7, 64, 188, 189, 250, 4096]) {
-      expect(unwrapAll(data, size)).toEqual(expected);
+      expect(hex(unwrapAll(data, size)), `chunked every ${size} bytes`).toBe(expected);
     }
   });
 
   it('passes an ordinary transport stream through unchanged', () => {
     const ts = Buffer.concat(Array.from({ length: 25 }, (_, i) => packet(i, 0x47)));
-    expect(unwrapAll(ts, 100)).toEqual(ts);
+    expect(hex(unwrapAll(ts, 100))).toBe(hex(ts));
   });
 });
 
