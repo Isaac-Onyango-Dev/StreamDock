@@ -1,36 +1,9 @@
 // Role: safe metadata probe for single videos, playlists, and stream pages.
+import type { BlockedKind, PlaylistProbe, PlaylistProbeItem, ProbeSupport, QualityOption } from '../shared/downloads';
 import { buildPluginDirArgs, resolveYtDlpCommand } from './binary-resolver';
-import { fetchWithDeadline, runProbeChild } from './probe-support';
+import { extractManifest, type ManifestResult } from './manifest-extractor';
+import { fetchWithDeadline, removeTempFile, runProbeChild } from './probe-support';
 import { EPISODE_PATTERNS, MANIFEST_PROBE_HOSTS, PLUGIN_EXTRACTOR_HOSTS, REFERENCE_HOSTS } from './url-router';
-
-export type ProbeSupport = 'direct' | 'playlist' | 'episode-range' | 'manifest-probe' | 'unknown';
-
-export interface PlaylistProbeItem {
-  id?: string;
-  title: string;
-  url?: string;
-  duration?: number;
-  thumbnail?: string;
-}
-
-export interface QualityOption {
-  height: number;
-  label: string;
-}
-
-export interface PlaylistProbe {
-  url: string;
-  host: string;
-  title: string;
-  support: ProbeSupport;
-  itemCount: number;
-  preview: PlaylistProbeItem[];
-  qualityOptions?: QualityOption[];
-  thumbnail?: string;
-  extractor?: string;
-  isLive: boolean;
-  notes: string[];
-}
 
 interface YtDlpInfo {
   id?: string;
@@ -413,19 +386,160 @@ function extractQualityOptions(info: YtDlpInfo): QualityOption[] | undefined {
   return sorted.map((height) => ({ height, label: `${height}p` }));
 }
 
-async function fallbackProbe(url: string, reason: string, signal?: AbortSignal): Promise<PlaylistProbe> {
+const BLOCKED_REASON: Record<Exclude<BlockedKind, 'drm'>, string> = {
+  'reference-index': "This is an index of sites, not a video page. Open one of its listed sources, then paste that page's URL into StreamDock.",
+  'no-media': 'No video found on this page. No downloader recognises the site, and its player loaded no stream while StreamDock watched. If the page does play video, press Analyze again — its player may have been slow to start.',
+  encrypted: 'This video stream is encrypted in a way only its own player can read, so it cannot be downloaded.',
+};
+
+function blockedProbe(url: string, blocked: BlockedKind, reason: string): PlaylistProbe {
+  return {
+    url,
+    host: hostFromUrl(url),
+    title: 'This page cannot be downloaded',
+    support: 'unsupported',
+    blocked,
+    itemCount: 0,
+    preview: [],
+    isLive: false,
+    notes: [reason],
+  };
+}
+
+/**
+ * A page whose stream the hidden browser finds at start.
+ *
+ * The renderer names a single-item download after its preview item, so without
+ * the page's own title the file is saved as the placeholder text itself.
+ * ponytail: listed probe hosts are never opened at probe time, so a single page
+ * on one still gets the placeholder name; reading the title there is the upgrade.
+ */
+function manifestProbe(url: string, note: string, pageTitle?: string, stream?: PlaylistProbe['stream']): PlaylistProbe {
+  return {
+    url,
+    host: hostFromUrl(url),
+    title: pageTitle ?? 'Stream page needs browser probe',
+    support: 'manifest-probe',
+    itemCount: 1,
+    preview: [{ title: pageTitle ?? 'Playable stream will be discovered at start' }],
+    isLive: false,
+    notes: [note],
+    stream,
+  };
+}
+
+/** Why a playlist cannot be downloaded, when it says so itself. */
+export type StreamProtection = { kind: 'encrypted' } | { kind: 'drm'; systems: string[] };
+
+/** DRM systems by the key formats and scheme ids playlists declare them with. */
+const DRM_SYSTEMS: Array<[string, RegExp]> = [
+  ['FairPlay', /com\.apple\.streamingkeydelivery|skd:\/\/|94ce86fb-07ff-4f43-adb8-93d2fa968ca2/i],
+  ['Widevine', /edef8ba9-79d6-4ace-a3c8-27dcd51d21ed/i],
+  ['PlayReady', /com\.microsoft\.playready|9a04f079-9840-4286-ab92-e65be0885f95/i],
+];
+
+/**
+ * What a fetched playlist declares about its own protection.
+ *
+ * - Neither a playlist nor markup (HLS starts with #EXTM3U, DASH is XML, a
+ *   block page is HTML): a playlist only the page's script can read. Measured
+ *   on one embed provider, whose playlists are ciphertext even with the
+ *   player's referer and whose segments are a PNG signature then encrypted
+ *   bytes; yt-dlp calls it "Response data has no m3u header".
+ * - An HLS key with SAMPLE-AES or a key format other than "identity", or any
+ *   DASH ContentProtection: DRM, which yt-dlp refuses at download.
+ * - Standard AES-128 is neither. The playlist points at its own key, and the
+ *   lab's AES-128 fixture downloads and decodes to the source's frames.
+ */
+export function manifestProtection(body: string | null): StreamProtection | null {
+  const text = (body ?? '').trimStart();
+  if (text === '') return null;
+  if (!text.startsWith('#EXTM3U') && !text.startsWith('<')) return { kind: 'encrypted' };
+  const drmKeys = (text.match(/^#EXT-X-(?:SESSION-)?KEY:.*$/gm) ?? [])
+    .filter((key) => /METHOD=SAMPLE-AES/i.test(key) || /KEYFORMAT="(?!identity")/i.test(key));
+  const dashProtection = text.match(/<ContentProtection\b[^>]*>/gi) ?? [];
+  const evidence = [...drmKeys, ...dashProtection];
+  if (evidence.length === 0) return null;
+  return { kind: 'drm', systems: DRM_SYSTEMS.filter(([, pattern]) => evidence.some((e) => pattern.test(e))).map(([name]) => name) };
+}
+
+/** The first variant a master playlist lists, as an absolute URL; null for a media playlist. */
+export function firstVariantUrl(master: string, base: string): string | null {
+  const lines = master.split(/\r?\n/).map((line) => line.trim());
+  const at = lines.findIndex((line) => line.startsWith('#EXT-X-STREAM-INF'));
+  const uri = at === -1 ? undefined : lines.slice(at + 1).find((line) => line && !line.startsWith('#'));
+  if (!uri) return null;
+  try {
+    return new URL(uri, base).toString();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch the stream the way its player did — same referer, same cookies — and
+ * read what it declares. A master playlist usually leaves the key to its
+ * variants, so the first variant is read too when the master declares nothing.
+ * A stream that refuses the check cannot be judged and is left downloadable:
+ * the engine resolves the page again at start, in its own browser session.
+ */
+async function streamProtection(found: ManifestResult, signal?: AbortSignal): Promise<StreamProtection | null> {
+  const headers: Record<string, string> = {};
+  if (found.referer) headers.Referer = found.referer;
+  if (found.cookieHeader) headers.Cookie = found.cookieHeader;
+  const read = async (url: string) => {
+    const { status, body } = await fetchWithDeadline(url, { headers, timeoutMs: PAGE_FETCH_TIMEOUT_MS, signal, maxBytes: 64_000 });
+    signal?.throwIfAborted();
+    return status === 200 ? body : null;
+  };
+
+  const master = await read(found.manifestUrl);
+  if (master === null) return null;
+  const declared = manifestProtection(master);
+  const variant = declared || found.type !== 'm3u8' ? null : firstVariantUrl(master, found.manifestUrl);
+  if (!variant) return declared;
+  const media = await read(variant);
+  return media === null ? null : manifestProtection(media);
+}
+
+/**
+ * No extractor claims this page, so look for its stream the way a browser
+ * extension does: load it in the hidden probe window and watch what its player
+ * requests, iframes and embeds included.
+ *
+ * That window used to open only for hosts listed in host-config, so every site
+ * outside the list — however plain its player — failed as "Unsupported URL"
+ * until someone added its domain by hand. What it finds is checked once for
+ * protection; the engine resolves the page again at start, because stream
+ * tokens expire.
+ */
+async function findStreamInPage(url: string, signal?: AbortSignal): Promise<PlaylistProbe> {
+  const found = await extractManifest(url, undefined, signal);
+  removeTempFile(found?.cookiesFile);
+  signal?.throwIfAborted();
+  if (!found) return blockedProbe(url, 'no-media', BLOCKED_REASON['no-media']);
+
+  const protection = found.type === 'mp4' ? null : await streamProtection(found, signal);
+  if (protection?.kind === 'encrypted') return blockedProbe(url, 'encrypted', BLOCKED_REASON.encrypted);
+  if (protection?.kind === 'drm') {
+    const system = protection.systems.length > 0 ? `${protection.systems.join(' and ')} DRM` : 'DRM';
+    return blockedProbe(url, 'drm', `This video is protected by ${system}, so it cannot be downloaded.`);
+  }
+
+  return manifestProbe(
+    url,
+    'No extractor supports this site, but its player loads a stream StreamDock can read. The page will be opened again in a hidden browser when the download starts.',
+    found.pageTitle,
+    { url: found.manifestUrl, referer: found.referer },
+  );
+}
+
+async function fallbackProbe(url: string, reason: string, signal?: AbortSignal, noExtractor = false): Promise<PlaylistProbe> {
   const host = hostFromUrl(url);
   if (matchesHost(host, REFERENCE_HOSTS())) {
-    return {
-      url,
-      host,
-      title: 'EverythingMoe reference index',
-      support: 'unknown',
-      itemCount: 1,
-      preview: [{ title: 'Choose a listed source page, then paste that source URL into StreamDock' }],
-      isLive: false,
-      notes: ['EverythingMoe is an index of sites, not a direct media page.'],
-    };
+    // Never downloadable, and engine.start() refuses it — so the probe says so
+    // too, rather than 'unknown' with the Download button still enabled.
+    return { ...blockedProbe(url, 'reference-index', BLOCKED_REASON['reference-index']), title: 'EverythingMoe reference index' };
   }
 
   const episodePattern = detectEpisodePattern(url);
@@ -447,20 +561,22 @@ async function fallbackProbe(url: string, reason: string, signal?: AbortSignal):
     };
   }
 
-  const manifestLikely = matchesHost(host, MANIFEST_PROBE_HOSTS());
+  if (matchesHost(host, MANIFEST_PROBE_HOSTS())) {
+    return manifestProbe(url, 'This host often hides HLS/DASH manifests behind the page player, so StreamDock will open a hidden probe when downloading.');
+  }
+  if (noExtractor) return findStreamInPage(url, signal);
+
+  // The probe failed for some other reason — a timeout, a network error, a
+  // 403 — which says nothing about whether the download itself can work.
   return {
     url,
     host,
-    title: manifestLikely ? 'Stream page needs browser probe' : 'Metadata not available yet',
-    support: manifestLikely ? 'manifest-probe' : 'unknown',
+    title: 'Metadata not available yet',
+    support: 'unknown',
     itemCount: 1,
-    preview: [{ title: manifestLikely ? 'Playable stream will be discovered at start' : 'Single URL' }],
+    preview: [{ title: 'Single URL' }],
     isLive: false,
-    notes: [
-      manifestLikely
-        ? 'This host often hides HLS/DASH manifests behind the page player, so StreamDock will open a hidden probe when downloading.'
-        : reason,
-    ],
+    notes: [reason],
   };
 }
 
@@ -533,10 +649,26 @@ function shouldSkipYtDlpProbe(url: string): boolean {
 }
 
 /**
+ * The last verdict the probe reached for each URL, which is what engine.start()
+ * enforces. Only the verdict is kept, not the probe and its preview list.
+ */
+const verdicts = new Map<string, { support: ProbeSupport; reason: string }>();
+
+export function probeVerdict(url: string): { support: ProbeSupport; reason: string } | undefined {
+  return verdicts.get(url);
+}
+
+/**
  * Describe what a URL holds. Rejects with the signal's reason when `signal`
  * aborts, after stopping any yt-dlp probe it started.
  */
 export async function inspectUrl(url: string, signal?: AbortSignal): Promise<PlaylistProbe> {
+  const probe = await describeUrl(url, signal);
+  verdicts.set(url, { support: probe.support, reason: probe.notes[0] ?? '' });
+  return probe;
+}
+
+async function describeUrl(url: string, signal?: AbortSignal): Promise<PlaylistProbe> {
   signal?.throwIfAborted();
   // Reference-index hosts (EverythingMoe and similar) must short-circuit here,
   // unconditionally and before any other check — previously this only worked
@@ -572,5 +704,8 @@ export async function inspectUrl(url: string, signal?: AbortSignal): Promise<Pla
   }
 
   if (probe) return probe;
-  return await fallbackProbe(url, result.stderr.trim() || 'The metadata probe failed. You can still try starting the download.', signal);
+  // yt-dlp's verdict when no extractor claims the URL and its generic one found
+  // no media in the page's HTML — distinct from a probe that merely failed.
+  const noExtractor = /\bUnsupported URL\b/i.test(result.stderr);
+  return await fallbackProbe(url, result.stderr.trim() || 'The metadata probe failed. You can still try starting the download.', signal, noExtractor);
 }

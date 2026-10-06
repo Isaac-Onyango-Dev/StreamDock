@@ -42,6 +42,7 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:e2e": "playwright test",
+    "test:electron": "npm run build:app && playwright test -c playwright.electron.config.ts",
     "test:e2e:headed": "playwright test --headed",
     "test:coverage": "vitest run --coverage"
   },

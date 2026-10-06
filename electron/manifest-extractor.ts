@@ -8,6 +8,7 @@ import {
   SPOOF_UA,
   SUBTITLE_PATTERN,
   fetchWithDeadline,
+  mediaTypeFromContentType,
   mediaTypeFromUrl,
   openHiddenProbe,
   removeTempFile,
@@ -122,6 +123,13 @@ export interface ManifestResult {
    * Sub episode used to arrive as Japanese audio with no subtitles at all.
    */
   subtitles?: CapturedSubtitle[];
+  /** The page's own title, as the probe window last saw it. */
+  pageTitle?: string;
+  /**
+   * The Cookie header the player's session sends for `manifestUrl`. The same
+   * cookies are in `cookiesFile` for yt-dlp; this form is for a plain request.
+   */
+  cookieHeader?: string;
 }
 
 export interface ApiProbeResult {
@@ -165,6 +173,8 @@ function streamTypeOf(url: string): StreamType | null {
 const EXTRACTION_TIMEOUT_MS = 45_000;
 /** Ceiling on the last-resort JS read, which can hang with a stuck renderer. */
 const JS_LAST_RESORT_MS = 5_000;
+/** Ceiling on reading the probe session's cookies, like every other await here. */
+const COOKIE_READ_MS = 2_000;
 /** Ceiling on a single raw fetch, so a silent server cannot stall the queue. */
 const FETCH_TIMEOUT_MS = 20_000;
 /** How long to wait for a page's language switcher to render. */
@@ -771,17 +781,46 @@ function probePage(
       clearTimeout(reloadTimer);
       clearTimeout(retryTimer);
       clearTimeout(languageBail);
-      dispose();
-      if (result && subtitles.size > 0) result = { ...result, subtitles: [...subtitles.values()] };
-      if (result && wantsLanguage) {
-        const outcome = languageOutcome ?? 'unconfirmed';
-        result = {
-          ...result,
-          languageOutcome: outcome,
-          translation: outcome === 'selected' ? wantedTranslation : undefined,
-        };
-      }
-      resolve(result);
+      // Read before the window goes. Chromium reports the URL when a page has
+      // no <title>, which is no name at all.
+      let pageTitle: string | undefined;
+      try { pageTitle = win.isDestroyed() ? undefined : win.webContents.getTitle().trim(); } catch { /* window gone */ }
+      void sessionCookies(result?.manifestUrl).then((cookies) => {
+        dispose();
+        if (result && pageTitle && !/^https?:\/\//i.test(pageTitle)) result = { ...result, pageTitle };
+        if (result && cookies.length > 0) {
+          // The player's cookies go with its stream, or a CDN that serves only
+          // a session it issued answers yt-dlp with a 403. Only the per-site
+          // API path ever handed cookies over; this is every other page.
+          // ponytail: the stream's own host only; segments on another host get
+          // none. Export per segment host if a CDN ever splits them.
+          const setCookies = cookies.map((c) => `${c.name}=${c.value}; Domain=${c.domain}; Path=${c.path || '/'}${c.secure ? '; Secure' : ''}`);
+          result = {
+            ...result,
+            cookieHeader: cookies.map((c) => `${c.name}=${c.value}`).join('; '),
+            cookiesFile: writeCookiesFile(setCookies, result.manifestUrl),
+          };
+        }
+        if (result && subtitles.size > 0) result = { ...result, subtitles: [...subtitles.values()] };
+        if (result && wantsLanguage) {
+          const outcome = languageOutcome ?? 'unconfirmed';
+          result = {
+            ...result,
+            languageOutcome: outcome,
+            translation: outcome === 'selected' ? wantedTranslation : undefined,
+          };
+        }
+        resolve(result);
+      });
+    };
+    /** Cookies the probe session would send to `url`; none on any failure, within a bound. */
+    const sessionCookies = (url: string | undefined): Promise<Electron.Cookie[]> => {
+      if (!url || signal?.aborted) return Promise.resolve([]);
+      let bound: ReturnType<typeof setTimeout> | undefined;
+      return Promise.race([
+        probeSession.cookies.get({ url }).catch(() => []),
+        new Promise<Electron.Cookie[]>((r) => { bound = setTimeout(() => r([]), COOKIE_READ_MS); }),
+      ]).finally(() => clearTimeout(bound));
     };
     // Paused or cancelled by the engine: stop now rather than run to the
     // timeout with a hidden Chromium renderer nobody is waiting for.
@@ -949,6 +988,15 @@ function probePage(
           const type = mediaTypeFromUrl(scan.manifestUrl) || 'm3u8';
           accept({ originalUrl: pageUrl, manifestUrl: scan.manifestUrl, type, referer }, ' via API response fetch');
         }).catch(() => { });
+      }
+      // A playlist at a URL with no extension is a playlist only by its type.
+      // The sniff above keys on extensions, so such a stream was never seen and
+      // the page reported empty; a browser extension like VDH looks at both.
+      if (!settled && languageReady && details.statusCode < 400 && !streamTypeOf(details.url)) {
+        const contentType = Object.entries(details.responseHeaders ?? {})
+          .find(([name]) => name.toLowerCase() === 'content-type')?.[1]?.[0];
+        const type = mediaTypeFromContentType(contentType);
+        if (type) accept({ originalUrl: pageUrl, manifestUrl: details.url, type, referer: refererForRequest(details, pageUrl) }, ' by its content type');
       }
       callback({});
     });

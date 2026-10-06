@@ -296,4 +296,28 @@ ERROR: [download] Got error: Failed to perform, curl: (6) Could not resolve host
   it('a genuine ffmpeg failure on the fatal line is still reported as ffmpeg', () => {
     expect(classifyEngineFailure('ERROR: Postprocessing: ffprobe and ffmpeg not found', {})).toMatch(/ffmpeg/i);
   });
+
+  // The bundled yt-dlp handed a browser-captured master playlist, with the
+  // referer its player sent: the CDN answered 200 with ciphertext. The old
+  // message was this line with its paths stripped, asking the user to file a
+  // yt-dlp bug about a stream that is encrypted by design.
+  it('an encrypted playlist says it cannot be downloaded, not "report this issue"', () => {
+    const stderr =
+      'ERROR: [generic] master.m3u8?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ2aWRlb19pZCI6ImMwZDIxMGFjIn0.Bnsvj2wutUSxI5FRoATvLHoCe8BYngQ7VXNMVy_juvg: ' +
+      'Response data has no m3u header; please report this issue on  https://github.com/yt-dlp/yt-dlp/issues?q= , ' +
+      'filling out the appropriate issue template. Confirm you are on the latest version using  yt-dlp -U';
+    const message = classifyEngineFailure(stderr, { manifestAttempted: true });
+    expect(message).toMatch(/only its own player can read/);
+    expect(message).not.toMatch(/report/i);
+  });
+
+  // The lab's fake .mp4 (a web page served as video/mp4): yt-dlp saves it and
+  // its metadata step rejects it. The job fails and nothing restarts it, so the
+  // message promised a retry that never came.
+  it('a non-video response says so and promises no restart', () => {
+    const stderr = 'ERROR: Postprocessing: Error opening input files: Invalid data found when processing input';
+    const message = classifyEngineFailure(stderr, {});
+    expect(message).toMatch(/not a valid video/i);
+    expect(message).not.toMatch(/restart/i);
+  });
 });

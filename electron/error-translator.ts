@@ -196,6 +196,11 @@ export function toUserError(error: unknown, fallback = 'Something went wrong. Re
   if (lower.includes('unsupported url') || lower.includes('ie_key')) {
     return 'This site is not yet supported. Try pasting a direct media URL instead.';
   }
+  // The stream URL answered 200 with something that is not a playlist — on the
+  // embed provider where this was measured, the playlist itself is encrypted.
+  if (lower.includes('no m3u header')) {
+    return 'The site sent its video playlist in a form only its own player can read (it is likely encrypted), so it cannot be downloaded.';
+  }
   if (
     lower.includes('no video formats found') ||
     lower.includes('no formats available') ||
@@ -216,8 +221,9 @@ export function toUserError(error: unknown, fallback = 'Something went wrong. Re
   }
 
   // ── File corruption ──────────────────────────────────────────────────────────
+  // Nothing restarts a failed download; this used to promise that it would.
   if (lower.includes('corrupt') || lower.includes('invalid data')) {
-    return 'The file was corrupted. Restarting download.';
+    return 'What the server sent is not a valid video file, so the download failed.';
   }
 
   // ── yt-dlp crash / generic failure ──────────────────────────────────────────

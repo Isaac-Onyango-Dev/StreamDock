@@ -50,6 +50,18 @@ export function mediaTypeFromUrl(url: string): StreamType | null {
   return match ? (match[1].toLowerCase() as StreamType) : null;
 }
 
+/**
+ * A playlist's type from its Content-Type, for streams served at URLs with no
+ * extension. Never 'mp4': an MSE player's fMP4 segments are video/mp4 too, and
+ * taking one for the whole video would save a two-second clip.
+ */
+export function mediaTypeFromContentType(contentType: string | undefined): StreamType | null {
+  const type = contentType?.split(';')[0].trim().toLowerCase();
+  if (!type) return null;
+  if (/^(?:application|audio)\/(?:x-|vnd\.apple\.)?mpegurl$/.test(type)) return 'm3u8';
+  return type === 'application/dash+xml' ? 'mpd' : null;
+}
+
 /** Subtitle files a web player fetches beside the stream. */
 export const SUBTITLE_PATTERN = /\.(vtt|srt|ass)(?:\?|$)/i;
 

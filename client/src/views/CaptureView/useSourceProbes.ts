@@ -58,7 +58,7 @@ export function useSourceProbes() {
    * function where there were three copies (initial probe, default language,
    * language switch).
    */
-  const loadTracks = useCallback(async (request: { pageUrl: string; manifestUrl?: string }) => {
+  const loadTracks = useCallback(async (request: { pageUrl: string; manifestUrl?: string; referer?: string }) => {
     if (!window.streamDock?.probeMediaTracks) return;
     const token = planToken.current;
     setProbingTracks(true);

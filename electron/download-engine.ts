@@ -31,6 +31,7 @@ import { extractManifest, type CapturedSubtitle, type ManifestResult } from './m
 import { attachSubtitles } from './subtitle-attach';
 import { repairStreamDownload } from './stream-repair';
 import { mediaTypeFromUrl } from './probe-support';
+import { probeVerdict } from './playlist-inspector';
 import { CONCURRENCY, MANIFEST_PROBE_HOSTS, REFERENCE_HOSTS } from './url-router';
 import { detectFormat, buildFormatArgs } from './format-detector';
 import { StallWatch, isInternetReachable } from './network-monitor';
@@ -370,6 +371,14 @@ export class DownloadEngine {
       );
     }
 
+    // The probe is the one judge of whether a URL can be downloaded. A URL it
+    // found no route to used to be queued anyway and fail as unsupported; one
+    // whose stream only a browser could find has to be resolved that way at
+    // start, whether or not its host is listed.
+    const verdict = probeVerdict(request.url);
+    if (verdict?.support === 'unsupported') throw new Error(verdict.reason);
+    request = { ...request, resolveInBrowser: verdict?.support === 'manifest-probe' || undefined };
+
     if (!existsSync(request.outputDir)) mkdirSync(request.outputDir, { recursive: true });
 
     const id = randomUUID();
@@ -646,7 +655,7 @@ export class DownloadEngine {
     // found a manifest: that manifest's CDN token dies in ~90s, long before a
     // queued job starts, and only the engine's own resolve catches the
     // subtitle files the player loads beside it.
-    const resolve = matchesProbeHost(host);
+    const resolve = matchesProbeHost(host) || Boolean(request.resolveInBrowser);
 
     const task: ActiveTask = {
       process: null,
@@ -1430,7 +1439,10 @@ export class DownloadEngine {
   private buildImpersonationArgs(request: DownloadRequest, originalUrl?: string, referer?: string): string[] {
     const checkUrl = originalUrl || request.url;
     const host = extractHost(checkUrl);
-    const shouldImpersonate = Boolean(request.impersonate) || matchesProbeHost(host);
+    // A stream the hidden browser found is fetched like a listed probe host's,
+    // or the referer its player sent — which these CDNs check — never reaches
+    // yt-dlp.
+    const shouldImpersonate = Boolean(request.impersonate) || matchesProbeHost(host) || Boolean(request.resolveInBrowser);
     if (!shouldImpersonate) return [];
 
     const browser = request.impersonate || 'chrome';

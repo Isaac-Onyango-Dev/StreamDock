@@ -20,8 +20,9 @@ export default defineConfig({
    * and it duplicated the chromium project's specs besides. Removed rather than
    * left failing: these specs load the renderer over HTTP and assert on the DOM,
    * so they are browser tests, and pretending otherwise hid that real Electron
-   * coverage does not exist yet. Adding it means _electron.launch() against the
-   * packaged main process, in its own spec file.
+   * coverage did not exist. It does now, in its own config:
+   * playwright.electron.config.ts drives the built app with _electron.launch()
+   * (`npm run test:electron`).
    */
   projects: [
     {

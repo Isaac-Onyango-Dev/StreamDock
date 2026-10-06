@@ -80,6 +80,7 @@ vi.mock('child_process', () => {
 const { execFile } = await import('child_process');
 const {
   fetchWithDeadline,
+  mediaTypeFromContentType,
   openHiddenProbe,
   runProbeChild,
   sweepProbeTempFiles,
@@ -99,6 +100,28 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   Object.defineProperty(process, 'platform', { value: realPlatform });
+});
+
+/**
+ * A playlist at a URL with no extension (the lab's /api/stream?id=1) is a
+ * playlist only by its Content-Type. The sniffer keyed on extensions alone, so
+ * such a stream was never seen and the page was called empty.
+ */
+describe('mediaTypeFromContentType', () => {
+  it('recognises the HLS and DASH types players are served', () => {
+    for (const t of ['application/vnd.apple.mpegurl', 'application/x-mpegURL', 'audio/mpegurl', 'audio/x-mpegurl; charset=utf-8']) {
+      expect(mediaTypeFromContentType(t)).toBe('m3u8');
+    }
+    expect(mediaTypeFromContentType('application/dash+xml')).toBe('mpd');
+  });
+
+  // An MSE player's fMP4 segments are video/mp4 too; taking one for a whole
+  // video would save a two-second clip, so content type never means mp4.
+  it('ignores everything else, video/mp4 included', () => {
+    for (const t of ['video/mp4', 'video/mp2t', 'text/html', 'application/json', '', undefined]) {
+      expect(mediaTypeFromContentType(t)).toBeNull();
+    }
+  });
 });
 
 describe('fetchWithDeadline', () => {

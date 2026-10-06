@@ -1,5 +1,19 @@
-import { describe, expect, it } from 'vitest';
-import { detectEpisodePattern, parseSeriesApiCount, parseSeriesInfo, pickThumbnail } from './playlist-inspector';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  detectEpisodePattern, firstVariantUrl, inspectUrl, manifestProtection, parseSeriesApiCount, parseSeriesInfo, pickThumbnail, probeVerdict,
+} from './playlist-inspector';
+
+const mocks = vi.hoisted(() => ({ runProbeChild: vi.fn(), fetchWithDeadline: vi.fn(), extractManifest: vi.fn() }));
+vi.mock('./probe-support', () => ({
+  runProbeChild: mocks.runProbeChild,
+  fetchWithDeadline: mocks.fetchWithDeadline,
+  removeTempFile: vi.fn(),
+}));
+vi.mock('./manifest-extractor', () => ({ extractManifest: mocks.extractManifest }));
+vi.mock('./binary-resolver', () => ({
+  resolveYtDlpCommand: () => ({ command: 'yt-dlp', args: [] }),
+  buildPluginDirArgs: () => [],
+}));
 
 /**
  * Markup shapes taken from the live anikoto.cz series page for Bleach — the
@@ -189,5 +203,179 @@ describe('the anikoto series-id lookup is configured', () => {
   it('extracts the series id the episode page carries', () => {
     // The pattern lives in host-config.json; this asserts the shape it targets.
     expect(EPISODE_PAGE.match(/data-id="(\d{1,10})"/i)?.[1]).toBe('1642');
+  });
+});
+
+/**
+ * The first bytes of a master playlist, captured 2026-10-06 from the embed
+ * provider behind a reported URL, fetched with the referer its player sends.
+ * HTTP 200 — and ciphertext, which only the page's own script can read. yt-dlp
+ * calls it "Response data has no m3u header".
+ */
+const ENCRYPTED_MASTER =
+  'UqGWqdAuZe8PLnsePbJatYGmj7ySL2AhJbzup81pOSA8oYq03CdkvHwuHgtFrj6s6LOOuogxd1troome7CAIYlPIgrzTWmWkay4eaHqaGcHoup24mFx4XE7rwon8Zk1JNKKPqNFJDbxpOA8LRb44sIG4mbaJ';
+
+/** Playlist lines as the lab fixtures (and real players) write them. */
+const FAIRPLAY_KEY = '#EXT-X-KEY:METHOD=SAMPLE-AES,URI="skd://lab-key",KEYFORMAT="com.apple.streamingkeydelivery",KEYFORMATVERSIONS="1"';
+const WIDEVINE_HLS_KEY = '#EXT-X-KEY:METHOD=SAMPLE-AES-CTR,URI="data:text/plain;base64,AAAA",KEYFORMAT="urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"';
+const AES128_KEY = '#EXT-X-KEY:METHOD=AES-128,URI="key.bin",IV=0x00000000000000000000000000000000';
+const media = (key: string) => `#EXTM3U\n#EXT-X-VERSION:3\n${key}\n#EXTINF:2.0,\nseg000.ts\n#EXT-X-ENDLIST\n`;
+const mpd = (protection: string) =>
+  `<?xml version="1.0"?><MPD xmlns="urn:mpeg:dash:schema:mpd:2011"><Period><AdaptationSet>${protection}</AdaptationSet></Period></MPD>`;
+
+describe('manifestProtection', () => {
+  it('calls a playlist only the page can read encrypted', () => {
+    expect(manifestProtection(ENCRYPTED_MASTER)).toEqual({ kind: 'encrypted' });
+  });
+
+  it('passes real HLS and DASH, with or without a byte-order mark', () => {
+    expect(manifestProtection('#EXTM3U\n#EXT-X-VERSION:3\n')).toBeNull();
+    expect(manifestProtection(`${String.fromCharCode(0xfeff)}#EXTM3U`)).toBeNull();
+    expect(manifestProtection(mpd(''))).toBeNull();
+  });
+
+  // The lab's AES-128 fixture downloads and decodes to the source's frames:
+  // a key URI in the playlist is the standard, and yt-dlp handles it.
+  it('passes standard AES-128, whose key the playlist itself points to', () => {
+    expect(manifestProtection(media(AES128_KEY))).toBeNull();
+    expect(manifestProtection(media(AES128_KEY.replace(',IV', ',KEYFORMAT="identity",IV')))).toBeNull();
+  });
+
+  it('names the DRM a playlist declares', () => {
+    expect(manifestProtection(media(FAIRPLAY_KEY))).toEqual({ kind: 'drm', systems: ['FairPlay'] });
+    expect(manifestProtection(media(WIDEVINE_HLS_KEY))).toEqual({ kind: 'drm', systems: ['Widevine'] });
+    expect(manifestProtection(mpd('<ContentProtection schemeIdUri="urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"/>' +
+      '<ContentProtection schemeIdUri="urn:uuid:9a04f079-9840-4286-ab92-e65be0885f95"/>')))
+      .toEqual({ kind: 'drm', systems: ['Widevine', 'PlayReady'] });
+  });
+
+  it('treats an unnamed protection scheme as DRM all the same', () => {
+    expect(manifestProtection(media('#EXT-X-KEY:METHOD=SAMPLE-AES,URI="key.bin"'))).toEqual({ kind: 'drm', systems: [] });
+    expect(manifestProtection(mpd('<ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011" value="cenc"/>')))
+      .toEqual({ kind: 'drm', systems: [] });
+  });
+
+  it('does not mistake a block page or an empty answer for protection', () => {
+    expect(manifestProtection('<!DOCTYPE html><title>Attention Required! | Cloudflare</title>')).toBeNull();
+    expect(manifestProtection('')).toBeNull();
+    expect(manifestProtection(null)).toBeNull();
+  });
+});
+
+describe('firstVariantUrl', () => {
+  it('resolves the first variant of a master playlist against it', () => {
+    const master = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=600000\nindex.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=1\nlow.m3u8\n';
+    expect(firstVariantUrl(master, 'https://cdn.example/v/master.m3u8?t=1')).toBe('https://cdn.example/v/index.m3u8');
+  });
+
+  it('has nothing to follow in a media playlist', () => {
+    expect(firstVariantUrl(media(''), 'https://cdn.example/v/index.m3u8')).toBeNull();
+  });
+});
+
+/**
+ * One verdict on whether a URL can be downloaded.
+ *
+ * yt-dlp's "Unsupported URL" used to become support 'unknown' with that stderr
+ * pasted in as a note: the preview said unsupported, the Download button stayed
+ * enabled, and the engine queued the URL only to fail it with the same words.
+ * The hidden browser that finds streams behind page players also never looked
+ * at such a page, because it only opened for hosts listed in host-config.
+ */
+describe('inspectUrl verdict for a page no extractor claims', () => {
+  const PAGE = 'https://videos.example/watch/clip-1?ep=1&lang=dub';
+  const MASTER = 'https://cdn.videos.example/v/abc/master.m3u8?token=t';
+  // exit 1, stdout "null", and this one line: the bundled yt-dlp on the reported URL.
+  const NO_EXTRACTOR = { code: 1, stdout: 'null', stderr: `ERROR: Unsupported URL: ${PAGE}` };
+
+  beforeEach(() => {
+    mocks.runProbeChild.mockReset().mockResolvedValue(NO_EXTRACTOR);
+    mocks.extractManifest.mockReset();
+    mocks.fetchWithDeadline.mockReset();
+  });
+
+  const found = (extra: Record<string, unknown> = {}) =>
+    ({ originalUrl: PAGE, manifestUrl: MASTER, type: 'm3u8', referer: 'https://player.example/', ...extra });
+  const answer = (...bodies: string[]) => {
+    for (const body of bodies) mocks.fetchWithDeadline.mockResolvedValueOnce({ status: 200, body, setCookies: [] });
+  };
+
+  it('blocks a stream its player loads encrypted, and says that is why', async () => {
+    mocks.extractManifest.mockResolvedValue(found());
+    answer(ENCRYPTED_MASTER);
+
+    const probe = await inspectUrl(PAGE);
+    expect(probe.support).toBe('unsupported');
+    expect(probe.blocked).toBe('encrypted');
+    expect(probe.notes).toEqual([expect.stringContaining('encrypted in a way only its own player can read')]);
+    expect(probeVerdict(PAGE)).toEqual({ support: 'unsupported', reason: probe.notes[0] });
+    // Checked the way the player fetched it, or a referer-gated CDN's block
+    // page would be all there was to judge.
+    expect(mocks.fetchWithDeadline).toHaveBeenCalledWith(MASTER, expect.objectContaining({ headers: { Referer: 'https://player.example/' } }));
+  });
+
+  // The lab's DRM fixture: the master is plain and the key lives in the variant.
+  // It used to be queued and fail at download with "DRM-protected".
+  it('blocks DRM declared in the first variant when the master declares none', async () => {
+    mocks.extractManifest.mockResolvedValue(found());
+    answer('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=600000\nindex.m3u8\n', media(FAIRPLAY_KEY));
+
+    const probe = await inspectUrl(PAGE);
+    expect(probe.blocked).toBe('drm');
+    expect(probe.notes[0]).toMatch(/protected by FairPlay DRM/);
+    expect(mocks.fetchWithDeadline).toHaveBeenLastCalledWith('https://cdn.videos.example/v/abc/index.m3u8', expect.anything());
+  });
+
+  // The lab's cookie fixture: the CDN serves only a session its player was given.
+  it('checks the stream with the cookies the player had', async () => {
+    mocks.extractManifest.mockResolvedValue(found({ cookieHeader: 'lab_session=granted' }));
+    answer(media(''));
+    await inspectUrl(PAGE);
+    expect(mocks.fetchWithDeadline).toHaveBeenCalledWith(MASTER, expect.objectContaining({
+      headers: { Referer: 'https://player.example/', Cookie: 'lab_session=granted' },
+    }));
+  });
+
+  it('says no video was found, not that the site is unsupported, when the page loads no stream', async () => {
+    mocks.extractManifest.mockResolvedValue(null);
+    const probe = await inspectUrl(PAGE);
+    expect(probe.support).toBe('unsupported');
+    expect(probe.blocked).toBe('no-media');
+    expect(probe.notes[0]).toMatch(/No video found/);
+    expect(probe.notes[0]).not.toMatch(/not supported/);
+  });
+
+  it('cannot judge a stream that refuses the check, so leaves it downloadable', async () => {
+    mocks.extractManifest.mockResolvedValue(found());
+    mocks.fetchWithDeadline.mockResolvedValue({ status: 403, body: 'forbidden', setCookies: [] });
+    expect((await inspectUrl(PAGE)).support).toBe('manifest-probe');
+  });
+
+  it('is a browser-resolved stream when its player loads a playlist yt-dlp can read', async () => {
+    mocks.extractManifest.mockResolvedValue(found({ pageTitle: 'Clip 1 | Videos' }));
+    answer('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nv.m3u8\n', media(AES128_KEY));
+    const probe = await inspectUrl(PAGE);
+    expect(probe.support).toBe('manifest-probe');
+    expect(probe.blocked).toBeUndefined();
+    expect(probeVerdict(PAGE)?.support).toBe('manifest-probe');
+    // The single preview item names the file; it used to be placeholder text.
+    expect(probe.preview).toEqual([{ title: 'Clip 1 | Videos' }]);
+    // The track probe is handed this stream instead of opening the page in a
+    // second hidden browser of its own.
+    expect(probe.stream).toEqual({ url: MASTER, referer: 'https://player.example/' });
+  });
+
+  it('leaves a probe that failed for another reason undecided, and opens no browser for it', async () => {
+    mocks.runProbeChild.mockResolvedValue({ code: 1, stdout: '', stderr: 'ERROR: [generic] Unable to download webpage: HTTP Error 403: Forbidden' });
+    const probe = await inspectUrl(PAGE);
+    expect(probe.support).toBe('unknown');
+    expect(mocks.extractManifest).not.toHaveBeenCalled();
+  });
+
+  it('calls a reference index unsupported instead of leaving Download enabled for it', async () => {
+    const probe = await inspectUrl('https://everythingmoe.com/anime/one-piece/episode-5');
+    expect(probe.support).toBe('unsupported');
+    expect(probe.blocked).toBe('reference-index');
+    expect(mocks.runProbeChild).not.toHaveBeenCalled();
   });
 });

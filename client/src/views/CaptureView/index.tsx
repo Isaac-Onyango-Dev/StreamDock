@@ -70,6 +70,10 @@ function supportLabel(probe: PlaylistProbe) {
   if (probe.support === 'episode-range') return 'Episode range';
   if (probe.support === 'manifest-probe') return 'Stream probe';
   if (probe.support === 'direct') return 'Single file';
+  if (probe.blocked === 'no-media') return 'No video found';
+  if (probe.blocked === 'encrypted') return 'Encrypted stream';
+  if (probe.blocked === 'drm') return 'DRM-protected';
+  if (probe.support === 'unsupported') return 'Not a video page';
   return 'Unknown format';
 }
 
@@ -466,6 +470,9 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
         return null;
       }
       setProbe(result.data);
+      // Nothing to configure for a page that cannot be downloaded, so the
+      // track and language probes — each another hidden browser — stay off.
+      if (result.data.support === 'unsupported') return result.data;
       if (result.data.support === 'playlist') {
         setSelection('all');
         setRangeEnd(Math.max(1, Math.min(result.data.itemCount, 24)));
@@ -480,7 +487,9 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
         setQuality('bestaudio/best');
         setSubtitleMode('none');
       }
-      void probes.loadTracks({ pageUrl: current.url });
+      // When the probe already found the stream, read that; otherwise the
+      // track probe loaded the page in a second hidden browser of its own.
+      void probes.loadTracks({ pageUrl: current.url, manifestUrl: result.data.stream?.url, referer: result.data.stream?.referer });
       // Hosts that serve dub and sub as separate streams are asked which they
       // have. Which hosts those are is the main process's call (host-config).
       if (mode === 'stream' || current.probesLanguages) {
@@ -524,6 +533,12 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
     // as "Video download" behind a placeholder icon.
     const activeProbe = probe && analysis?.url === url.trim() ? probe : await inspect();
     if (token !== planToken.current) return;
+    // The probe's verdict decides, not whether the URL could be queued: a
+    // download pressed without Analyze first lands here with a fresh one.
+    if (activeProbe?.support === 'unsupported') {
+      onError(activeProbe.notes[0] ?? 'This page cannot be downloaded.');
+      return;
+    }
 
     // Pressing Download while this source is still being asked whether it has
     // Dub used to queue straight away with no language — so the site default
@@ -845,7 +860,13 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
                 </option>
               ))}
             </select>
-            <button type="button" onClick={() => void start()} disabled={busy || probing} className="btn-primary min-w-[88px]">
+            <button
+              type="button"
+              onClick={() => void start()}
+              disabled={busy || probing || probe?.support === 'unsupported'}
+              title={probe?.support === 'unsupported' ? probe.notes[0] : undefined}
+              className="btn-primary min-w-[88px]"
+            >
               {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5 fill-current" />}
               Download
             </button>
@@ -941,7 +962,7 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
                   is downgraded rather than skipped — stating it here is what
                   keeps that from looking like a silent failure.
                 */}
-                {probe && (
+                {probe && probe.support !== 'unsupported' && (
                   <p className="truncate text-xs text-text-disabled">
                     {detectedQualityCount > 0
                       ? `${detectedQualityCount} resolution${detectedQualityCount === 1 ? '' : 's'} detected · a chosen quality is a maximum, so each item downloads at its own best`
@@ -1038,7 +1059,14 @@ export function CaptureView({ mode, setMode, outputDir, incomingUrl, defaultSubt
             )}
 
             {probe?.notes.map((note) => (
-              <p key={note} className="mt-2 rounded-md bg-surface-3 px-2 py-1.5 text-xs text-text-secondary">{note}</p>
+              <p
+                key={note}
+                className={probe.support === 'unsupported'
+                  ? 'mt-2 rounded-md bg-warning-muted px-2 py-1.5 text-xs text-warning'
+                  : 'mt-2 rounded-md bg-surface-3 px-2 py-1.5 text-xs text-text-secondary'}
+              >
+                {note}
+              </p>
             ))}
           </div>
 

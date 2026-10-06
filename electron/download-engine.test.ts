@@ -137,6 +137,12 @@ vi.mock('./stream-repair', () => ({
   ),
 }));
 
+// ── Fake probe verdicts ──────────────────────────────────────────────────────
+
+const verdicts = new Map<string, { support: string; reason: string }>();
+
+vi.mock('./playlist-inspector', () => ({ probeVerdict: (url: string) => verdicts.get(url) }));
+
 vi.mock('./binary-resolver', () => ({
   resolveBinary: () => 'ffmpeg',
   resolveYtDlpCommand: () => ({ command: 'yt-dlp', args: [], type: 'native' }),
@@ -191,6 +197,7 @@ beforeEach(() => {
   extractions.length = 0;
   attached.length = 0;
   repairs.length = 0;
+  verdicts.clear();
   sent = [];
   CONCURRENCY().probeHostMaxConcurrent = 1;
   internetUp = true;
@@ -695,6 +702,63 @@ describe('restart', () => {
     expect(find(second, resolving.id).status).toBe('paused');
     expect(existsSync(join(staging, running.id))).toBe(true);
     expect(existsSync(join(staging, 'orphan-from-a-crash'))).toBe(false);
+  });
+});
+
+/**
+ * The probe decides whether a URL can be downloaded, and the queue obeys it.
+ *
+ * A page the probe found no route to used to be queued anyway — the probe said
+ * "Unsupported URL", the button stayed enabled, and the engine failed the job
+ * with the same words. And a page whose stream only the hidden browser could
+ * find was handed straight to yt-dlp unless its host was in host-config.
+ */
+describe('the probe verdict', () => {
+  const PAGE = 'https://videos.example/watch/clip-1';
+  const ENCRYPTED = 'This site is not supported: it encrypts its video stream, which only its own player can read.';
+
+  it('refuses a URL the probe found no route to, before anything is queued', () => {
+    verdicts.set(PAGE, { support: 'unsupported', reason: ENCRYPTED });
+    const engine = newEngine();
+    expect(() => startVideo(engine, PAGE)).toThrow(ENCRYPTED);
+    expect(engine.list()).toHaveLength(0);
+    expect(children).toHaveLength(0);
+  });
+
+  it('resolves an unlisted page in the browser when that is where the probe found its stream', async () => {
+    verdicts.set(PAGE, { support: 'manifest-probe', reason: '' });
+    const engine = newEngine();
+    const { id } = startVideo(engine, PAGE);
+    expect(find(engine, id).status).toBe('resolving');
+    expect(extractions.map((e) => e.url)).toEqual([PAGE]);
+
+    extractions[0].resolve({ originalUrl: PAGE, manifestUrl: CDN(1), type: 'm3u8', referer: 'https://player.example/' });
+    await settle(10);
+    const args = childFor(CDN(1)).args;
+    expect(args[args.indexOf('--referer') + 1]).toBe('https://player.example/');
+  });
+
+  it('still resolves in the browser after a restart, when the in-memory verdict is gone', async () => {
+    verdicts.set(PAGE, { support: 'manifest-probe', reason: '' });
+    const first = newEngine();
+    const { id } = startVideo(first, PAGE);
+    await settle(600);
+
+    verdicts.clear();
+    const second = newEngine();
+    second.resume(id);
+    await settle();
+    expect(find(second, id).status).toBe('resolving');
+    expect(extractions.at(-1)?.url).toBe(PAGE);
+  });
+
+  it('hands a page nothing asked a browser for straight to yt-dlp, as before', async () => {
+    verdicts.set(PAGE, { support: 'direct', reason: '' });
+    const engine = newEngine();
+    const { id } = startVideo(engine, PAGE);
+    expect(find(engine, id).status).toBe('running');
+    expect(extractions).toHaveLength(0);
+    expect(childFor(PAGE)).toBeDefined();
   });
 });
 

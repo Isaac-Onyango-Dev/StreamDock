@@ -23,6 +23,61 @@ export interface UrlAnalysis {
   probesLanguages: boolean;
 }
 
+/**
+ * What the probe found a URL to be — the one verdict on whether it can be
+ * downloaded. The Download button, the renderer's start() and engine.start()
+ * all read it.
+ *
+ * `unsupported` means no route to the media exists: no extractor claims the
+ * page and its player loads no stream StreamDock can read. Its one note says
+ * why. Before it existed that case was `unknown` with yt-dlp's raw "Unsupported
+ * URL" pasted in as a note, while the button stayed enabled and the engine
+ * queued the URL only to fail it with the same message.
+ */
+export type ProbeSupport = 'direct' | 'playlist' | 'episode-range' | 'manifest-probe' | 'unknown' | 'unsupported';
+
+/**
+ * Why an `unsupported` URL cannot be downloaded. Each is a different thing to
+ * tell the user: "not a video page" and "no video found" invite another try or
+ * another link; "encrypted" and "DRM" are final.
+ */
+export type BlockedKind = 'reference-index' | 'no-media' | 'encrypted' | 'drm';
+
+export interface PlaylistProbeItem {
+  id?: string;
+  title: string;
+  url?: string;
+  duration?: number;
+  thumbnail?: string;
+}
+
+export interface QualityOption {
+  height: number;
+  label: string;
+}
+
+export interface PlaylistProbe {
+  url: string;
+  host: string;
+  title: string;
+  support: ProbeSupport;
+  /** Set exactly when `support` is 'unsupported'. */
+  blocked?: BlockedKind;
+  itemCount: number;
+  preview: PlaylistProbeItem[];
+  qualityOptions?: QualityOption[];
+  thumbnail?: string;
+  extractor?: string;
+  isLive: boolean;
+  notes: string[];
+  /**
+   * The stream the probe's hidden browser found, so the track probe can read
+   * it instead of loading the page a second time. It expires; downloads never
+   * use it — the engine resolves the page again at start.
+   */
+  stream?: { url: string; referer?: string };
+}
+
 export interface DownloadRequest {
   url: string;
   mode: CaptureMode;
@@ -88,6 +143,13 @@ export interface DownloadRequest {
    * the site default, which is Sub.
    */
   translation?: string;
+  /**
+   * Find the stream by loading the page in the hidden probe window before
+   * yt-dlp runs. Set by engine.start() from the probe's verdict, never by the
+   * renderer, and persisted with the job so a download resumed after a restart
+   * still resolves — the verdict itself lives only in memory.
+   */
+  resolveInBrowser?: boolean;
 }
 
 /**
