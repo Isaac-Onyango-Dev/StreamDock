@@ -33,8 +33,12 @@ fast without re-deriving it. Update it as work continues — don't let it go sta
 - `shared/` — types and rules both processes use: `downloads.ts` (request,
   record, status), `settings.ts`, `subtitle-args.ts`, `language.ts`.
 - `electron/playlist-inspector.ts` — probes a URL to determine what kind of
-  content it is (single video / playlist / episode-range / manifest-probe) and
-  returns preview data for the UI.
+  content it is (single video / playlist / episode-range / manifest-probe /
+  unsupported) and returns preview data for the UI. Since session 23 it is
+  also the one judge of whether a URL can be downloaded: `probeVerdict(url)`
+  is what `engine.start()` enforces, and the Download button reads the same
+  verdict. When yt-dlp says no extractor claims a page, it runs the hidden
+  browser sniffer itself instead of requiring a host-config entry.
 - `electron/manifest-extractor.ts` (~39KB) — hidden-`BrowserWindow`-based
   manifest discovery (HLS/.m3u8, DASH/.mpd) for sites yt-dlp can't handle
   directly.
@@ -70,7 +74,7 @@ actual runs — full yt-dlp spawn command lines, verbatim stderr, timestamps.
 
 ## Where things stand (as of this session)
 
-Twenty-two work sessions have happened against this repo so far.
+Twenty-four work sessions have happened against this repo so far.
 
 **Correcting a claim this file carried for three sessions:** sessions 5 and 6
 were *not* unpushed. Verified in session 9 — `HEAD == origin/main` and
@@ -2219,13 +2223,194 @@ it for the subtitle track); and
 2 concurrent site A jobs or `-N 4`, which were never measured against the live
 CDN, so the host limit stays at 1. Delete the 59MB truncated episode 553 file before retrying that episode.
 
+### Session 23 - "unsupported" but queueable: one verdict, and the sniffer unlisted
+
+No version bump, **nothing committed or released**. Isaac reported a site (site
+F here) displayed as unsupported while Download still queued it, which then
+failed as unsupported.
+
+**Problem B, the inconsistency, was four layers each making their own call.**
+`analyzeUrl` returns `valid: true` for any http(s) URL; the probe turned yt-dlp's
+`Unsupported URL` into `support: 'unknown'` with the raw stderr as a note (that
+note was the "unsupported" Isaac saw); the Download button checked only
+`busy || probing`; `engine.start()` refused reference hosts only. Now the probe
+reaches `support: 'unsupported'` with one human reason, records it
+(`probeVerdict`), and the button, `start()` and `engine.start()` all obey it.
+The reference index, which had the identical shape, gets the same verdict.
+
+**Problem A, site F, is not supportable, and that was measured, not assumed.**
+The page calls its own API for servers; all four (sub and dub alike) point at
+one embed provider, which delivers a single dual-audio stream. The provider
+encrypts the whole chain: page data (AES-256-CBC, an obfuscation seed, a
+per-page WASM decryptor, randomised field names), the master and media
+playlists (ciphertext with a 200 even with the player's referer), and every
+segment (a PNG signature, then encrypted bytes; no TS sync, no fMP4 boxes). Its
+key endpoint is single-use. The app's own sniffer found the stream in 6.7s;
+yt-dlp, given it with the right referer, says `Response data has no m3u
+header`. Decrypting would mean reimplementing a rotating protection scheme; it
+was declined, and the app now says so before anything is queued.
+
+**The reusable fix: the sniffer no longer needs a host list.** `probePage`, the
+hidden-browser network sniffer, was already general (iframes, embeds, players
+that build URLs in JS), but it only ran for the 17 hosts in
+`manifestProbeHosts`, so every new site needed a config edit. When yt-dlp says
+no extractor claims a page, the probe now sniffs it, fetches what it found once
+with the player's referer, and `isEncryptedPlaylist()` separates a real
+playlist from ciphertext. A browser-found stream is queued with
+`resolveInBrowser` (persisted on the request, so a restart still resolves it).
+**Verified on a real unlisted site**, a public HLS player demo page: probe
+`manifest-probe` in 15s, the real engine resolved it in a hidden browser and
+saved a playable 10:34 h264+aac file named after the page title.
+
+**Two defects only the new route exposed, both fixed:** the referer the
+browser captured reached yt-dlp only inside `buildImpersonationArgs`, which ran
+for listed hosts alone, so a browser-found stream on any other host would have
+been fetched with no referer (found by the engine test going red); and a
+browser-found download was named after the probe's placeholder text
+("Playable stream will be discovered at start.mp4"). The probe window now
+reports `webContents.getTitle()` as `pageTitle`. Listed probe hosts still get
+the placeholder name for single pages (marked `ponytail:`); their probe never
+opens the page.
+
+**Cost:** Analyze on a page with no video now takes ~25-45s (the sniff) instead
+of ~3s, and a slow site whose player misses the 45s window is told "no stream
+found" with a hint to Analyze again. Track and language probes no longer run for
+an unsupported page.
+
+**Site-specific debt found and left alone** (reported, not refactored): the
+site-A-only API path in `manifest-extractor` with a hard-coded referer, the
+`[data-type=…]` language-click markup, a hard-coded embed-provider referer in
+the engine, two `KNOWN_CDNS` copies, and the host-matching helper written five
+times (including a renderer copy of `STREAM_HOSTS`).
+
+**Verification**: typecheck, ESLint 0/0, 314 Vitest tests, verify:engine 396,
+Playwright 32/32, production build. All 11 new verdict tests plus both new e2e
+specs were run red against unmodified HEAD in a scratch worktree, each on its
+own assertion (`'unknown'` vs `'unsupported'`, `'running'` vs `'resolving'`,
+and the old renderer really calling `startDownload`). Real-engine matrix in
+Electron (`.claude/harness/verdict-matrix.ts`): site F refused (twice, 57s and
+24s), a page with no video refused, invalid and ftp URLs rejected at analyze,
+YouTube completed, site A still resolved and downloaded through its listed
+route, the unlisted HLS page completed.
+
+### Session 24 - session 23 re-verified with a fixture lab and the real app window
+
+No version bump, **nothing committed** (session 23's work is still uncommitted
+too; this builds on it). Isaac asked for an independent re-investigation that
+treated session 23's results as claims. Nine hypotheses were written down with
+what would disprove each, then tested.
+
+**The instrument: `tests/electron/fixtures/lab.ts`.** Two loopback origins (pages,
+and a "CDN" with embeds), every stream cut from one 10s ffmpeg clip, page scripts
+building their stream URLs at runtime so yt-dlp cannot regex them out. Routes for
+a direct mp4, an HTML5 page, JS player, DASH, cross-origin iframe with a
+referer-gated CDN, redirect, an extension-less playlist, a cookie-gated CDN,
+standard AES-128 HLS with a known key, opaque ciphertext, FairPlay-signalled
+HLS, Widevine-signalled DASH, a page with no video, and a web page served as
+video/mp4. `frameHash()` checks a download decodes to the source's 250 frames;
+the lab itself was validated that way first (all five streams matched).
+
+**Real-app E2E now exists.** `npm run test:electron` builds, then
+`playwright.electron.config.ts` drives the real app via `_electron.launch()` with
+`--user-data-dir` (Electron honours it; no production hook needed) and the lab.
+16 tests, 3.1 min, every download frame-checked. Not in CI (needs binaries).
+
+**Session 23's claims that held, in the real window:** the cross-origin
+referer-gated embed downloads frame for frame; opaque ciphertext is refused;
+the verdict gates the button and the queue; titles name files.
+
+**What it got wrong or missed, each confirmed red before fixing:**
+1. *H1* — the sniffer recognised streams by URL extension only, so a playlist
+   at an extension-less URL was reported "not supported" after 25.7s. Now also
+   by response Content-Type (HLS and DASH only; never mp4, since fMP4 segments
+   are video/mp4 too).
+2. *H2* — browser cookies reached yt-dlp only on the site-A API path; a
+   cookie-gated CDN 403'd (the lab log showed `cookie=n`). The probe window now
+   exports its session cookies for the stream into `cookiesFile` (which the
+   engine already passed as `--cookies`) and `cookieHeader` (for the check).
+3. *H3* — DRM-signalled HLS/DASH starts with `#EXTM3U`/`<`, passed the
+   ciphertext check, was queued and failed at download. `manifestProtection()`
+   is now the one classifier (opaque, or SAMPLE-AES / non-identity KEYFORMAT /
+   any ContentProtection, naming FairPlay/Widevine/PlayReady); it follows the
+   first variant when the master declares nothing. Standard AES-128 passes and
+   was proven to decode to the source's frames.
+4. *H5* — a page with no video said "This site is not supported". Blocked
+   verdicts now carry a kind (`reference-index | no-media | encrypted | drm`)
+   with its own label and message.
+5. *H6* — one Analyze opened the page in two hidden browsers (the track probe
+   re-sniffed). The probe hands its found `stream` to `loadTracks`.
+6. The "corrupt / invalid data" message promised "Restarting download"; nothing
+   restarts a failed job.
+
+**Disproved:** H7 (a fake mp4 does fail, not complete). **Invalid URL:** the
+field is `type="url"`, so the window's native validation blocks "not a url"
+before the app sees it; `ftp://` reaches the app and is refused.
+
+**Not done, deliberately:** no attempt on the reported site's custom
+encryption. VDH was studied only as concepts: its extension source is not
+public despite claims; the public companion app is GPL-2.0 (archived) and
+confirms per-detection header replay, which is what H2 adopts. VDH's
+"recording mode" for undownloadable streams was not adopted.
+
+**Timeouts unchanged, on evidence:** Isaac's real log: 16 sniffs, 7 finds, none
+after the reload pass, but one find at 33s. A no-video page still costs ~26s.
+
+**Verification**: typecheck, ESLint 0/0, 325 Vitest, verify:engine 396,
+Playwright 32/32, real-app 16/16, `build:app`. Fixture matrix (17 cases) and
+real sites (YouTube, site A listed route, unlisted HLS demo, reported site)
+re-run on the final code, all as expected.
+
+**Then the slowest test, and release 1.9.1.** Measured with Vitest's JSON
+reporter: `stream-repair.test.ts` "gives the same result however the file is
+chunked" at 538ms, 16% of the suite. Parsing took ~13ms; six `toEqual` calls on
+15KB Buffers took ~360ms (`Buffer.equals`: 0.7ms). Now hex strings with `toBe`:
+11-17ms, same detection (a chunk-boundary mutant fails the old and new tests
+alike). The Playwright suite's ~6s tests are 1.3-2.1s on one worker: that is
+parallel workers contending for a cold Vite server, not the tests.
+
 ## Working agreements for future sessions on this repo
+
+- **Never `toEqual` a Buffer of any size.** Vitest compares it byte by byte
+  through generic deep equality (~4us a byte). Compare `toString('hex')` with
+  `toBe`; it is ~500x faster and still diffs.
+- **Profile a test before blaming the code under test.** The slowest test spent
+  97% of its time in its own assertions.
+
+- **Validate the instrument before trusting its verdicts.** The lab's streams
+  were frame-hashed against the source before any download was judged by them;
+  the first DASH "mismatch" was ffmpeg failing to open the file at all.
+- **Never `spawnSync` a client of a server running in the same process.** The
+  event loop blocks, the server cannot answer, and the run hangs silently.
+- **ffmpeg's dash muxer writes segments relative to the working directory on
+  Windows**, not the manifest's folder. It put 13 `.m4s` files in the repo root;
+  run it with `cwd` set to the output folder.
+- **Drive the real app with `_electron.launch()` and `--user-data-dir`.** A
+  stubbed bridge proves the renderer, not the app; session 23 could only claim
+  the former.
+- **Playwright `getByText('Failed')` is a case-insensitive substring match.**
+  It also hit "...so the download failed."; use `{ exact: true }` for badges.
 
 - **Never name a streaming site in public text.** The changelog (and so the
   README, the site and the release notes), commit messages, PRs and these notes
   say "some sites" or use placeholders (site A, `site-a.example`, Series X).
   Isaac wants users to try sites themselves and report which ones break. Only
   functional code (`host-config.json`, extractors, tests) names real hosts.
+
+- **A capability gated by a host list is a site-specific patch in disguise.**
+  The sniffer was general all along; only its trigger was a domain allowlist,
+  so every new site looked like it needed new code. Before adding a host to a
+  list, ask whether the mechanism should run on "no extractor claims this"
+  instead.
+- **A sniffed stream is not a readable stream.** A player can request a
+  playlist URL and receive ciphertext with a 200. Fetch it once the way the
+  player did and look at the first bytes before promising a download.
+- **One verdict, enforced at every gate.** If the preview, the button and the
+  queue each decide "can this download?" separately, one of them will
+  disagree. Compute it once (the probe), store it where the queue can read it,
+  and make the UI read the same value.
+- **The Edit and Bash tools turn a backslash-u-FEFF escape into a literal BOM.** It happened
+  twice this session, in source and in a test. `trimStart()` already strips
+  U+FEFF; in tests use `String.fromCharCode(0xfeff)`.
 
 - **Let CI run on Linux before a release commit reaches `main`.** CI runs on
   `main` and on pull requests, so a branch merged straight into a release never
