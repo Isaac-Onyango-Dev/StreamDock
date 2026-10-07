@@ -4,6 +4,33 @@ All notable changes to StreamDock are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.9.1] - 2026-10-07
+
+### Fixed
+- **A link StreamDock cannot download is no longer queued anyway.** Analyze
+  could show a link as unsupported while the Download button stayed enabled, so
+  it went into the queue and failed there. Analyze now says why a link cannot be
+  downloaded (no video found, an encrypted stream, DRM, or a page that only
+  lists other sites), and Download stays off for it.
+- **Videos on sites StreamDock has no setup for are found more often.** When no
+  downloader recognises a site, StreamDock now opens the page in its hidden
+  browser and watches what the player loads, including players inside embedded
+  frames, streams behind redirects and playlists served without a file
+  extension, instead of giving up. The page's cookies and referrer go with the
+  download, so servers that only serve their own player still work, and the
+  file is named after the page instead of a placeholder.
+- **Encrypted and DRM-protected streams are recognised before you download,**
+  with the DRM named (FairPlay, Widevine, PlayReady), instead of failing partway
+  through. Ordinary AES-128 encrypted streams still download.
+- **Clearer failure messages.** A server that sends a web page instead of a
+  video no longer claims the download is restarting, and an encrypted playlist
+  no longer asks you to report a bug to the download engine.
+
+### Changed
+- Analyzing a page that has no video can take up to about 30 seconds, because
+  StreamDock now watches its player before concluding there is nothing there.
+- One Analyze opens a page in one hidden browser instead of two.
+
 ## [1.9.0] - 2026-10-01
 
 ### Fixed
